@@ -1,0 +1,7 @@
+# LangSmith demo — parity with the deep_eval demo.
+langsmith>=0.1.0
+openai>=1.40
+anthropic>=0.40
+instructor>=1.5            # structured (schema) outputs for the LLM-as-judge
+python-dotenv>=1.0
+pytest>=8.0
