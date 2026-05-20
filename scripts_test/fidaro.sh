@@ -37,7 +37,7 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
   desc_args=(--description "github_actions run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT:-1} @ ${short_sha} (${GITHUB_REF_NAME})")
 fi
 
-exec pnpm exec promptfoo eval \
+AGENTHARM_LIMIT=5 RESEARCH_RUBRICS_LIMIT=5 RESEARCH_RUBRICS_MAX_CRITERIA=3 exec pnpm exec promptfoo eval \
   --config promptfooconfig.yaml \
   --filter-providers fidaro_plaintext_gateway_phala \
   --output results/ci/latest.json \

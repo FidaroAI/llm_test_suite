@@ -39,8 +39,10 @@ def _load_rows():
         return json.load(fh)
 
 
-def _row_to_test(row):
+def _row_to_test(row, max_num_criteria=None):
     rubrics = row.get("rubrics") or []
+    if max_num_criteria is not None:
+        rubrics = rubrics[:max_num_criteria]
     asserts = [
         {
             "type": "llm-rubric",
@@ -78,5 +80,18 @@ def generate_tests():
     if limit:
         rows = rows[: int(limit)]
 
+    max_num_criteria = os.environ.get("RESEARCH_RUBRICS_MAX_CRITERIA", default=None)
+    if max_num_criteria:
+        max_num_criteria = int(max_num_criteria)
+
     # Skip rows that carry no gradable rubric items.
-    return [test for row in rows if (test := _row_to_test(row))["assert"]]
+    return [
+        test
+        for row in rows
+        if (test := _row_to_test(row, max_num_criteria=max_num_criteria))["assert"]
+    ]
+
+
+if __name__ == "__main__":
+    result = generate_tests()
+    print(json.dumps(result[0], indent=2))
