@@ -36,8 +36,18 @@ defaultTest:
     # reasoning data in a consistent way rather than offloading this to the test.
     # transform: file://hooks/normalize_response.js
     # LLM-as-judge for any `llm-rubric` assertions (e.g. the research_rubrics
-    # suite). Uses a locally available Codex provider for now; revisit for CI.
-    provider: openai:codex-sdk
+    # and agentharm_refusal suites). AWS Bedrock so the same config works both
+    # locally and in CI; credentials come from the standard AWS chain
+    # (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION, or AWS_PROFILE).
+    # The model id is pinned (not env-templated) so grading stays comparable
+    # across runs. Claude Haiku 4.5 via the us. cross-region inference profile
+    # (3.5 Haiku is flagged Legacy on Bedrock); temperature 0 for deterministic
+    # verdicts. Override per-run with --grader.
+    provider:
+      id: bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0
+      config:
+        region: "{{ env.AWS_REGION }}"
+        temperature: 0
     # Example of an assertion that would be applied to every test.
   # assert:
   #   - type: python
