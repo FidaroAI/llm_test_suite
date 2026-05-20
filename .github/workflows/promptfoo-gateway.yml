@@ -1,0 +1,106 @@
+name: Fidaro gateway smoke tests
+
+# Runs the promptfoo regression suite (fidaro system-prompt tests only) against
+# the cvm-llm-gateway image built by the secure-enclave repo. The image is
+# pulled from ECR, started as a Docker container exposing :8082, and then
+# promptfoo is executed against http://127.0.0.1:8082/v1.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      gateway_image_tag:
+        description: "ECR tag for cvm-llm-gateway (commit SHA from secure-enclave, or 'latest')"
+        required: false
+        default: "latest"
+
+permissions:
+  # OIDC token for AWS role assumption (ECR pull).
+  id-token: write
+  contents: read
+
+concurrency:
+  group: promptfoo-gateway-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  promptfoo:
+    runs-on: ubuntu-latest
+
+    # All expression interpolation happens here so run: blocks reference shell
+    # env vars only — guards against workflow injection from any user-controlled
+    # input. See https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+      # NOTE: secure-enclave's build-dev.yml currently tags images only by
+      # commit SHA — there is no rolling `:latest` tag. Until that's added
+      # upstream, auto-triggered runs (push / pull_request) will fail to pull.
+      # Trigger manually via workflow_dispatch and pass an explicit SHA in
+      # the meantime.
+      GATEWAY_IMAGE_TAG: ${{ github.event.inputs.gateway_image_tag || 'latest' }}
+      # Upstream LLM backend the gateway proxies to. Set as a repo var so the
+      # ephemeral dstack/phala endpoint can change without a code edit.
+      HOST_OPENAI_BASE_URL: ${{ vars.HOST_OPENAI_BASE_URL }}
+      BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Requires a repo var ECR_PULLER_ROLE pointing at an IAM role that
+      # trusts this repo via OIDC and has read-only ECR permissions
+      # (ecr:GetAuthorizationToken, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer)
+      # scoped to fidaro/dev/cvm-llm-gateway. Distinct from the upstream pusher
+      # role so CI in this repo can't accidentally push images.
+      - name: Assume ECR puller role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.ECR_PULLER_ROLE }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region "$AWS_REGION" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      - name: Start gateway container
+        run: |
+          image="${ECR_REGISTRY}/fidaro/dev/cvm-llm-gateway:${GATEWAY_IMAGE_TAG}"
+          ./scripts_repo/run_plaintext_gateway.sh --docker-image "$image" --vllm-url "$HOST_OPENAI_BASE_URL" --brave-api-key "$BRAVE_API_KEY"
+
+      - name: Run tests
+        run: |
+          GATEWAY_WAIT_SECONDS=60 ./scripts_test/fidaro.sh
+
+      - name: Upload promptfoo results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: promptfoo-results
+          path: results/ci/latest.json
+          if-no-files-found: error
+
+      - name: Show gateway logs on failure
+        if: failure()
+        run: docker logs fidaro-gateway || true
+
+      - name: Stop gateway
+        if: always()
+        run: docker rm -f fidaro-gateway || true

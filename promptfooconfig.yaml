@@ -1,0 +1,58 @@
+description: "LLM regression suite — multi-provider matrix"
+
+# extensions:
+#   - file://hooks/before_each.py:before_each
+
+providers:
+  # Test against prod phala using a locally running plaintext gateway. You must start the gateway
+  # first. This provider can't do that automatically.
+  - file://providers/fidaro_plaintext_gateway_phala.yaml
+  # Use this for testing against a local dstack and local vllm. The only real difference in the
+  # provider config is the model name.
+  # - file://providers/fidaro_plaintext_gateway_local.yaml
+  # Use this for testing directly against the phala vllm endpoint. Not super useful right now.
+  # - file://providers/fidaro_vllm_phala.yaml
+
+prompts:
+  # Simple template for specifying the user prompt.
+  - id: file://prompt_templates/user_only.json
+    label: user_only
+  # This template allows you to specify the system prompt as well. This can't be used when
+  # testing against the plaintext gateway as the gateway will always set the system prompt
+  # to the Fidaro systme prompt.
+  # - id: file://prompt_templates/system_and_user.json
+  #   label: system_and_user
+
+defaultTest:
+  options:
+    cache: true
+    # This is hacky. It's very geared towards the output format for qwen80b. It's used to
+    # strip out the thinking block so that we can assert just on the response the user
+    # got and not the throught process. It's fine for now, but we may want to run
+    # tests on the thinking later.
+    transform: file://hooks/strip_before_triple_newline.py
+    # I think this normalize response is garbage. Claude was getting confused. The intent was for
+    # reasoning parsing. I think this can be done better by ensuring providers are returning
+    # reasoning data in a consistent way rather than offloading this to the test.
+    # transform: file://hooks/normalize_response.js
+    # TODO: configure an LLM-as-judge for any `llm-rubric` assertions, e.g.
+    # provider:
+    #   id: anthropic:messages:claude-sonnet-4-5
+    #   config:
+    #     apiKey: "{{ env.ANTHROPIC_API_KEY }}"
+    #     temperature: 0
+    # Example of an assertion that would be applied to every test.
+  # assert:
+  #   - type: python
+  #     value: file://assertions/assert_no_censorship.py
+
+
+tests:
+  - file://tests/fidaro_basic.yaml
+  - file://tests/simple_facts.csv
+  - file://tests/simple_facts_regressions.csv
+
+evaluateOptions:
+  maxConcurrency: 4
+
+outputPath: results/local/latest.json

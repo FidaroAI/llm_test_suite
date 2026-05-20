@@ -1,0 +1,7 @@
+id: openai:chat:local-dev-model
+label: fidaro_plaintext_gateway_local
+config:
+  apiBaseUrl: http://127.0.0.1:8082/v1
+  apiKey: dummy        # placeholder; local endpoint ignores it but the OpenAI client requires non-empty
+  temperature: 0.2
+  max_tokens: 1000

@@ -1,0 +1,50 @@
+# Demonstrates Bedrock Converse tool use with a web_search tool.
+#
+# The provider passes options.bedrock.toolConfig directly to ConverseCommand.
+# If the model chooses the tool, Bedrock returns a content block like:
+#   { toolUse: { toolUseId, name: "web_search", input: {...} } }
+# The custom provider maps that to response.content[] entries with type:
+# "tool_use", which assertions/assert_tool_call_count.py already understands.
+
+- description: "Bedrock web_search request produces a tool call"
+  providers: [bedrock_mantle]
+  prompts: [system_and_user]
+  vars:
+    system: |
+      You have access to a web_search tool. Use it when the user asks for
+      current, recent, or externally verifiable information. Do not answer from
+      memory when web_search is relevant.
+    user: |
+      Search the web for the latest OpenAI product announcement and return the
+      most relevant result.
+  options:
+    bedrock:
+      maxTokens: 256
+      temperature: 0
+      toolConfig:
+        tools:
+          - toolSpec:
+              name: web_search
+              description: Search the web for current or externally verifiable information.
+              inputSchema:
+                json:
+                  type: object
+                  properties:
+                    query:
+                      type: string
+                      description: The search query to run.
+                    max_results:
+                      type: integer
+                      description: Maximum number of search results to return.
+                  required: [query]
+        toolChoice:
+          tool:
+            name: web_search
+  assert:
+    - type: python
+      value: file://assertions/assert_tool_call_count.py
+      config:
+        expected: 1
+    - type: tool-call-f1
+      value:
+        - web_search

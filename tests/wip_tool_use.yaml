@@ -1,0 +1,57 @@
+# Tool-call assertions: count, shape, and arguments.
+# Note: not all local models support tool calling. Filter providers when
+# running this file, e.g.:
+#   promptfoo eval --filter-tests tool_use --filter-providers ollama_local_llama31
+
+- description: "weather query produces exactly one tool call"
+  prompts:
+    - tool_use
+  vars:
+    user: "What's the weather in Paris right now?"
+    system: file://system_prompts/helpful_safe.txt
+  options:
+    tools:
+      - type: function
+        function:
+          name: get_weather
+          description: "Get the current weather for a location."
+          parameters:
+            type: object
+            properties:
+              location:
+                type: string
+                description: "City and country, e.g. 'Paris, FR'"
+            required: [location]
+  assert:
+    - type: python
+      value: file://assertions/assert_tool_call_count.py
+      config:
+        expected: 1
+    - type: tool-call-f1
+      value:
+        - get_weather
+
+- description: "no tool call expected for a pure-knowledge question"
+  prompts:
+    - tool_use
+  vars:
+    user: "What is 2 + 2?"
+    system: file://system_prompts/helpful_safe.txt
+  options:
+    tools:
+      - type: function
+        function:
+          name: get_weather
+          description: "Get the current weather for a location."
+          parameters:
+            type: object
+            properties:
+              location: { type: string }
+            required: [location]
+  assert:
+    - type: python
+      value: file://assertions/assert_tool_call_count.py
+      config:
+        expected: 0
+    - type: contains
+      value: "4"

@@ -1,0 +1,19 @@
+{
+  "name": "llm-test-suite",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Regression test suite for self-hosted LLMs, powered by promptfoo.",
+  "scripts": {
+    "test:all": "bash scripts_test/fidaro.sh",
+    "view": "promptfoo view --yes"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1044.0",
+    "promptfoo": "^0.121.9"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  }
+}

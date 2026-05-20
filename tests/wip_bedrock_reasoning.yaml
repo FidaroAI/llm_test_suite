@@ -1,0 +1,40 @@
+# Demonstrates Bedrock reasoning/thinking capture.
+#
+# For models that support Bedrock Converse reasoning blocks, the provider maps
+# response.output.message.content[].reasoningContent into:
+#   response.reasoning_content
+#   response.thinking
+#   response.content[] entries with type: thinking
+#
+# The reasoning assertion intentionally checks for the word "remainder" because
+# this prompt makes that concept part of the necessary hidden work.
+
+- description: "Bedrock reasoning blocks are surfaced to assertions"
+  providers: [bedrock_mantle]
+  prompts: [system_and_user]
+  vars:
+    system: "Answer the user. If reasoning is available, use it internally and give a concise final answer."
+    user: |
+      Think through this arithmetic problem carefully, then give only the final answer:
+      What is the remainder when 12345 is divided by 97?
+  options:
+    bedrock:
+      maxTokens: 512
+      temperature: null
+      topP: null
+      additionalModelRequestFields:
+        reasoningConfig:
+          type: enabled
+          maxReasoningEffort: low
+  assert:
+    - type: contains
+      value: "26"
+    - type: python
+      value: file://assertions/assert_reasoning_iterations.py
+      config:
+        min: 1
+    - type: python
+      value: file://assertions/assert_reasoning_contains.py
+      config:
+        value: "remainder"
+        regex: true

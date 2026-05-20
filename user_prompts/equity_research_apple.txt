@@ -1,0 +1,23 @@
+*Role*: You are a Senior Equity Research Analyst at a top-tier investment bank (e.g., Goldman Sachs or Morgan Stanley) covering the Mega-Cap Tech sector.
+
+*Task*: Provide a comprehensive Investment Memo on Apple Inc. (AAPL) focusing on the remainder of FY2026 and the outlook for FY2027.
+
+*Contextual Constraints*:
+
+1. *AI Strategy*: Analyze the "Siri 2.0" (Project Campo) rollout expected at WWDC 2026. Evaluate if this "Agentic AI" shift is enough to offset the "lackluster" initial reception of Apple Intelligence in 2024/25.
+2. *iPhone 18 Staggered Cycle*: Address the impact of the rumored staggered launch (Pro models in Fall 2026, Base models in Spring 2027). How does this affect Q4 2026 revenue recognition and year-over-year (YoY) comparisons?
+3. *Margin Analysis*: Evaluate the tension between record Services margins (currently ~76%) and the headwind of rising 2nm chip costs and memory price inflation.
+4. *Regional Focus*: Assess the sustainability of the 23% revenue surge in Greater China reported in Q1 2026. Is this a structural recovery or a one-time upgrade pull-forward?
+
+*Required Output Structure*:
+
+* *Executive Summary*: (Rating, Price Target, and 30-second "Elevator Pitch").
+* *Segment Deep Dive*: 
+ * iPhone: Unit growth vs. ASP (Average Selling Price) expansion.
+ * Services: Adoption rates of Apple One and impact of the Google/Gemini integration.
+* *Financial Health*: Analysis of FCF (Free Cash Flow) yield and the 2026 share buyback trajectory.
+* *Bull/Bear Scenarios:*
+ * *Bull*: Siri 2.0 triggers a "must-have" upgrade for the 2.5B active device base.
+ * *Bear*: Memory cost inflation compresses Gross Margin below 47%.
+* *Pre-Mortem*: If AAPL stock drops 20% by Dec 2026, what was the most likely cause?
+* *Data Integrity*: Use only verified 2025/2026 financial data. If a specific metric is unknown, flag it as "Data Gap/Forecast Sensitivity" and provide a range based on historical volatility.

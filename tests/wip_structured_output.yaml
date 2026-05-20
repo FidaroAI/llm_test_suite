@@ -1,0 +1,36 @@
+# Validate JSON / XML structure and specific field values.
+
+- description: "Example test case for how to request structured output and validate it with assertions."
+  providers: [bedrock_mantle]
+  # prompts: [system_and_user]
+  vars:
+    user: |
+      Extract the author and year from this sentence: "Pride and Prejudice was written by Jane Austen and published in 1813."
+      Return JSON with keys "author" and "year".
+    system: file://system_prompts/strict_json.txt
+  options:
+    bedrock:
+      outputConfig:
+        textFormat:
+          type: json_schema
+          structure:
+            jsonSchema:
+              name: author_year_record
+              description: Extracted author and publication year
+              schema: |
+                {
+                  "type": "object",
+                  "properties": {
+                    "author": { "type": "string", "description": "Author name" },
+                    "year": { "type": "integer", "description": "Publication year" }
+                  },
+                  "required": ["author", "year"],
+                  "additionalProperties": false
+                }
+  assert:
+    - type: is-json
+    - type: javascript
+      value: |
+        const o = JSON.parse(output);
+        return o.author === 'Jane Austen' && o.year === 1813;
+

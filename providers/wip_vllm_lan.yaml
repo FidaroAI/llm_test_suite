@@ -1,0 +1,6 @@
+id: "openai:chat:{{ env.VLLM_MODEL_ID }}"
+label: vllm_lan
+config:
+  apiBaseUrl: "{{ env.VLLM_BASE_URL }}"
+  apiKey: "{{ env.VLLM_API_KEY }}"
+  temperature: 0.2

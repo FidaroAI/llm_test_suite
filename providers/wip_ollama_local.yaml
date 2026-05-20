@@ -1,0 +1,9 @@
+id: openai:chat:llama3.1:8b
+label: ollama_local_llama31
+config:
+  apiBaseUrl: http://localhost:11434/v1
+  apiKey: ollama        # placeholder; Ollama ignores it
+  temperature: 0.2
+  # Ollama returns thinking content in a separate `thinking` field when
+  # this is set. Non-thinking models silently ignore it.
+  think: true
