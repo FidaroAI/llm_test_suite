@@ -1,0 +1,7 @@
+# DeepEval demo — pinned-ish ranges, mirror of the parent suite's style.
+deepeval>=2.0,<4
+openai>=1.40
+anthropic>=0.40
+instructor>=1.5            # structured (schema) outputs for the custom judge model
+python-dotenv>=1.0
+pytest>=8.0
