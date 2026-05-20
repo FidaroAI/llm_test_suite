@@ -45,6 +45,7 @@ jobs:
       # ephemeral dstack/phala endpoint can change without a code edit.
       HOST_OPENAI_BASE_URL: ${{ vars.HOST_OPENAI_BASE_URL }}
       BRAVE_API_KEY: ${{ secrets.BRAVE_API_KEY }}
+      AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
 
     steps:
       - uses: actions/checkout@v4
