@@ -6,6 +6,7 @@
   "scripts": {
     "test:all": "bash scripts_test/fidaro.sh",
     "view": "promptfoo view --yes",
+    "dataset": "pnpm dataset:researchrubrics && pnpm dataset:agentharm",
     "dataset:researchrubrics": "node scripts_repo/download_researchrubrics.mjs",
     "dataset:agentharm": "node scripts_repo/download_agentharm.mjs"
   },

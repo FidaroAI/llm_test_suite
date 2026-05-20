@@ -85,6 +85,9 @@ jobs:
           image="${ECR_REGISTRY}/fidaro/dev/cvm-llm-gateway:${GATEWAY_IMAGE_TAG}"
           ./scripts_repo/run_plaintext_gateway.sh --docker-image "$image" --vllm-url "$HOST_OPENAI_BASE_URL" --brave-api-key "$BRAVE_API_KEY"
 
+      - name: Fetch datasets
+        run: pnpm dataset
+
       - name: Run tests
         run: |
           GATEWAY_WAIT_SECONDS=60 ./scripts_test/fidaro.sh
