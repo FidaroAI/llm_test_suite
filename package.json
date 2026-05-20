@@ -5,7 +5,8 @@
   "description": "Regression test suite for self-hosted LLMs, powered by promptfoo.",
   "scripts": {
     "test:all": "bash scripts_test/fidaro.sh",
-    "view": "promptfoo view --yes"
+    "view": "promptfoo view --yes",
+    "dataset:researchrubrics": "node scripts_repo/download_researchrubrics.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1044.0",

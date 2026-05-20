@@ -3,3 +3,6 @@ __pycache__
 .pnpm-store
 node_modules
 results
+
+# Downloaded dataset artifact; regenerate with `npm run dataset:researchrubrics`
+data/researchrubrics.json

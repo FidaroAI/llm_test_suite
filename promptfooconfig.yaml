@@ -35,12 +35,9 @@ defaultTest:
     # reasoning parsing. I think this can be done better by ensuring providers are returning
     # reasoning data in a consistent way rather than offloading this to the test.
     # transform: file://hooks/normalize_response.js
-    # TODO: configure an LLM-as-judge for any `llm-rubric` assertions, e.g.
-    # provider:
-    #   id: anthropic:messages:claude-sonnet-4-5
-    #   config:
-    #     apiKey: "{{ env.ANTHROPIC_API_KEY }}"
-    #     temperature: 0
+    # LLM-as-judge for any `llm-rubric` assertions (e.g. the research_rubrics
+    # suite). Uses a locally available Codex provider for now; revisit for CI.
+    provider: openai:codex-sdk
     # Example of an assertion that would be applied to every test.
   # assert:
   #   - type: python
@@ -51,6 +48,11 @@ tests:
   - file://tests/fidaro_basic.yaml
   - file://tests/simple_facts.csv
   - file://tests/simple_facts_regressions.csv
+  # Research-style prompts graded against weighted rubrics (one llm-rubric
+  # assertion per criterion). Tagged metadata.suite=research_rubrics so they can
+  # be run in isolation: --filter-metadata "suite=research_rubrics".
+  # Requires `npm run dataset:researchrubrics` to have been run first.
+  - file://tests/research_rubrics_gen.py:generate_tests
 
 evaluateOptions:
   maxConcurrency: 4
