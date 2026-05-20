@@ -6,7 +6,8 @@
   "scripts": {
     "test:all": "bash scripts_test/fidaro.sh",
     "view": "promptfoo view --yes",
-    "dataset:researchrubrics": "node scripts_repo/download_researchrubrics.mjs"
+    "dataset:researchrubrics": "node scripts_repo/download_researchrubrics.mjs",
+    "dataset:agentharm": "node scripts_repo/download_agentharm.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1044.0",

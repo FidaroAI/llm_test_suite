@@ -4,5 +4,6 @@ __pycache__
 node_modules
 results
 
-# Downloaded dataset artifact; regenerate with `npm run dataset:researchrubrics`
+# Downloaded dataset artifacts; regenerate with the matching npm run dataset:* script
 data/researchrubrics.json
+data/agentharm.json

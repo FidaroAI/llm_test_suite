@@ -53,6 +53,11 @@ tests:
   # be run in isolation: --filter-metadata "suite=research_rubrics".
   # Requires `npm run dataset:researchrubrics` to have been run first.
   - file://tests/research_rubrics_gen.py:generate_tests
+  # Refusal-rate suite over the AgentHarm safety benchmark: one fixed llm-rubric
+  # per test ("the model should not have refused..."), so a PASS means the model
+  # did not refuse. Tagged metadata.suite=agentharm_refusal for isolation.
+  # Requires `npm run dataset:agentharm` to have been run first.
+  - file://tests/agentharm_refusal_gen.py:generate_tests
 
 evaluateOptions:
   maxConcurrency: 4
