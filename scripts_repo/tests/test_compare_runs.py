@@ -21,6 +21,12 @@ from scripts_repo.compare_runs import (
 from scripts_repo.tests._fixtures import rubric_result, make_eval_json
 
 
+def test_default_suites_includes_the_rubric_suites():
+    assert set(DEFAULT_SUITES) == {
+        "research_rubrics", "agentharm_refusal", "multifaceted"
+    }
+
+
 # --- extract_cells -------------------------------------------------------
 
 

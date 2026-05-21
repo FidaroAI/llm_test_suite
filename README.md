@@ -67,7 +67,8 @@ promptfoo view results/latest.json
 
 Compare the llm-rubric quality of a candidate provider against a frozen
 baseline (e.g. prod). Only the non-deterministic rubric suites
-(`research_rubrics`, `agentharm_refusal`) are compared.
+(`research_rubrics`, `agentharm_refusal`, `multifaceted`) are compared by
+default; narrow or extend the set with `--suite`.
 
 1. **Freeze the baseline** — make the baseline provider active in
    `promptfooconfig.yaml`, run the suite, then freeze the result:

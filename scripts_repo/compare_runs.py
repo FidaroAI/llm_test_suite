@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
-DEFAULT_SUITES = ("research_rubrics", "agentharm_refusal")
+DEFAULT_SUITES = ("research_rubrics", "agentharm_refusal", "multifaceted")
 DEFAULT_TOLERANCE = 0.05
 # promptfoo web UI base; user is responsible for running the server there.
 DEFAULT_UI_BASE_URL = "http://localhost:3000"
