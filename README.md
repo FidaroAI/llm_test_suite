@@ -63,6 +63,43 @@ promptfoo eval --cache
 promptfoo view results/latest.json
 ```
 
+## Comparing two providers
+
+Compare the llm-rubric quality of a candidate provider against a frozen
+baseline (e.g. prod). Only the non-deterministic rubric suites
+(`research_rubrics`, `agentharm_refusal`) are compared.
+
+1. **Freeze the baseline** — make the baseline provider active in
+   `promptfooconfig.yaml`, run the suite, then freeze the result:
+
+   ```bash
+   promptfoo eval --cache
+   scripts_repo/freeze_baseline.py results/local/latest.json
+   # -> baselines/<provider_label>.json   (committed reference)
+   ```
+
+   Re-run this only when prod changes. Commit the baseline file.
+
+2. **Run the candidate** — switch the active provider, run again:
+
+   ```bash
+   promptfoo eval --cache
+   ```
+
+3. **Compare** — diff candidate against the frozen baseline:
+
+   ```bash
+   scripts_repo/compare_runs.py \
+       baselines/<provider_label>.json results/local/latest.json \
+       --tolerance 0.05 --out report.html
+   open report.html
+   ```
+
+   The report groups per-assertion deltas by suite, worst-first, and colors
+   each cell green (improved beyond tolerance), red (regressed), or grey
+   (within the ±tolerance band). Moves smaller than `--tolerance` (default
+   0.05 on the 0–1 score) are treated as noise.
+
 ## Launching vLLM
 
 ```bash
