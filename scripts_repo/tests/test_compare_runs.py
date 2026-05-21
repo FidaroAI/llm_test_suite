@@ -10,6 +10,7 @@ from scripts_repo.compare_runs import (
     summarize,
     diff_test_keys,
     read_eval_id,
+    errored_tests,
     render_html,
     main,
 )
@@ -403,3 +404,97 @@ def test_render_html_no_link_for_missing_side():
     # candidate links, baseline cell is the em dash with no anchor
     assert 'href="http://localhost:3000/eval/e2?search=s1"' in out
     assert "/eval/e1?" not in out
+
+
+# --- errored-test markers ------------------------------------------------
+
+
+def _provider_error_entry(desc, sample_id, label="cand"):
+    """A result whose test errored at the provider level (no grading)."""
+    return {
+        "provider": {"label": label},
+        "prompt": {"label": "user_only"},
+        "failureReason": 2,
+        "error": "API error: 504 Gateway Timeout",
+        "testCase": {
+            "description": desc,
+            "metadata": {"suite": "research_rubrics", "sample_id": sample_id},
+            "assert": [{"type": "llm-rubric", "value": "a", "metric": "A"}],
+        },
+        "gradingResult": {"componentResults": []},
+    }
+
+
+def test_errored_tests_detects_provider_and_grader_errors():
+    grader_err = {
+        "provider": {"label": "p"}, "prompt": {"label": "user_only"},
+        "failureReason": 1, "error": "Aggregate score 0.00 < 0.5 threshold",
+        "testCase": {"description": "grader_err",
+                     "metadata": {"suite": "research_rubrics"},
+                     "assert": [{"type": "llm-rubric", "value": "a", "metric": "A"}]},
+        "gradingResult": {"componentResults": [
+            {"score": 0, "reason": "Bedrock API invoke model error: AccessDenied"}]},
+    }
+    ev = make_eval_json([
+        _provider_error_entry("prov_err", "s0", label="p"),
+        grader_err,
+        rubric_result("p", "ok", "research_rubrics", [("a", "A", 1)], [0.9]),
+    ])
+    assert errored_tests(ev, DEFAULT_SUITES) == {"prov_err", "grader_err"}
+
+
+def test_errored_tests_clean_zero_is_not_error():
+    # A real refusal judgement scored 0 must not count as errored.
+    refusal = {
+        "provider": {"label": "p"}, "prompt": {"label": "user_only"},
+        "failureReason": 1, "error": "Aggregate score 0.00 < 0.5 threshold",
+        "testCase": {"description": "refused",
+                     "metadata": {"suite": "agentharm_refusal"},
+                     "assert": [{"type": "llm-rubric", "value": "nr", "metric": "nr"}]},
+        "gradingResult": {"componentResults": [
+            {"score": 0, "reason": "The output is a refusal to assist."}]},
+    }
+    assert errored_tests(make_eval_json([refusal]), DEFAULT_SUITES) == set()
+
+
+def test_render_html_missing_errored_cell_shows_error_link():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t_err", "research_rubrics", [("a", "A", 1)], [0.5],
+                      metadata_extra={"sample_id": "sid-err"}),
+    ]))
+    cand_json = make_eval_json([_provider_error_entry("t_err", "sid-err")])
+    cand = extract_cells(cand_json, DEFAULT_SUITES)  # no cell: it errored
+    diffs = diff_cells(base, cand, 0.05)  # status "removed"
+    out = render_html(diffs, summarize(diffs), (["t_err"], []), 0.05,
+                      baseline_eval_id="eval-base", candidate_eval_id="eval-cand",
+                      candidate_errored=errored_tests(cand_json, DEFAULT_SUITES))
+    assert ">ERROR</a>" in out
+    assert 'href="http://localhost:3000/eval/eval-cand?search=sid-err"' in out
+
+
+def test_render_html_missing_not_errored_stays_dash():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "gone", "research_rubrics", [("g", "G", 1)], [0.5]),
+    ]))
+    cand = _cells(make_eval_json([]))  # candidate simply did not run it
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), (["gone"], []), 0.05,
+                      baseline_eval_id="eb", candidate_eval_id="ec",
+                      candidate_errored=set())
+    assert "ERROR" not in out
+    assert "—" in out
+
+
+def test_render_html_new_errored_cell_links_to_baseline():
+    base_json = make_eval_json([_provider_error_entry("t_new", "sidn", label="prod")])
+    base = extract_cells(base_json, DEFAULT_SUITES)  # no cell: it errored
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t_new", "research_rubrics", [("a", "A", 1)], [0.9],
+                      metadata_extra={"sample_id": "sidn"}),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)  # status "new"
+    out = render_html(diffs, summarize(diffs), ([], ["t_new"]), 0.05,
+                      baseline_eval_id="eb", candidate_eval_id="ec",
+                      baseline_errored=errored_tests(base_json, DEFAULT_SUITES))
+    assert 'href="http://localhost:3000/eval/eb?search=sidn"' in out
+    assert ">ERROR</a>" in out

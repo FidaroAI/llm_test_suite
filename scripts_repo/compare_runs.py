@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,18 @@ DEFAULT_SUITES = ("research_rubrics", "agentharm_refusal")
 DEFAULT_TOLERANCE = 0.05
 # promptfoo web UI base; user is responsible for running the server there.
 DEFAULT_UI_BASE_URL = "http://localhost:3000"
+
+# promptfoo ResultFailureReason.ERROR (provider / response level error).
+_FAILURE_REASON_ERROR = 2
+
+# Infra-error signatures in an assertion's grading reason — the judge could not
+# run (e.g. a missing AWS/Bedrock token), as opposed to a real low-score verdict.
+_GRADER_ERROR_RE = re.compile(
+    r"(invoke model error|access ?denied|api error\b|rate ?limit|timeout"
+    r"|unauthorized|forbidden|service unavailable|credential|expired token"
+    r"|could not parse|failed to (call|invoke|reach|parse)|exception:)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -56,6 +69,36 @@ def read_eval_id(eval_json: dict) -> str | None:
     return eval_json.get("evalId") or (eval_json.get("_baseline_meta") or {}).get(
         "eval_id"
     )
+
+
+def _result_errored(result: dict) -> bool:
+    """True when a result failed to produce real grades (vs. a low score).
+
+    Catches provider/response errors (failureReason ERROR) and llm-rubric judge
+    failures whose component reason is an infra error.
+    """
+    if result.get("failureReason") == _FAILURE_REASON_ERROR:
+        return True
+    comps = (result.get("gradingResult") or {}).get("componentResults") or []
+    if any(_GRADER_ERROR_RE.search(str(c.get("reason") or "")) for c in comps):
+        return True
+    if not comps and result.get("error") and result.get("failureReason") not in (0, 1):
+        return True
+    return False
+
+
+def errored_tests(eval_json: dict, suites) -> set:
+    """Descriptions of tests in the given suites whose grading errored."""
+    suites = set(suites)
+    out: set = set()
+    for result in eval_json.get("results", {}).get("results", []):
+        test_case = result.get("testCase") or {}
+        meta = test_case.get("metadata") or {}
+        if meta.get("suite") not in suites:
+            continue
+        if _result_errored(result):
+            out.add(test_case.get("description") or "<no-description>")
+    return out
 
 
 def _search_term(meta: dict, description: str) -> str:
@@ -188,6 +231,7 @@ h2 { margin-top: 1.5rem; }
 /* Neutral alternating banding: all rows of one test share a shade. */
 tr.test-a td { background: #f4f4f4; }
 tr.test-b td { background: #ffffff; }
+.cell-error { color: #b35900; font-weight: 600; }
 """
 
 
@@ -199,19 +243,29 @@ def _fmt_delta(value) -> str:
     return "—" if value is None else f"{value:+.2f}"
 
 
-def _score_html(value, eval_id, search, base_url) -> str:
-    """Score text, hyperlinked to the test's filtered view in the promptfoo UI.
+def _ui_href(eval_id, search, base_url) -> str:
+    return html.escape(f"{base_url}/eval/{eval_id}?search={quote(search)}", quote=True)
 
-    Links only when a score and an eval id are present; a missing side (None)
-    renders as an em dash with no link.
+
+def _score_html(value, eval_id, search, base_url, errored=False) -> str:
+    """Cell content, hyperlinked to the test's filtered view in the promptfoo UI.
+
+    A present score links to its run. A missing side (None) renders as ERROR
+    (linked, when the test errored in that run) or an em dash otherwise. Links
+    only appear when an eval id and search term are available.
     """
     if value is None:
-        return "—"
+        if not errored:
+            return "—"
+        if eval_id and search:
+            return (f'<a class="cell-error" href="{_ui_href(eval_id, search, base_url)}" '
+                    'target="_blank" rel="noopener">ERROR</a>')
+        return '<span class="cell-error">ERROR</span>'
     text = f"{value:.2f}"
     if not eval_id or not search:
         return text
-    href = html.escape(f"{base_url}/eval/{eval_id}?search={quote(search)}", quote=True)
-    return f'<a href="{href}" target="_blank" rel="noopener">{text}</a>'
+    return (f'<a href="{_ui_href(eval_id, search, base_url)}" '
+            f'target="_blank" rel="noopener">{text}</a>')
 
 
 def _sort_key(diff):
@@ -228,13 +282,19 @@ def _group_sort_key(group):
 def render_html(diffs: list, counts: dict, drift, tolerance: float,
                 baseline_eval_id: str | None = None,
                 candidate_eval_id: str | None = None,
-                ui_base_url: str = DEFAULT_UI_BASE_URL) -> str:
+                ui_base_url: str = DEFAULT_UI_BASE_URL,
+                baseline_errored: set | None = None,
+                candidate_errored: set | None = None) -> str:
     """Render a self-contained HTML report. `drift` is (only_base, only_cand).
 
     When an eval id is supplied for a side, that side's scores link to the
     test's filtered view in the promptfoo UI (`{ui_base_url}/eval/<id>?search=`).
+    A missing cell whose test is in `baseline_errored` / `candidate_errored`
+    renders a linked ERROR instead of an em dash.
     """
     only_base, only_cand = drift
+    baseline_errored = baseline_errored or set()
+    candidate_errored = candidate_errored or set()
     summary = (
         f"{counts['improved']} improved &middot; {counts['regressed']} regressed "
         f"&middot; {counts['within']} within &plusmn;{tolerance:g} &middot; "
@@ -286,8 +346,8 @@ def render_html(diffs: list, counts: dict, drift, tolerance: float,
                     f"<td>{html.escape(d.key.test)}</td>"
                     f"<td>{html.escape(d.assertion_value)}</td>"
                     f"<td>{html.escape(d.metric or '')}</td>"
-                    f'<td class="num">{_score_html(d.baseline, baseline_eval_id, d.search, ui_base_url)}</td>'
-                    f'<td class="num">{_score_html(d.candidate, candidate_eval_id, d.search, ui_base_url)}</td>'
+                    f'<td class="num">{_score_html(d.baseline, baseline_eval_id, d.search, ui_base_url, d.key.test in baseline_errored)}</td>'
+                    f'<td class="num">{_score_html(d.candidate, candidate_eval_id, d.search, ui_base_url, d.key.test in candidate_errored)}</td>'
                     f'<td class="num delta">{_fmt_delta(d.delta)}</td>'
                     f"<td>{d.status}</td>"
                     "</tr>"
@@ -364,7 +424,9 @@ def main(argv: list[str] | None = None) -> int:
         render_html(diffs, counts, drift, args.tolerance,
                     baseline_eval_id=read_eval_id(baseline_json),
                     candidate_eval_id=read_eval_id(candidate_json),
-                    ui_base_url=args.ui_base_url),
+                    ui_base_url=args.ui_base_url,
+                    baseline_errored=errored_tests(baseline_json, suites),
+                    candidate_errored=errored_tests(candidate_json, suites)),
         encoding="utf-8",
     )
     print(
