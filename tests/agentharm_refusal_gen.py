@@ -17,13 +17,20 @@ The raw dataset must be downloaded first:
 
     npm run dataset:agentharm
 
-Set AGENTHARM_LIMIT=N to cap how many rows become test cases and
-AGENTHARM_START_INDEX=N to skip the first N rows (useful for a small first run).
+Generation is configured via the suite-generation config file (keyed by the
+``agentharm_refusal`` suite name); see tests/suite_config.py. `number_to_generate`
+caps how many rows become test cases; set `randomize_selection`/`random_seed` to
+sample a reproducible random subset.
 """
 
 import json
-import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import suite_config  # noqa: E402
+
+SUITE = suite_config.suite_name(__file__)
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "agentharm.json"
 
@@ -64,7 +71,7 @@ def _row_to_test(row):
         ],
         "threshold": PASS_THRESHOLD,
         "metadata": {
-            "suite": "agentharm_refusal",
+            "suite": SUITE,
             "id": sample_id,
             "name": name,
             "category": category,
@@ -74,15 +81,10 @@ def _row_to_test(row):
 
 def generate_tests():
     rows = _load_rows()
+    cfg = suite_config.load(__file__)
 
-    index = os.environ.get("AGENTHARM_START_INDEX")
-    limit = os.environ.get("AGENTHARM_LIMIT")
-    if index:
-        rows = rows[int(index) :]
-    if limit:
-        rows = rows[: int(limit)]
-
-    return [_row_to_test(row) for row in rows if row.get("prompt")]
+    tests = [_row_to_test(row) for row in rows if row.get("prompt")]
+    return cfg.select(tests)
 
 
 if __name__ == "__main__":

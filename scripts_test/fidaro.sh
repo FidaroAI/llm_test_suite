@@ -37,7 +37,7 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
   desc_args=(--description "github_actions run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT:-1} @ ${short_sha} (${GITHUB_REF_NAME})")
 fi
 
-AGENTHARM_LIMIT=5 RESEARCH_RUBRICS_LIMIT=10 RESEARCH_RUBRICS_MAX_CRITERIA=3 pnpm exec promptfoo eval \
+SUITE_GENERATION_CONFIG_FILE=scripts_test/fidaro_config.json pnpm exec promptfoo eval \
   --config promptfooconfig.yaml \
   --filter-providers fidaro_plaintext_gateway_phala_prod \
   --filter-metadata suite=research_rubrics \

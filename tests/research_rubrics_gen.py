@@ -14,13 +14,20 @@ The raw dataset must be downloaded first:
 
     npm run dataset:researchrubrics
 
-Set RESEARCH_RUBRICS_LIMIT=N to cap how many rows become test cases (useful for
-a small first run); leave it unset to use all rows.
+Generation is configured via the suite-generation config file (keyed by the
+``research_rubrics`` suite name); see tests/suite_config.py. `number_to_generate`
+caps how many rows become test cases and `max_rubrics` caps rubric criteria per
+row.
 """
 
 import json
-import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import suite_config  # noqa: E402
+
+SUITE = suite_config.suite_name(__file__)
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "researchrubrics.json"
 
@@ -63,7 +70,7 @@ def _row_to_test(row, max_num_criteria=None):
         "assert": asserts,
         "threshold": PASS_THRESHOLD,
         "metadata": {
-            "suite": "research_rubrics",
+            "suite": SUITE,
             "sample_id": sample_id,
             "domain": domain,
             "conceptual_breadth": row.get("conceptual_breadth", "unknown"),
@@ -75,21 +82,15 @@ def _row_to_test(row, max_num_criteria=None):
 
 def generate_tests():
     rows = _load_rows()
+    cfg = suite_config.load(__file__)
 
-    limit = os.environ.get("RESEARCH_RUBRICS_LIMIT")
-    if limit:
-        rows = rows[: int(limit)]
-
-    max_num_criteria = os.environ.get("RESEARCH_RUBRICS_MAX_CRITERIA", default=None)
-    if max_num_criteria:
-        max_num_criteria = int(max_num_criteria)
-
-    # Skip rows that carry no gradable rubric items.
-    return [
+    # Skip rows that carry no gradable rubric items, then apply selection.
+    tests = [
         test
         for row in rows
-        if (test := _row_to_test(row, max_num_criteria=max_num_criteria))["assert"]
+        if (test := _row_to_test(row, max_num_criteria=cfg.max_rubrics))["assert"]
     ]
+    return cfg.select(tests)
 
 
 if __name__ == "__main__":

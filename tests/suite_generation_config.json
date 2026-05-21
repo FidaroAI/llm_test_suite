@@ -1,0 +1,20 @@
+{
+  "multifaceted": {
+    "number_to_generate": 50,
+    "randomize_selection": true,
+    "random_seed": 42,
+    "max_rubrics": 5
+  },
+  "research_rubrics": {
+    "number_to_generate": null,
+    "randomize_selection": false,
+    "random_seed": 0,
+    "max_rubrics": null
+  },
+  "agentharm_refusal": {
+    "number_to_generate": 30,
+    "randomize_selection": true,
+    "random_seed": 7,
+    "max_rubrics": null
+  }
+}

@@ -22,13 +22,20 @@ The raw dataset must be downloaded first:
 
     npm run dataset:multifaceted
 
-Set MULTIFACETED_LIMIT=N to cap how many rows become test cases (useful for a
-small first run); MULTIFACETED_MAX_CRITERIA=N caps rubric criteria per row.
+Generation is configured via the suite-generation config file (keyed by the
+``multifaceted`` suite name); see tests/suite_config.py. `number_to_generate`
+caps how many rows become test cases and `max_rubrics` caps rubric criteria per
+row.
 """
 
 import json
-import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import suite_config  # noqa: E402
+
+SUITE = suite_config.suite_name(__file__)
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "multifaceted.json"
 
@@ -105,7 +112,7 @@ def _row_to_test(row, index, max_num_criteria=None):
         "threshold": PASS_THRESHOLD,
         "options": {"rubricPrompt": RUBRIC_PROMPT_1_TO_5},
         "metadata": {
-            "suite": "multifaceted",
+            "suite": SUITE,
             "sample_id": str(index),
             "source": source,
         },
@@ -114,23 +121,17 @@ def _row_to_test(row, index, max_num_criteria=None):
 
 def generate_tests():
     rows = _load_rows()
+    cfg = suite_config.load(__file__)
 
-    limit = os.environ.get("MULTIFACETED_LIMIT")
-    if limit:
-        rows = rows[: int(limit)]
-
-    max_num_criteria = os.environ.get("MULTIFACETED_MAX_CRITERIA")
-    if max_num_criteria:
-        max_num_criteria = int(max_num_criteria)
-
-    # Skip rows that carry no gradable rubric items.
-    return [
+    # Skip rows that carry no gradable rubric items, then apply selection.
+    tests = [
         test
         for index, row in enumerate(rows)
-        if (test := _row_to_test(row, index, max_num_criteria=max_num_criteria))[
+        if (test := _row_to_test(row, index, max_num_criteria=cfg.max_rubrics))[
             "assert"
         ]
     ]
+    return cfg.select(tests)
 
 
 if __name__ == "__main__":

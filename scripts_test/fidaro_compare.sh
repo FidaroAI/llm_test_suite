@@ -12,38 +12,34 @@ fi
 
 mkdir -p results/local
 
-# echo "WARNING: baseline runs will be cached for optimization. Add the --no-cache flag to disable caching and get a fresh run, but this will be slower. Caching is recommended for regular use and CI runs, but you may want to disable it when developing or debugging."
+echo "WARNING: baseline runs will be cached for optimization. Add the --no-cache flag to disable caching and get a fresh run, but this will be slower. Caching is recommended for regular use and CI runs, but you may want to disable it when developing or debugging."
 
-# export AGENTHARM_LIMIT=0
-# export RESEARCH_RUBRICS_LIMIT=0
-# export RESEARCH_RUBRICS_MAX_CRITERIA=3
-# export MULTIFACETED_LIMIT=1
-# export MULTIFACETED_MAX_CRITERIA=3
+export SUITE_GENERATION_CONFIG_FILE=scripts_test/fidaro_compare_config.json
 
-#  pnpm exec promptfoo eval \
-#   --config promptfooconfig.yaml \
-#   --filter-providers fidaro_plaintext_gateway_phala_prod \
-#   --filter-metadata suite=multifaceted \
-#   --output results/local/latest.json \
-#   --no-cache \
-#   --description "Baseline prod run"
+ pnpm exec promptfoo eval \
+  --config promptfooconfig.yaml \
+  --filter-providers fidaro_plaintext_gateway_phala_prod \
+  --filter-metadata suite=multifaceted \
+  --output results/local/latest.json \
+  --no-cache \
+  --description "Baseline prod run"
 
-# set -e
+set -e
 
-# ./scripts_repo/freeze_baseline.py results/local/latest.json --force
-# cp results/local/latest.json results/local/$(jq -r '.evalId' results/local/latest.json).json
+./scripts_repo/freeze_baseline.py results/local/latest.json --force
+cp results/local/latest.json results/local/$(jq -r '.evalId' results/local/latest.json).json
 
-# set +e
+set +e
 
-# pnpm exec promptfoo eval \
-#   --config promptfooconfig.yaml \
-#   --filter-providers fidaro_plaintext_gateway_phala_dev \
-#   --filter-metadata suite=multifaceted \
-#   --output results/local/latest.json \
-#   --no-cache \
-#   --description "Comparison dev run"
+pnpm exec promptfoo eval \
+  --config promptfooconfig.yaml \
+  --filter-providers fidaro_plaintext_gateway_phala_dev \
+  --filter-metadata suite=multifaceted \
+  --output results/local/latest.json \
+  --no-cache \
+  --description "Comparison dev run"
 
-# set -e
+set -e
 
 # Annoyingly we can't just leave this running. promptfoo doesn't pick up changes to
 # its database once running :(
