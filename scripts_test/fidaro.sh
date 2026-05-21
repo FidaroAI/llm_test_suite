@@ -29,7 +29,7 @@ wait_for_gateway() {
 
 wait_for_gateway
 
-mkdir -p results/ci
+mkdir -p results/local
 
 desc_args=()
 if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
@@ -37,9 +37,9 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
   desc_args=(--description "github_actions run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT:-1} @ ${short_sha} (${GITHUB_REF_NAME})")
 fi
 
-AGENTHARM_LIMIT=5 RESEARCH_RUBRICS_LIMIT=5 RESEARCH_RUBRICS_MAX_CRITERIA=3 exec pnpm exec promptfoo eval \
+AGENTHARM_LIMIT=5 RESEARCH_RUBRICS_LIMIT=10 RESEARCH_RUBRICS_MAX_CRITERIA=3 pnpm exec promptfoo eval \
   --config promptfooconfig.yaml \
-  --filter-providers fidaro_plaintext_gateway_phala \
-  --output results/ci/latest.json \
-  --no-cache \
+  --filter-providers fidaro_plaintext_gateway_phala_prod \
+  --filter-metadata suite=research_rubrics \
+  --output results/local/latest.json \
   "${desc_args[@]}"

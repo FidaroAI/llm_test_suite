@@ -1,6 +1,7 @@
 .claude/worktrees
 __pycache__
 .pnpm-store
+.env
 node_modules
 results
 

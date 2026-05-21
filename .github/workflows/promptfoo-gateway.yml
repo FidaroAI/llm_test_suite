@@ -98,7 +98,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: promptfoo-results
-          path: results/ci/latest.json
+          path: results/local/latest.json
           if-no-files-found: error
 
       - name: Show gateway logs on failure

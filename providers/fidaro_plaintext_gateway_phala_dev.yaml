@@ -1,0 +1,7 @@
+id: openai:chat:Qwen/Qwen3-Next-80B-A3B-Thinking-FP8
+label: fidaro_plaintext_gateway_phala_dev
+config:
+  apiBaseUrl: http://127.0.0.1:8084/v1
+  apiKey: dummy        # placeholder; local endpoint ignores it but the OpenAI client requires non-empty
+  temperature: 0.7 # TODO: Major. Is this being passed in?
+  max_tokens: 10000 # TODO: Major. Can this be set to zero?

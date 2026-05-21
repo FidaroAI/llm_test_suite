@@ -1,4 +1,4 @@
-description: "LLM regression suite — multi-provider matrix"
+description: "Fidaro model eval suite"
 
 # extensions:
 #   - file://hooks/before_each.py:before_each
@@ -6,7 +6,10 @@ description: "LLM regression suite — multi-provider matrix"
 providers:
   # Test against prod phala using a locally running plaintext gateway. You must start the gateway
   # first. This provider can't do that automatically.
-  - file://providers/fidaro_plaintext_gateway_phala.yaml
+  - file://providers/fidaro_plaintext_gateway_phala_prod.yaml
+  # Test against dev phala using a locally running plaintext gateway. You must start the gateway
+  # first. This provider can't do that automatically.
+  - file://providers/fidaro_plaintext_gateway_phala_dev.yaml
   # Use this for testing against a local dstack and local vllm. The only real difference in the
   # provider config is the model name.
   # - file://providers/fidaro_plaintext_gateway_local.yaml
@@ -70,6 +73,7 @@ tests:
   - file://tests/agentharm_refusal_gen.py:generate_tests
 
 evaluateOptions:
-  maxConcurrency: 4
+  # TODO: I have no idea what's reasonable here for Fidaro!
+  maxConcurrency: 10
 
 outputPath: results/local/latest.json
