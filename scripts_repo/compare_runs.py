@@ -185,6 +185,9 @@ h2 { margin-top: 1.5rem; }
 .status-regressed td.delta { color: #c0341d; font-weight: 600; }
 .status-within td.delta { color: #888; }
 .status-new td, .status-removed td { color: #555; font-style: italic; }
+/* Neutral alternating banding: all rows of one test share a shade. */
+tr.test-a td { background: #f4f4f4; }
+tr.test-b td { background: #ffffff; }
 """
 
 
@@ -214,6 +217,12 @@ def _score_html(value, eval_id, search, base_url) -> str:
 def _sort_key(diff):
     # Worst regressions first; new/removed (delta None) sort to the bottom.
     return (0, diff.delta) if diff.delta is not None else (1, 0.0)
+
+
+def _group_sort_key(group):
+    # Order test groups by their worst delta; groups with no delta sort last.
+    deltas = [g.delta for g in group if g.delta is not None]
+    return (0, min(deltas)) if deltas else (1, 0.0)
 
 
 def render_html(diffs: list, counts: dict, drift, tolerance: float,
@@ -253,20 +262,36 @@ def render_html(diffs: list, counts: dict, drift, tolerance: float,
         grouped[d.suite].append(d)
 
     sections = []
+    parity_counter = 0  # alternates per test group across the whole report
     for suite in suites:
+        # Group this suite's rows by test so a test's assertions stay together,
+        # ordering groups by their worst delta (regressions near the top).
+        test_groups: dict = {}
+        group_order: list = []
+        for d in grouped[suite]:
+            gkey = (d.key.test, d.key.prompt)
+            if gkey not in test_groups:
+                test_groups[gkey] = []
+                group_order.append(gkey)
+            test_groups[gkey].append(d)
+        group_order.sort(key=lambda gk: _group_sort_key(test_groups[gk]))
+
         rows = []
-        for d in sorted(grouped[suite], key=_sort_key):
-            rows.append(
-                f'<tr class="status-{d.status}">'
-                f"<td>{html.escape(d.key.test)}</td>"
-                f"<td>{html.escape(d.assertion_value)}</td>"
-                f"<td>{html.escape(d.metric or '')}</td>"
-                f'<td class="num">{_score_html(d.baseline, baseline_eval_id, d.search, ui_base_url)}</td>'
-                f'<td class="num">{_score_html(d.candidate, candidate_eval_id, d.search, ui_base_url)}</td>'
-                f'<td class="num delta">{_fmt_delta(d.delta)}</td>'
-                f"<td>{d.status}</td>"
-                "</tr>"
-            )
+        for gkey in group_order:
+            parity = "a" if parity_counter % 2 == 0 else "b"
+            parity_counter += 1
+            for d in sorted(test_groups[gkey], key=_sort_key):
+                rows.append(
+                    f'<tr class="status-{d.status} test-{parity}">'
+                    f"<td>{html.escape(d.key.test)}</td>"
+                    f"<td>{html.escape(d.assertion_value)}</td>"
+                    f"<td>{html.escape(d.metric or '')}</td>"
+                    f'<td class="num">{_score_html(d.baseline, baseline_eval_id, d.search, ui_base_url)}</td>'
+                    f'<td class="num">{_score_html(d.candidate, candidate_eval_id, d.search, ui_base_url)}</td>'
+                    f'<td class="num delta">{_fmt_delta(d.delta)}</td>'
+                    f"<td>{d.status}</td>"
+                    "</tr>"
+                )
         sections.append(
             f"<h2>{html.escape(suite)}</h2>"
             "<table><thead><tr>"

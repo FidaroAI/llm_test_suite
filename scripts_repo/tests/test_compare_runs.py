@@ -1,4 +1,5 @@
 import json
+import re
 
 from scripts_repo.compare_runs import (
     DEFAULT_SUITES,
@@ -198,8 +199,8 @@ def test_render_html_contains_summary_and_markers():
     assert "1 improved" in out
     assert "1 regressed" in out
     assert "research_rubrics" in out
-    assert 'class="status-improved"' in out
-    assert 'class="status-regressed"' in out
+    assert "status-improved" in out
+    assert "status-regressed" in out
 
 
 def test_render_html_shows_drift_banner():
@@ -271,6 +272,48 @@ def test_main_respects_suite_override(tmp_path):
     text = out.read_text(encoding="utf-8")
     assert "research_rubrics" in text
     assert "agentharm_refusal" not in text
+
+
+# --- alternating per-test row highlight ----------------------------------
+
+
+def _row_parities_by_test(out, test_descs):
+    """Map each test description -> set of parity classes (a/b) on its rows."""
+    result = {t: set() for t in test_descs}
+    for cls, body in re.findall(r'<tr class="([^"]*)">(.*?)</tr>', out, re.DOTALL):
+        parity = "a" if "test-a" in cls else "b" if "test-b" in cls else None
+        for t in test_descs:
+            if f">{t}<" in body:
+                result[t].add(parity)
+    return result
+
+
+def test_render_html_rows_of_same_test_share_one_parity():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t_a", "research_rubrics",
+                      [("a", "A", 1), ("b", "B", 1)], [0.5, 0.5]),
+        rubric_result("prod", "t_b", "research_rubrics",
+                      [("c", "C", 1), ("d", "D", 1)], [0.5, 0.5]),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t_a", "research_rubrics",
+                      [("a", "A", 1), ("b", "B", 1)], [0.6, 0.6]),
+        rubric_result("cand", "t_b", "research_rubrics",
+                      [("c", "C", 1), ("d", "D", 1)], [0.6, 0.6]),
+    ]))
+    out = render_html(diff_cells(base, cand, 0.05),
+                      summarize(diff_cells(base, cand, 0.05)), ([], []), 0.05)
+    parities = _row_parities_by_test(out, ["t_a", "t_b"])
+    # each test's rows share exactly one parity, and the two tests differ
+    assert len(parities["t_a"]) == 1
+    assert len(parities["t_b"]) == 1
+    assert parities["t_a"] != parities["t_b"]
+
+
+def test_render_html_defines_neutral_row_colors():
+    out = render_html([], {"improved": 0, "regressed": 0, "within": 0,
+                           "new": 0, "removed": 0}, ([], []), 0.05)
+    assert ".test-a" in out and ".test-b" in out
 
 
 # --- promptfoo UI links --------------------------------------------------
