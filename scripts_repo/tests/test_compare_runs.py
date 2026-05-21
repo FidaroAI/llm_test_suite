@@ -11,6 +11,10 @@ from scripts_repo.compare_runs import (
     diff_test_keys,
     read_eval_id,
     errored_tests,
+    parse_provider_yaml,
+    extract_request_info,
+    resolve_endpoints,
+    build_curl,
     render_html,
     main,
 )
@@ -498,3 +502,102 @@ def test_render_html_new_errored_cell_links_to_baseline():
                       baseline_errored=errored_tests(base_json, DEFAULT_SUITES))
     assert 'href="http://localhost:3000/eval/eb?search=sidn"' in out
     assert ">ERROR</a>" in out
+
+
+# --- copy-as-curl --------------------------------------------------------
+
+_PROVIDER_YAML = """\
+id: openai:chat:Qwen/Qwen3-Next-80B-A3B-Thinking-FP8
+label: gw_prod
+config:
+  apiBaseUrl: http://127.0.0.1:8082/v1
+  apiKey: dummy        # placeholder comment
+  temperature: 0.7
+  max_tokens: 100000
+"""
+
+
+def test_parse_provider_yaml_strips_comments_and_quotes():
+    cfg = parse_provider_yaml(_PROVIDER_YAML)
+    assert cfg["label"] == "gw_prod"
+    assert cfg["id"] == "openai:chat:Qwen/Qwen3-Next-80B-A3B-Thinking-FP8"
+    assert cfg["apiBaseUrl"] == "http://127.0.0.1:8082/v1"
+    assert cfg["apiKey"] == "dummy"
+    assert cfg["temperature"] == "0.7"
+    assert cfg["max_tokens"] == "100000"
+
+
+def test_extract_request_info_includes_model_and_messages():
+    ev = {"results": {"results": [{
+        "provider": {"id": "openai:chat:Qwen/Q", "label": "gw_prod"},
+        "prompt": {"raw": '[{"role":"user","content":"hi"}]'},
+        "testCase": {"description": "t1", "metadata": {"suite": "research_rubrics"}},
+    }]}}
+    info = extract_request_info(ev)
+    assert info["t1"]["model"] == "Qwen/Q"
+    assert info["t1"]["provider_label"] == "gw_prod"
+    assert info["t1"]["messages_raw"] == '[{"role":"user","content":"hi"}]'
+
+
+def test_build_curl_has_endpoint_model_messages_and_shell_escapes():
+    ep = {"url": "http://127.0.0.1:8082/v1", "api_key": "dummy",
+          "temperature": "0.7", "max_tokens": "100000"}
+    messages_raw = '[{"role":"user","content":"it' + "'" + 's ok"}]'
+    curl = build_curl(ep, "Qwen/Q", messages_raw)
+    assert curl.startswith("curl http://127.0.0.1:8082/v1/chat/completions ")
+    assert "Authorization: Bearer dummy" in curl
+    assert '"model": "Qwen/Q"' in curl
+    assert '"temperature": 0.7' in curl
+    assert '"max_tokens": 100000' in curl
+    assert "'\\''" in curl  # single quote in content is shell-escaped
+
+
+def test_build_curl_empty_when_no_url():
+    assert build_curl({"url": None}, "m", "[]") == ""
+
+
+def test_resolve_endpoints_from_yaml_files(tmp_path):
+    (tmp_path / "providers").mkdir()
+    (tmp_path / "providers" / "p.yaml").write_text(_PROVIDER_YAML, encoding="utf-8")
+    ev = {"config": {"providers": ["file://providers/p.yaml"]},
+          "results": {"results": [{"provider": {"label": "gw_prod"}}]}}
+    eps = resolve_endpoints(ev, tmp_path)
+    assert eps["gw_prod"]["url"] == "http://127.0.0.1:8082/v1"
+    assert eps["gw_prod"]["api_key"] == "dummy"
+
+
+def test_resolve_endpoints_override_url_without_yaml(tmp_path):
+    ev = {"config": {"providers": []},
+          "results": {"results": [{"provider": {"label": "gw_x"}}]}}
+    eps = resolve_endpoints(ev, tmp_path, override_url="http://host:9/v1")
+    assert eps["gw_x"]["url"] == "http://host:9/v1"
+
+
+def test_render_html_copy_button_on_score_and_error_cells():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t_ok", "research_rubrics", [("a", "A", 1)], [0.5],
+                      metadata_extra={"sample_id": "s1"}),
+    ]))
+    cand_json = make_eval_json([_provider_error_entry("t_ok", "s1")])
+    cand = extract_cells(cand_json, DEFAULT_SUITES)  # errored -> removed cell
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), (["t_ok"], []), 0.05,
+                      candidate_errored=errored_tests(cand_json, DEFAULT_SUITES),
+                      baseline_curls={"t_ok": "curl http://b/v1/chat/completions"},
+                      candidate_curls={"t_ok": "curl http://c/v1/chat/completions"})
+    assert "copy-btn" in out
+    assert "navigator.clipboard.writeText" in out
+    assert 'data-curl="curl http://b/v1/chat/completions"' in out  # baseline score
+    assert 'data-curl="curl http://c/v1/chat/completions"' in out  # candidate ERROR
+
+
+def test_render_html_no_copy_button_for_bare_missing():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "gone", "research_rubrics", [("g", "G", 1)], [0.5]),
+    ]))
+    cand = _cells(make_eval_json([]))  # candidate absent (not errored)
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), (["gone"], []), 0.05,
+                      candidate_curls={})  # no curl for the absent candidate
+    # the .copy-btn CSS/JS is always present; assert no button element rendered
+    assert '<button type="button" class="copy-btn"' not in out

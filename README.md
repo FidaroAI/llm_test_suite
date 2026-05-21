@@ -104,6 +104,11 @@ baseline (e.g. prod). Only the non-deterministic rubric suites
    promptfoo web UI (`--ui-base-url`, default `http://localhost:3000`). Start
    the UI yourself (e.g. `promptfoo view`) for the links to resolve.
 
+   Each baseline/candidate cell also has a clipboard button that copies a
+   `curl` command to replay that test directly against the provider endpoint.
+   The endpoint URL, key and params are read from the provider YAML referenced
+   in each eval's config; override with `--baseline-url` / `--candidate-url`.
+
 ### Per-test matrix view
 
 `compare_matrix.py` is an alternative report aimed at debugging a run. For each
