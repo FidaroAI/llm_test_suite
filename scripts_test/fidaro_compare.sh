@@ -31,5 +31,12 @@ AGENTHARM_LIMIT=5 RESEARCH_RUBRICS_LIMIT=10 RESEARCH_RUBRICS_MAX_CRITERIA=3 pnpm
   --no-cache \
   --description "Comparison dev run"
 
-./scripts_repo/compare_matrix.py --baseline baselines/fidaro_plaintext_gateway_phala_prod.json --latest results/local/latest.json --out report.html
-open report.html
+# Annoyingly we can't just leave this running. promptfoo doesn't pick up changes to
+# its database once running :(
+./scripts_repo/run_promptfoo_docker.sh
+
+./scripts_repo/compare_runs.py baselines/fidaro_plaintext_gateway_phala_prod.json results/local/latest.json --tolerance 0.05 --out ./results/reports/report_comparison.html
+open ./results/reports/report_comparison.html
+
+./scripts_repo/compare_matrix.py --baseline baselines/fidaro_plaintext_gateway_phala_prod.json --latest results/local/latest.json --out ./results/reports/report_matrix.html
+open ./results/reports/report_matrix.html

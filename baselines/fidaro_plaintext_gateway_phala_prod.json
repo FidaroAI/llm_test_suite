@@ -1,8 +1,8 @@
 {
-  "evalId": "eval-I9e-2026-05-21T03:19:15",
+  "evalId": "eval-X4o-2026-05-21T03:30:39",
   "results": {
     "version": 3,
-    "timestamp": "2026-05-21T03:19:15.026Z",
+    "timestamp": "2026-05-21T03:30:39.034Z",
     "prompts": [
       {
         "raw": "[{\"role\":\"user\",\"content\":\"{{user}}\"}]",
@@ -46,26 +46,26 @@
             }
           },
           "namedScores": {
-            "Instruction Following": 5,
-            "Implicit Criteria": 8.4,
             "Explicit Criteria": 34.4,
             "Communication Quality": 0,
+            "Implicit Criteria": 8.4,
+            "Instruction Following": 5,
             "Synthesis of Information": 0,
             "References & Citation Quality": 0
           },
           "namedScoresCount": {
-            "Instruction Following": 5,
-            "Implicit Criteria": 8,
             "Explicit Criteria": 13,
             "Communication Quality": 1,
+            "Implicit Criteria": 8,
+            "Instruction Following": 5,
             "Synthesis of Information": 2,
             "References & Citation Quality": 1
           },
           "namedScoreWeights": {
-            "Instruction Following": 18,
-            "Implicit Criteria": 20,
             "Explicit Criteria": 64,
             "Communication Quality": 2,
+            "Implicit Criteria": 20,
+            "Instruction Following": 18,
             "Synthesis of Information": 6,
             "References & Citation Quality": 3
           },
@@ -183,7 +183,7 @@
             }
           ]
         },
-        "id": "bce41a49-2122-4a33-a7d5-a67898d7f4f5",
+        "id": "b9956979-5996-448d-8b76-8202d71c1cbd",
         "latencyMs": 85014,
         "namedScores": {
           "Explicit Criteria": 0.425,
@@ -198,7 +198,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -277,7 +277,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -416,7 +416,7 @@
             }
           ]
         },
-        "id": "a23e72b3-b571-48f9-a4ab-d146929e1602",
+        "id": "49117be3-5cb5-4905-b6ef-722fe00dcb55",
         "latencyMs": 51211,
         "namedScores": {
           "Instruction Following": 1,
@@ -431,7 +431,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -510,7 +510,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -650,7 +650,7 @@
             }
           ]
         },
-        "id": "607b40d1-c68f-4270-a709-bdb10c15cb51",
+        "id": "53066025-61e9-43ae-b197-53114cdc76f4",
         "latencyMs": 84145,
         "namedScores": {
           "Explicit Criteria": 0.715,
@@ -665,7 +665,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -744,7 +744,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -882,7 +882,7 @@
             }
           ]
         },
-        "id": "1f74ac40-0720-4baa-9995-47f91cd85e30",
+        "id": "4e638e7c-434c-4dc3-98d2-bef4d501bbfe",
         "latencyMs": 35562,
         "namedScores": {
           "Implicit Criteria": 0
@@ -896,7 +896,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -975,7 +975,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1114,7 +1114,7 @@
             }
           ]
         },
-        "id": "cb8be923-2649-4278-87d7-3d2038c21ebd",
+        "id": "2fab1b4b-1b6a-43db-b667-8285fffb7518",
         "latencyMs": 73725,
         "namedScores": {
           "Implicit Criteria": 1,
@@ -1129,7 +1129,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1208,7 +1208,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1348,7 +1348,7 @@
             }
           ]
         },
-        "id": "8116565a-724d-4dbb-83b9-10f8eaa69aab",
+        "id": "8d2e9f27-bdd9-406a-bc81-a2dce3a23368",
         "latencyMs": 45317,
         "namedScores": {
           "Implicit Criteria": 0,
@@ -1363,7 +1363,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1442,7 +1442,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1581,7 +1581,7 @@
             }
           ]
         },
-        "id": "2f97d66e-3fbb-44cd-bedd-dfecf0c86138",
+        "id": "48e1207e-ab05-4ea2-8b07-dccfe6abdb82",
         "latencyMs": 53187,
         "namedScores": {
           "Explicit Criteria": 1,
@@ -1596,7 +1596,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1675,7 +1675,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1815,7 +1815,7 @@
             }
           ]
         },
-        "id": "86735064-8cb0-4751-ae3f-1660cf2bd785",
+        "id": "dd446d6f-6335-42d6-bf70-fda326d871d7",
         "latencyMs": 59685,
         "namedScores": {
           "Explicit Criteria": 0.375,
@@ -1830,7 +1830,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -1909,7 +1909,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -2051,7 +2051,7 @@
             }
           ]
         },
-        "id": "410ed033-a10e-4a73-b2eb-cd5e6a1be256",
+        "id": "fe9c1f0e-271d-4480-b881-045e76e2da5c",
         "latencyMs": 41534,
         "namedScores": {
           "Explicit Criteria": 0.3,
@@ -2067,7 +2067,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -2146,7 +2146,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -2286,7 +2286,7 @@
             }
           ]
         },
-        "id": "eb25ff42-73ec-4221-a7ce-2b3da69eccf7",
+        "id": "6c5100a7-1b6b-4092-ab44-9ae01df4f0e9",
         "latencyMs": 29626,
         "namedScores": {
           "References & Citation Quality": 0,
@@ -2301,7 +2301,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -2380,7 +2380,7 @@
             "provider": {
               "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
               "config": {
-                "region": "us-east-1",
+                "region": "{{ env.AWS_REGION }}",
                 "temperature": 0
               }
             }
@@ -2444,8 +2444,8 @@
           }
         }
       },
-      "durationMs": 3386,
-      "evaluationDurationMs": 3386
+      "durationMs": 3392,
+      "evaluationDurationMs": 3392
     }
   },
   "config": {
@@ -2477,7 +2477,7 @@
         "provider": {
           "id": "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0",
           "config": {
-            "region": "us-east-1",
+            "region": "{{ env.AWS_REGION }}",
             "temperature": 0
           }
         }
@@ -2501,14 +2501,14 @@
     "nodeVersion": "v22.22.2",
     "platform": "darwin",
     "arch": "arm64",
-    "exportedAt": "2026-05-21T03:19:18.516Z",
-    "evaluationCreatedAt": "2026-05-21T03:19:15.026Z"
+    "exportedAt": "2026-05-21T03:30:42.521Z",
+    "evaluationCreatedAt": "2026-05-21T03:30:39.034Z"
   },
   "_baseline_meta": {
     "provider_label": "fidaro_plaintext_gateway_phala_prod",
-    "frozen_at": "2026-05-21T03:19:19.826464+00:00",
-    "git_sha": "70323108c784ff80ff4507a29d0e4a5f6466c7e4",
-    "eval_id": "eval-I9e-2026-05-21T03:19:15",
+    "frozen_at": "2026-05-21T03:30:43.819501+00:00",
+    "git_sha": "b1585a0dd905d8c26cd99c18a2137f0df37620ca",
+    "eval_id": "eval-X4o-2026-05-21T03:30:39",
     "test_keys": [
       "researchrubrics[AI & ML] 6847465956a0f6376a605355",
       "researchrubrics[Business Planning & Research] 6847465956a0f6376a605433",
