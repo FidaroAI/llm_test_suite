@@ -4,4 +4,4 @@ config:
   apiBaseUrl: http://127.0.0.1:8082/v1
   apiKey: dummy        # placeholder; local endpoint ignores it but the OpenAI client requires non-empty
   temperature: 0.7
-  max_tokens: 10000
+  max_tokens: 100000

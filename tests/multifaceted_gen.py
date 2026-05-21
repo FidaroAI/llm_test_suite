@@ -46,8 +46,8 @@ RUBRIC_PROMPT_1_TO_5 = [
             "You are grading a response against a rubric that uses a 1-5 rating "
             "scale. The rubric states a criterion followed by a description of "
             "what each score from 1 (worst) to 5 (best) means. Read the rubric "
-            "and its 1-5 descriptions, decide the integer rating that best "
-            "matches the response, then normalize it to a 0-1 score with "
+            "and its 1-5 descriptions, decide a rating that best "
+            "matches the response, you may use fractional values, e.g. 3.4, then normalize it to a 0-1 score with "
             "score = (rating - 1) / 4 (so 1 -> 0.0, 3 -> 0.5, 5 -> 1.0). "
             "Respond with a JSON object {reason: string, pass: boolean, score: "
             "number} where `score` is the normalized 0-1 value and `reason` "
@@ -127,7 +127,9 @@ def generate_tests():
     return [
         test
         for index, row in enumerate(rows)
-        if (test := _row_to_test(row, index, max_num_criteria=max_num_criteria))["assert"]
+        if (test := _row_to_test(row, index, max_num_criteria=max_num_criteria))[
+            "assert"
+        ]
     ]
 
 

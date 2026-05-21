@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-if [[ -n "$(docker ps -q --filter 'name=^promptfoo$')" ]]; then
-  echo "Container 'promptfoo' is already running; stopping it..." >&2
+if [[ -n "$(docker ps -aq --filter 'name=^promptfoo$')" ]]; then
+  echo "Container 'promptfoo' already exists; stopping and deleting it..." >&2
   docker rm -f promptfoo >/dev/null
 fi
 
