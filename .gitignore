@@ -12,3 +12,4 @@ results/**
 # Downloaded dataset artifacts; regenerate with the matching npm run dataset:* script
 data/researchrubrics.json
 data/agentharm.json
+data/multifaceted.json

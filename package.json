@@ -6,9 +6,10 @@
   "scripts": {
     "test:all": "bash scripts_test/fidaro.sh",
     "view": "promptfoo view --yes",
-    "dataset": "pnpm dataset:researchrubrics && pnpm dataset:agentharm",
+    "dataset": "pnpm dataset:researchrubrics && pnpm dataset:agentharm && pnpm dataset:multifaceted",
     "dataset:researchrubrics": "node scripts_repo/download_researchrubrics.mjs",
-    "dataset:agentharm": "node scripts_repo/download_agentharm.mjs"
+    "dataset:agentharm": "node scripts_repo/download_agentharm.mjs",
+    "dataset:multifaceted": "node scripts_repo/download_multifaceted.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1044.0",

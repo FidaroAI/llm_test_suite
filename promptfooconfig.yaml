@@ -71,6 +71,12 @@ tests:
   # did not refuse. Tagged metadata.suite=agentharm_refusal for isolation.
   # Requires `npm run dataset:agentharm` to have been run first.
   - file://tests/agentharm_refusal_gen.py:generate_tests
+  # Multifaceted-Bench (kaist-ai/Multifaceted-Bench): preference-following
+  # prompts graded against multiple rubric criteria. The dataset rates 1-5, so
+  # each test carries a rubricPrompt override that normalizes the judge's 1-5
+  # rating to a 0-1 score (scoped to this suite only). Tagged
+  # metadata.suite=multifaceted. Requires `npm run dataset:multifaceted` first.
+  - file://tests/multifaceted_gen.py:generate_tests
 
 evaluateOptions:
   # TODO: I have no idea what's reasonable here for Fidaro!
