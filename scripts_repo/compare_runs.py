@@ -21,9 +21,12 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 DEFAULT_SUITES = ("research_rubrics", "agentharm_refusal")
 DEFAULT_TOLERANCE = 0.05
+# promptfoo web UI base; user is responsible for running the server there.
+DEFAULT_UI_BASE_URL = "http://localhost:3000"
 
 
 @dataclass(frozen=True)
@@ -41,10 +44,28 @@ class Cell:
     weight: float
     score: float
     assertion_value: str
+    search: str = ""  # term that isolates this test in the promptfoo UI search
 
 
 def read_eval_json(path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def read_eval_id(eval_json: dict) -> str | None:
+    """The eval's id, preferring the live evalId, then a frozen baseline's."""
+    return eval_json.get("evalId") or (eval_json.get("_baseline_meta") or {}).get(
+        "eval_id"
+    )
+
+
+def _search_term(meta: dict, description: str) -> str:
+    """A clean token that isolates one test in the promptfoo UI search box.
+
+    Prefer a stable dataset id (sample_id/id/name); fall back to the full
+    description. Single tokens like a sample_id avoid clashing with promptfoo's
+    regex-style search (the description can contain `[` / `]`).
+    """
+    return str(meta.get("sample_id") or meta.get("id") or meta.get("name") or description)
 
 
 def extract_cells(eval_json: dict, suites) -> dict:
@@ -58,6 +79,7 @@ def extract_cells(eval_json: dict, suites) -> dict:
             continue
         suite = meta["suite"]
         test_desc = test_case.get("description") or "<no-description>"
+        search = _search_term(meta, test_desc)
         prompt_label = (result.get("prompt") or {}).get("label") or "<no-prompt>"
         asserts = test_case.get("assert") or []
         comps = (result.get("gradingResult") or {}).get("componentResults") or []
@@ -80,6 +102,7 @@ def extract_cells(eval_json: dict, suites) -> dict:
                 weight=float(assertion.get("weight", 1) or 1),
                 score=float(score) if score is not None else 0.0,
                 assertion_value=value,
+                search=search,
             )
     return cells
 
@@ -94,6 +117,7 @@ class CellDiff:
     candidate: float | None
     delta: float | None
     status: str  # improved | regressed | within | new | removed
+    search: str = ""  # promptfoo UI search term for this test
 
 
 def classify(delta: float, tolerance: float) -> str:
@@ -121,13 +145,14 @@ def diff_cells(baseline_cells: dict, candidate_cells: dict, tolerance: float) ->
         if b and c:
             delta = c.score - b.score
             diffs.append(CellDiff(key, c.suite, c.metric, c.assertion_value,
-                                  b.score, c.score, delta, classify(delta, tolerance)))
+                                  b.score, c.score, delta, classify(delta, tolerance),
+                                  c.search))
         elif c is not None:
             diffs.append(CellDiff(key, c.suite, c.metric, c.assertion_value,
-                                  None, c.score, None, "new"))
+                                  None, c.score, None, "new", c.search))
         else:
             diffs.append(CellDiff(key, b.suite, b.metric, b.assertion_value,
-                                  b.score, None, None, "removed"))
+                                  b.score, None, None, "removed", b.search))
     return diffs
 
 
@@ -171,13 +196,35 @@ def _fmt_delta(value) -> str:
     return "—" if value is None else f"{value:+.2f}"
 
 
+def _score_html(value, eval_id, search, base_url) -> str:
+    """Score text, hyperlinked to the test's filtered view in the promptfoo UI.
+
+    Links only when a score and an eval id are present; a missing side (None)
+    renders as an em dash with no link.
+    """
+    if value is None:
+        return "—"
+    text = f"{value:.2f}"
+    if not eval_id or not search:
+        return text
+    href = html.escape(f"{base_url}/eval/{eval_id}?search={quote(search)}", quote=True)
+    return f'<a href="{href}" target="_blank" rel="noopener">{text}</a>'
+
+
 def _sort_key(diff):
     # Worst regressions first; new/removed (delta None) sort to the bottom.
     return (0, diff.delta) if diff.delta is not None else (1, 0.0)
 
 
-def render_html(diffs: list, counts: dict, drift, tolerance: float) -> str:
-    """Render a self-contained HTML report. `drift` is (only_base, only_cand)."""
+def render_html(diffs: list, counts: dict, drift, tolerance: float,
+                baseline_eval_id: str | None = None,
+                candidate_eval_id: str | None = None,
+                ui_base_url: str = DEFAULT_UI_BASE_URL) -> str:
+    """Render a self-contained HTML report. `drift` is (only_base, only_cand).
+
+    When an eval id is supplied for a side, that side's scores link to the
+    test's filtered view in the promptfoo UI (`{ui_base_url}/eval/<id>?search=`).
+    """
     only_base, only_cand = drift
     summary = (
         f"{counts['improved']} improved &middot; {counts['regressed']} regressed "
@@ -214,8 +261,8 @@ def render_html(diffs: list, counts: dict, drift, tolerance: float) -> str:
                 f"<td>{html.escape(d.key.test)}</td>"
                 f"<td>{html.escape(d.assertion_value)}</td>"
                 f"<td>{html.escape(d.metric or '')}</td>"
-                f'<td class="num">{_fmt(d.baseline)}</td>'
-                f'<td class="num">{_fmt(d.candidate)}</td>'
+                f'<td class="num">{_score_html(d.baseline, baseline_eval_id, d.search, ui_base_url)}</td>'
+                f'<td class="num">{_score_html(d.candidate, candidate_eval_id, d.search, ui_base_url)}</td>'
                 f'<td class="num delta">{_fmt_delta(d.delta)}</td>'
                 f"<td>{d.status}</td>"
                 "</tr>"
@@ -266,6 +313,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("report.html"),
         help="Output HTML path (default: report.html).",
     )
+    parser.add_argument(
+        "--ui-base-url",
+        default=DEFAULT_UI_BASE_URL,
+        help="promptfoo web UI base URL for score links "
+        f"(default: {DEFAULT_UI_BASE_URL}).",
+    )
     return parser
 
 
@@ -273,15 +326,21 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     suites = args.suite if args.suite else list(DEFAULT_SUITES)
 
-    baseline_cells = extract_cells(read_eval_json(args.baseline_json), suites)
-    candidate_cells = extract_cells(read_eval_json(args.candidate_json), suites)
+    baseline_json = read_eval_json(args.baseline_json)
+    candidate_json = read_eval_json(args.candidate_json)
+    baseline_cells = extract_cells(baseline_json, suites)
+    candidate_cells = extract_cells(candidate_json, suites)
 
     diffs = diff_cells(baseline_cells, candidate_cells, args.tolerance)
     counts = summarize(diffs)
     drift = diff_test_keys(baseline_cells, candidate_cells)
 
     args.out.write_text(
-        render_html(diffs, counts, drift, args.tolerance), encoding="utf-8"
+        render_html(diffs, counts, drift, args.tolerance,
+                    baseline_eval_id=read_eval_id(baseline_json),
+                    candidate_eval_id=read_eval_id(candidate_json),
+                    ui_base_url=args.ui_base_url),
+        encoding="utf-8",
     )
     print(
         f"{counts['improved']} improved, {counts['regressed']} regressed, "

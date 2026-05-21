@@ -100,6 +100,10 @@ baseline (e.g. prod). Only the non-deterministic rubric suites
    (within the ±tolerance band). Moves smaller than `--tolerance` (default
    0.05 on the 0–1 score) are treated as noise.
 
+   Each baseline/candidate score links to that test's filtered view in the
+   promptfoo web UI (`--ui-base-url`, default `http://localhost:3000`). Start
+   the UI yourself (e.g. `promptfoo view`) for the links to resolve.
+
 ### Per-test matrix view
 
 `compare_matrix.py` is an alternative report aimed at debugging a run. For each

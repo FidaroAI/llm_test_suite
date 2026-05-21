@@ -8,6 +8,7 @@ from scripts_repo.compare_runs import (
     diff_cells,
     summarize,
     diff_test_keys,
+    read_eval_id,
     render_html,
     main,
 )
@@ -270,3 +271,92 @@ def test_main_respects_suite_override(tmp_path):
     text = out.read_text(encoding="utf-8")
     assert "research_rubrics" in text
     assert "agentharm_refusal" not in text
+
+
+# --- promptfoo UI links --------------------------------------------------
+
+
+def test_extract_cells_search_prefers_metadata_id():
+    ev = make_eval_json([
+        rubric_result("prod", "researchrubrics[X] abc123", "research_rubrics",
+                      [("a", "A", 1)], [0.5], metadata_extra={"sample_id": "abc123"}),
+    ])
+    cell = next(iter(extract_cells(ev, DEFAULT_SUITES).values()))
+    assert cell.search == "abc123"
+
+
+def test_extract_cells_search_falls_back_to_description():
+    ev = make_eval_json([
+        rubric_result("prod", "agentharm[x] 9-2 foo", "agentharm_refusal",
+                      [("nr", "non_refusal", 1)], [1.0]),
+    ])
+    cell = next(iter(extract_cells(ev, DEFAULT_SUITES).values()))
+    assert cell.search == "agentharm[x] 9-2 foo"
+
+
+def test_read_eval_id_prefers_top_level():
+    assert read_eval_id(make_eval_json([], eval_id="eval-xyz")) == "eval-xyz"
+
+
+def test_read_eval_id_falls_back_to_baseline_meta():
+    assert read_eval_id({"_baseline_meta": {"eval_id": "eval-frozen"}}) == "eval-frozen"
+
+
+def test_render_html_links_scores_when_eval_ids_given():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "researchrubrics[X] abc123", "research_rubrics",
+                      [("a", "A", 1)], [0.5], metadata_extra={"sample_id": "abc123"}),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "researchrubrics[X] abc123", "research_rubrics",
+                      [("a", "A", 1)], [0.9], metadata_extra={"sample_id": "abc123"}),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+                      baseline_eval_id="eval-base", candidate_eval_id="eval-cand")
+    assert 'href="http://localhost:3000/eval/eval-base?search=abc123"' in out
+    assert 'href="http://localhost:3000/eval/eval-cand?search=abc123"' in out
+    assert ">0.50</a>" in out
+
+
+def test_render_html_custom_base_url():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t", "research_rubrics", [("a", "A", 1)], [0.5],
+                      metadata_extra={"sample_id": "s1"}),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t", "research_rubrics", [("a", "A", 1)], [0.9],
+                      metadata_extra={"sample_id": "s1"}),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+                      baseline_eval_id="e1", candidate_eval_id="e2",
+                      ui_base_url="http://host:9999")
+    assert 'href="http://host:9999/eval/e1?search=s1"' in out
+
+
+def test_render_html_no_links_without_eval_ids():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t", "research_rubrics", [("a", "A", 1)], [0.5]),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t", "research_rubrics", [("a", "A", 1)], [0.9]),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), ([], []), 0.05)
+    assert "<a href" not in out
+
+
+def test_render_html_no_link_for_missing_side():
+    # 'new' cell: present only in candidate -> baseline shows em dash, no link.
+    base = _cells(make_eval_json([]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t", "research_rubrics", [("a", "A", 1)], [0.9],
+                      metadata_extra={"sample_id": "s1"}),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+                      baseline_eval_id="e1", candidate_eval_id="e2")
+    # candidate links, baseline cell is the em dash with no anchor
+    assert 'href="http://localhost:3000/eval/e2?search=s1"' in out
+    assert "/eval/e1?" not in out
