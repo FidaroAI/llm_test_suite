@@ -100,6 +100,22 @@ baseline (e.g. prod). Only the non-deterministic rubric suites
    (within the ±tolerance band). Moves smaller than `--tolerance` (default
    0.05 on the 0–1 score) are treated as noise.
 
+### Per-test matrix view
+
+`compare_matrix.py` is an alternative report aimed at debugging a run. For each
+test in the union of the baseline and latest run it draws a 2×N table (rows:
+baseline, latest; columns: each assertion). The latest row is colored
+red/white/green for worse/same/better than baseline. A test absent from a run
+shows `missing`; an assertion whose grading errored (provider/response failure,
+or an llm-rubric judge failure such as a missing AWS/Bedrock token) shows
+`ERROR` rather than a misleading 0. Tests containing errors float to the top.
+
+```bash
+scripts_repo/compare_matrix.py --out matrix_report.html
+# defaults: --baseline = the sole file in baselines/, --latest results/local/latest.json
+open matrix_report.html
+```
+
 ## Launching vLLM
 
 ```bash
