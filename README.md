@@ -100,9 +100,11 @@ baseline (e.g. prod). Only the non-deterministic rubric suites
    (within the ±tolerance band). Moves smaller than `--tolerance` (default
    0.05 on the 0–1 score) are treated as noise.
 
-   Each baseline/candidate score links to that test's filtered view in the
-   promptfoo web UI (`--ui-base-url`, default `http://localhost:3000`). Start
-   the UI yourself (e.g. `promptfoo view`) for the links to resolve.
+   The report header names both evals (baseline and candidate), each linked to
+   its eval view in the promptfoo web UI. Each baseline/candidate score also
+   links to that test's filtered view in the UI (`--ui-base-url`, default
+   `http://localhost:3000`). Start the UI yourself (e.g. `promptfoo view`) for
+   the links to resolve.
 
    Each baseline/candidate cell also has a clipboard button that copies a
    `curl` command to replay that test directly against the provider endpoint.

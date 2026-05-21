@@ -355,6 +355,9 @@ def diff_test_keys(baseline_cells: dict, candidate_cells: dict):
 _CSS = """
 body { font-family: -apple-system, system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
 .summary { font-size: 1.1rem; margin-bottom: 1rem; }
+.evals { margin-bottom: 1rem; font-size: .95rem; color: #333; }
+.evals .evlabel { display: inline-block; min-width: 5.5rem; font-weight: 600; color: #555; }
+.evals .muted { color: #999; }
 .drift { background: #fff3cd; border: 1px solid #ffe69c; padding: .75rem 1rem;
          border-radius: 6px; margin-bottom: 1rem; }
 table { border-collapse: collapse; width: 100%; margin-bottom: 2rem; }
@@ -433,6 +436,24 @@ def _copy_button(curl: str) -> str:
     return (f'<button type="button" class="copy-btn" title="Copy curl" '
             f'aria-label="Copy curl command" '
             f'data-curl="{html.escape(curl, quote=True)}">{_CLIPBOARD_SVG}</button>')
+
+
+def _eval_header(baseline_eval_id, candidate_eval_id, base_url) -> str:
+    """Header line naming the two evals, each linked to its promptfoo UI view."""
+
+    def row(label, eval_id):
+        if eval_id:
+            href = html.escape(f"{base_url}/eval/{eval_id}", quote=True)
+            value = (f'<a href="{href}" target="_blank" rel="noopener">'
+                     f"{html.escape(eval_id)}</a>")
+        else:
+            value = '<span class="muted">(unknown)</span>'
+        return f'<div><span class="evlabel">{label}</span> {value}</div>'
+
+    return ('<div class="evals">'
+            + row("Baseline", baseline_eval_id)
+            + row("Candidate", candidate_eval_id)
+            + "</div>")
 
 
 def _cell_td(value, eval_id, search, base_url, errored, curl) -> str:
@@ -545,8 +566,9 @@ def render_html(diffs: list, counts: dict, drift, tolerance: float,
         "<title>Provider comparison</title>"
         f"<style>{_CSS}</style></head><body>"
         "<h1>Provider comparison</h1>"
-        f'<div class="summary">{summary}</div>'
-        f"{drift_html}"
+        + _eval_header(baseline_eval_id, candidate_eval_id, ui_base_url)
+        + f'<div class="summary">{summary}</div>'
+        + f"{drift_html}"
         + "".join(sections)
         + _COPY_SCRIPT
         + "</body></html>"

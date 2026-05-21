@@ -601,3 +601,30 @@ def test_render_html_no_copy_button_for_bare_missing():
                       candidate_curls={})  # no curl for the absent candidate
     # the .copy-btn CSS/JS is always present; assert no button element rendered
     assert '<button type="button" class="copy-btn"' not in out
+
+
+# --- eval-name header ----------------------------------------------------
+
+
+def test_render_html_shows_eval_names_in_header():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t", "research_rubrics", [("a", "A", 1)], [0.5]),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t", "research_rubrics", [("a", "A", 1)], [0.9]),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+                      baseline_eval_id="eval-base-123",
+                      candidate_eval_id="eval-cand-456")
+    assert "Baseline" in out and "Candidate" in out
+    assert "eval-base-123" in out and "eval-cand-456" in out
+    assert 'href="http://localhost:3000/eval/eval-base-123"' in out
+    assert 'href="http://localhost:3000/eval/eval-cand-456"' in out
+
+
+def test_render_html_eval_header_handles_missing_id():
+    out = render_html([], {"improved": 0, "regressed": 0, "within": 0,
+                           "new": 0, "removed": 0}, ([], []), 0.05)
+    assert "Baseline" in out and "Candidate" in out
+    assert "(unknown)" in out
