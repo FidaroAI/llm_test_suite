@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Compare llm-rubric scores between a baseline and a candidate promptfoo eval.
+"""Compare a baseline and a candidate promptfoo eval.
 
-Extracts one "cell" per llm-rubric assertion per test from each eval JSON,
-joins them on (test description, prompt label, rubric text), classifies each
-score delta against an absolute tolerance band, and writes a self-contained
-HTML report. Scope is restricted to tests whose metadata.suite is in the
-allowlist (default: research_rubrics, agentharm_refusal).
+Extracts one "cell" per assertion per test from each eval JSON, joins them on
+(test description, prompt label, assertion text), and writes a self-contained
+HTML report grouped by suite. Two kinds of cell are handled:
+
+  * rubric        — an llm-rubric assertion with a 0-1 score; the delta is
+                    classified against an absolute tolerance band.
+  * deterministic — any other assertion (icontains, python, …) with a pass/fail
+                    verdict; no delta, classified as a pass/fail transition.
+
+Every suite present in either run is compared (no allowlist); `--suite` can
+still restrict the scope. Tests with no metadata.suite are grouped under
+"(no suite)".
 
 Usage:
     compare_runs.py baselines/prod.json results/local/latest.json
     compare_runs.py BASE.json CAND.json --tolerance 0.05 --out report.html \\
-        --suite research_rubrics --suite agentharm_refusal
+        --suite research_rubrics
 """
 
 from __future__ import annotations
@@ -24,8 +31,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
-DEFAULT_SUITES = ("research_rubrics", "agentharm_refusal", "multifaceted")
 DEFAULT_TOLERANCE = 0.05
+# Suite heading for tests that carry no metadata.suite.
+NO_SUITE = "(no suite)"
 # promptfoo web UI base; user is responsible for running the server there.
 DEFAULT_UI_BASE_URL = "http://localhost:3000"
 
@@ -53,10 +61,12 @@ class CellKey:
 class Cell:
     key: "CellKey"
     suite: str
+    kind: str  # "rubric" | "deterministic"
     metric: str | None
     weight: float
-    score: float
     assertion_value: str
+    score: float | None = None    # rubric: the 0-1 grade
+    passed: bool | None = None    # deterministic: the pass/fail verdict
     search: str = ""  # term that isolates this test in the promptfoo UI search
 
 
@@ -225,14 +235,18 @@ def build_curls(eval_json: dict, base_dir, override_url: str | None = None) -> d
     return curls
 
 
-def errored_tests(eval_json: dict, suites) -> set:
-    """Descriptions of tests in the given suites whose grading errored."""
-    suites = set(suites)
+def errored_tests(eval_json: dict, suites=None) -> set:
+    """Descriptions of tests whose grading errored.
+
+    When `suites` is given, scope is restricted to those suites; otherwise all
+    suites are considered.
+    """
+    suites = set(suites) if suites is not None else None
     out: set = set()
     for result in eval_json.get("results", {}).get("results", []):
         test_case = result.get("testCase") or {}
         meta = test_case.get("metadata") or {}
-        if meta.get("suite") not in suites:
+        if suites is not None and (meta.get("suite") or NO_SUITE) not in suites:
             continue
         if _result_errored(result):
             out.add(test_case.get("description") or "<no-description>")
@@ -249,16 +263,22 @@ def _search_term(meta: dict, description: str) -> str:
     return str(meta.get("sample_id") or meta.get("id") or meta.get("name") or description)
 
 
-def extract_cells(eval_json: dict, suites) -> dict:
-    """Map CellKey -> Cell for every llm-rubric assertion in the given suites."""
-    suites = set(suites)
+def extract_cells(eval_json: dict, suites=None) -> dict:
+    """Map CellKey -> Cell for every gradable assertion.
+
+    Rubric (llm-rubric) and deterministic (icontains, python, …) assertions are
+    both captured. When `suites` is given, scope is restricted to those suites;
+    otherwise every suite is included. Tests with no metadata.suite are grouped
+    under "(no suite)".
+    """
+    suites = set(suites) if suites is not None else None
     cells: dict = {}
     for result in eval_json.get("results", {}).get("results", []):
         test_case = result.get("testCase") or {}
         meta = test_case.get("metadata") or {}
-        if meta.get("suite") not in suites:
+        suite = meta.get("suite") or NO_SUITE
+        if suites is not None and suite not in suites:
             continue
-        suite = meta["suite"]
         test_desc = test_case.get("description") or "<no-description>"
         search = _search_term(meta, test_desc)
         prompt_label = (result.get("prompt") or {}).get("label") or "<no-prompt>"
@@ -266,8 +286,6 @@ def extract_cells(eval_json: dict, suites) -> dict:
         comps = (result.get("gradingResult") or {}).get("componentResults") or []
         seen: dict = {}
         for i, assertion in enumerate(asserts):
-            if assertion.get("type") != "llm-rubric":
-                continue
             if i >= len(comps):
                 continue
             value = assertion.get("value") or f"<assertion-{i}>"
@@ -275,16 +293,27 @@ def extract_cells(eval_json: dict, suites) -> dict:
             seen[value] = n + 1
             assertion_key = value if n == 0 else f"{value}#{n}"
             key = CellKey(test=test_desc, prompt=prompt_label, assertion=assertion_key)
-            score = comps[i].get("score")
-            cells[key] = Cell(
+            common = dict(
                 key=key,
                 suite=suite,
                 metric=assertion.get("metric"),
                 weight=float(assertion.get("weight", 1) or 1),
-                score=float(score) if score is not None else 0.0,
                 assertion_value=value,
                 search=search,
             )
+            if assertion.get("type") == "llm-rubric":
+                score = comps[i].get("score")
+                cells[key] = Cell(
+                    kind="rubric",
+                    score=float(score) if score is not None else 0.0,
+                    **common,
+                )
+            else:
+                comp = comps[i]
+                passed = comp.get("pass")
+                if passed is None:
+                    passed = float(comp.get("score") or 0.0) >= 0.5
+                cells[key] = Cell(kind="deterministic", passed=bool(passed), **common)
     return cells
 
 
@@ -292,17 +321,19 @@ def extract_cells(eval_json: dict, suites) -> dict:
 class CellDiff:
     key: "CellKey"
     suite: str
+    kind: str  # "rubric" | "deterministic"
     metric: str | None
     assertion_value: str
-    baseline: float | None
-    candidate: float | None
-    delta: float | None
-    status: str  # improved | regressed | within | new | removed
+    # rubric: 0-1 score; deterministic: pass/fail bool; absent side: None
+    baseline: float | bool | None
+    candidate: float | bool | None
+    delta: float | None  # rubric only; None for deterministic / missing side
+    status: str  # rubric: improved|regressed|within ; det: improved|regressed|same ; new|removed
     search: str = ""  # promptfoo UI search term for this test
 
 
 def classify(delta: float, tolerance: float) -> str:
-    """Three-way verdict for a delta against an absolute tolerance band.
+    """Three-way verdict for a rubric delta against an absolute tolerance band.
 
     A move exactly equal to the band is treated as within tolerance.
     """
@@ -311,6 +342,12 @@ def classify(delta: float, tolerance: float) -> str:
     if delta < -tolerance:
         return "regressed"
     return "within"
+
+
+def _classify_deterministic(baseline_passed: bool, candidate_passed: bool) -> str:
+    if baseline_passed == candidate_passed:
+        return "same"
+    return "improved" if candidate_passed else "regressed"
 
 
 def diff_cells(baseline_cells: dict, candidate_cells: dict, tolerance: float) -> list:
@@ -323,26 +360,59 @@ def diff_cells(baseline_cells: dict, candidate_cells: dict, tolerance: float) ->
     for key in all_keys:
         b = baseline_cells.get(key)
         c = candidate_cells.get(key)
+        src = c or b
+        kind = src.kind
         if b and c:
-            delta = c.score - b.score
-            diffs.append(CellDiff(key, c.suite, c.metric, c.assertion_value,
-                                  b.score, c.score, delta, classify(delta, tolerance),
-                                  c.search))
+            if kind == "rubric":
+                delta = c.score - b.score
+                diffs.append(CellDiff(key, src.suite, kind, src.metric,
+                                      src.assertion_value, b.score, c.score, delta,
+                                      classify(delta, tolerance), src.search))
+            else:
+                status = _classify_deterministic(b.passed, c.passed)
+                diffs.append(CellDiff(key, src.suite, kind, src.metric,
+                                      src.assertion_value, b.passed, c.passed, None,
+                                      status, src.search))
         elif c is not None:
-            diffs.append(CellDiff(key, c.suite, c.metric, c.assertion_value,
-                                  None, c.score, None, "new", c.search))
+            value = c.score if kind == "rubric" else c.passed
+            diffs.append(CellDiff(key, c.suite, kind, c.metric, c.assertion_value,
+                                  None, value, None, "new", c.search))
         else:
-            diffs.append(CellDiff(key, b.suite, b.metric, b.assertion_value,
-                                  b.score, None, None, "removed", b.search))
+            value = b.score if kind == "rubric" else b.passed
+            diffs.append(CellDiff(key, b.suite, kind, b.metric, b.assertion_value,
+                                  value, None, None, "removed", b.search))
     return diffs
 
 
 def summarize(diffs: list) -> dict:
-    """Count diffs by status."""
+    """Count rubric diffs by status (deterministic diffs are ignored)."""
     counts = {"improved": 0, "regressed": 0, "within": 0, "new": 0, "removed": 0}
     for d in diffs:
-        counts[d.status] += 1
+        if d.kind == "rubric":
+            counts[d.status] += 1
     return counts
+
+
+def summarize_deterministic(diffs: list) -> dict:
+    """Summarize deterministic diffs: pass/fail transitions and candidate totals.
+
+    new_passes / new_fails count fail->pass / pass->fail transitions among tests
+    present in both runs; total_passes / total_fails count the candidate-side
+    verdicts (so brand-new tests count, removed ones do not).
+    """
+    out = {"new_passes": 0, "new_fails": 0, "total_passes": 0, "total_fails": 0}
+    for d in diffs:
+        if d.kind != "deterministic":
+            continue
+        if d.status == "improved":
+            out["new_passes"] += 1
+        elif d.status == "regressed":
+            out["new_fails"] += 1
+        if d.candidate is True:
+            out["total_passes"] += 1
+        elif d.candidate is False:
+            out["total_fails"] += 1
+    return out
 
 
 def diff_test_keys(baseline_cells: dict, candidate_cells: dict):
@@ -355,6 +425,9 @@ def diff_test_keys(baseline_cells: dict, candidate_cells: dict):
 _CSS = """
 body { font-family: -apple-system, system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
 .summary { font-size: 1.1rem; margin-bottom: 1rem; }
+.summary .agg-line, .suite-summary .sum-line { margin: .15rem 0; }
+.summary .sum-label, .suite-summary .sum-label { font-weight: 600; color: #555; }
+.suite-summary { margin: .25rem 0 .75rem; color: #333; font-size: .95rem; }
 .evals { margin-bottom: 1rem; font-size: .95rem; color: #333; }
 .evals .evlabel { display: inline-block; min-width: 5.5rem; font-weight: 600; color: #555; }
 .evals .muted { color: #999; }
@@ -367,8 +440,10 @@ td.num { text-align: right; font-variant-numeric: tabular-nums; }
 h2 { margin-top: 1.5rem; }
 .status-improved td.delta { color: #0a7d28; font-weight: 600; }
 .status-regressed td.delta { color: #c0341d; font-weight: 600; }
-.status-within td.delta { color: #888; }
+.status-within td.delta, .status-same td.delta { color: #888; }
 .status-new td, .status-removed td { color: #555; font-style: italic; }
+.verdict.pass { color: #0a7d28; font-weight: 600; }
+.verdict.fail { color: #c0341d; font-weight: 600; }
 /* Neutral alternating banding: all rows of one test share a shade. */
 tr.test-a td { background: #f4f4f4; }
 tr.test-b td { background: #ffffff; }
@@ -392,11 +467,12 @@ def _ui_href(eval_id, search, base_url) -> str:
     return html.escape(f"{base_url}/eval/{eval_id}?search={quote(search)}", quote=True)
 
 
-def _score_html(value, eval_id, search, base_url, errored=False) -> str:
+def _value_html(kind, value, eval_id, search, base_url, errored=False) -> str:
     """Cell content, hyperlinked to the test's filtered view in the promptfoo UI.
 
-    A present score links to its run. A missing side (None) renders as ERROR
-    (linked, when the test errored in that run) or an em dash otherwise. Links
+    A present value links to its run: a rubric score renders as `0.50`, a
+    deterministic verdict as a `pass`/`fail` span. A missing side (None) renders
+    as ERROR (linked, when the test errored in that run) or an em dash. Links
     only appear when an eval id and search term are available.
     """
     if value is None:
@@ -406,10 +482,16 @@ def _score_html(value, eval_id, search, base_url, errored=False) -> str:
             return (f'<a class="cell-error" href="{_ui_href(eval_id, search, base_url)}" '
                     'target="_blank" rel="noopener">ERROR</a>')
         return '<span class="cell-error">ERROR</span>'
-    text = f"{value:.2f}"
+    if kind == "deterministic":
+        text = "pass" if value else "fail"
+        cls = "verdict pass" if value else "verdict fail"
+    else:
+        text = f"{value:.2f}"
+        cls = ""
     if not eval_id or not search:
-        return text
-    return (f'<a href="{_ui_href(eval_id, search, base_url)}" '
+        return f'<span class="{cls}">{text}</span>' if cls else text
+    cls_attr = f'class="{cls}" ' if cls else ""
+    return (f'<a {cls_attr}href="{_ui_href(eval_id, search, base_url)}" '
             f'target="_blank" rel="noopener">{text}</a>')
 
 
@@ -456,25 +538,67 @@ def _eval_header(baseline_eval_id, candidate_eval_id, base_url) -> str:
             + "</div>")
 
 
-def _cell_td(value, eval_id, search, base_url, errored, curl) -> str:
-    inner = _score_html(value, eval_id, search, base_url, errored)
+def _cell_td(kind, value, eval_id, search, base_url, errored, curl) -> str:
+    inner = _value_html(kind, value, eval_id, search, base_url, errored)
     if curl and (value is not None or errored):
         inner += _copy_button(curl)
     return f'<td class="num">{inner}</td>'
 
 
+# Severity order for rows with no numeric delta (deterministic / new / removed).
+_STATUS_ORDER = {"regressed": 0, "new": 1, "removed": 2, "improved": 3,
+                 "same": 4, "within": 5}
+
+
 def _sort_key(diff):
-    # Worst regressions first; new/removed (delta None) sort to the bottom.
-    return (0, diff.delta) if diff.delta is not None else (1, 0.0)
+    # Rubric rows: worst regressions first. Otherwise order by status severity.
+    if diff.delta is not None:
+        return (0, diff.delta, 0)
+    return (1, 0.0, _STATUS_ORDER.get(diff.status, 9))
 
 
 def _group_sort_key(group):
-    # Order test groups by their worst delta; groups with no delta sort last.
+    # Order test groups by their worst rubric delta; delta-less groups
+    # (deterministic) sort after, with any regression first.
     deltas = [g.delta for g in group if g.delta is not None]
-    return (0, min(deltas)) if deltas else (1, 0.0)
+    if deltas:
+        return (0, min(deltas), 0)
+    has_regression = any(g.status == "regressed" for g in group)
+    return (1, 0.0, 0 if has_regression else 1)
 
 
-def render_html(diffs: list, counts: dict, drift, tolerance: float,
+def _rubric_summary_line(counts: dict, tolerance: float) -> str:
+    return (
+        '<div class="sum-line"><span class="sum-label">Rubric Tests:</span> '
+        f"{counts['improved']} improved &middot; {counts['regressed']} regressed "
+        f"&middot; {counts['within']} within &plusmn;{tolerance:g} &middot; "
+        f"{counts['new']} new &middot; {counts['removed']} removed</div>"
+    )
+
+
+def _deterministic_summary_line(counts: dict) -> str:
+    return (
+        '<div class="sum-line"><span class="sum-label">Deterministic Tests:</span> '
+        f"{counts['new_passes']} new passes &middot; {counts['new_fails']} new fails "
+        f"&middot; {counts['total_passes']} total passes &middot; "
+        f"{counts['total_fails']} total fails</div>"
+    )
+
+
+def _summary_block(diffs: list, tolerance: float, css_class: str) -> str:
+    """Rubric and/or deterministic summary lines for a set of diffs.
+
+    A kind's line is shown only when that kind has at least one diff.
+    """
+    lines = []
+    if any(d.kind == "rubric" for d in diffs):
+        lines.append(_rubric_summary_line(summarize(diffs), tolerance))
+    if any(d.kind == "deterministic" for d in diffs):
+        lines.append(_deterministic_summary_line(summarize_deterministic(diffs)))
+    return f'<div class="{css_class}">{"".join(lines)}</div>'
+
+
+def render_html(diffs: list, drift, tolerance: float,
                 baseline_eval_id: str | None = None,
                 candidate_eval_id: str | None = None,
                 ui_base_url: str = DEFAULT_UI_BASE_URL,
@@ -484,23 +608,21 @@ def render_html(diffs: list, counts: dict, drift, tolerance: float,
                 candidate_curls: dict | None = None) -> str:
     """Render a self-contained HTML report. `drift` is (only_base, only_cand).
 
-    When an eval id is supplied for a side, that side's scores link to the
-    test's filtered view in the promptfoo UI (`{ui_base_url}/eval/<id>?search=`).
-    A missing cell whose test is in `baseline_errored` / `candidate_errored`
-    renders a linked ERROR instead of an em dash. When a test has an entry in
-    `baseline_curls` / `candidate_curls`, a copy-to-clipboard button is shown
-    next to that side's score/ERROR.
+    An aggregate summary (rubric and/or deterministic) is shown at the top, and
+    each suite carries its own summary above its table. When an eval id is
+    supplied for a side, that side's cells link to the test's filtered view in
+    the promptfoo UI (`{ui_base_url}/eval/<id>?search=`). A missing cell whose
+    test is in `baseline_errored` / `candidate_errored` renders a linked ERROR
+    instead of an em dash. When a test has an entry in `baseline_curls` /
+    `candidate_curls`, a copy-to-clipboard button is shown next to that side's
+    value/ERROR.
     """
     only_base, only_cand = drift
     baseline_errored = baseline_errored or set()
     candidate_errored = candidate_errored or set()
     baseline_curls = baseline_curls or {}
     candidate_curls = candidate_curls or {}
-    summary = (
-        f"{counts['improved']} improved &middot; {counts['regressed']} regressed "
-        f"&middot; {counts['within']} within &plusmn;{tolerance:g} &middot; "
-        f"{counts['new']} new &middot; {counts['removed']} removed"
-    )
+    aggregate = _summary_block(diffs, tolerance, "summary")
 
     drift_html = ""
     if only_base or only_cand:
@@ -547,15 +669,16 @@ def render_html(diffs: list, counts: dict, drift, tolerance: float,
                     f"<td>{html.escape(d.key.test)}</td>"
                     f"<td>{html.escape(d.assertion_value)}</td>"
                     f"<td>{html.escape(d.metric or '')}</td>"
-                    f'{_cell_td(d.baseline, baseline_eval_id, d.search, ui_base_url, d.key.test in baseline_errored, baseline_curls.get(d.key.test, ""))}'
-                    f'{_cell_td(d.candidate, candidate_eval_id, d.search, ui_base_url, d.key.test in candidate_errored, candidate_curls.get(d.key.test, ""))}'
+                    f'{_cell_td(d.kind, d.baseline, baseline_eval_id, d.search, ui_base_url, d.key.test in baseline_errored, baseline_curls.get(d.key.test, ""))}'
+                    f'{_cell_td(d.kind, d.candidate, candidate_eval_id, d.search, ui_base_url, d.key.test in candidate_errored, candidate_curls.get(d.key.test, ""))}'
                     f'<td class="num delta">{_fmt_delta(d.delta)}</td>'
                     f"<td>{d.status}</td>"
                     "</tr>"
                 )
         sections.append(
             f"<h2>{html.escape(suite)}</h2>"
-            "<table><thead><tr>"
+            + _summary_block(grouped[suite], tolerance, "suite-summary")
+            + "<table><thead><tr>"
             "<th>test</th><th>assertion</th><th>metric</th>"
             "<th>baseline</th><th>candidate</th><th>&Delta;</th><th>status</th>"
             "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
@@ -567,7 +690,7 @@ def render_html(diffs: list, counts: dict, drift, tolerance: float,
         f"<style>{_CSS}</style></head><body>"
         "<h1>Provider comparison</h1>"
         + _eval_header(baseline_eval_id, candidate_eval_id, ui_base_url)
-        + f'<div class="summary">{summary}</div>'
+        + aggregate
         + f"{drift_html}"
         + "".join(sections)
         + _COPY_SCRIPT
@@ -586,8 +709,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--suite",
         action="append",
         default=None,
-        help="Suite to include (repeatable). Defaults to "
-        f"{', '.join(DEFAULT_SUITES)}.",
+        help="Suite to include (repeatable). Defaults to every suite present "
+        "in either run.",
     )
     parser.add_argument(
         "--tolerance",
@@ -624,7 +747,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    suites = args.suite if args.suite else list(DEFAULT_SUITES)
+    suites = args.suite  # None => every suite present in either run
 
     baseline_json = read_eval_json(args.baseline_json)
     candidate_json = read_eval_json(args.candidate_json)
@@ -633,11 +756,12 @@ def main(argv: list[str] | None = None) -> int:
 
     diffs = diff_cells(baseline_cells, candidate_cells, args.tolerance)
     counts = summarize(diffs)
+    det = summarize_deterministic(diffs)
     drift = diff_test_keys(baseline_cells, candidate_cells)
 
     base_dir = Path.cwd()
     args.out.write_text(
-        render_html(diffs, counts, drift, args.tolerance,
+        render_html(diffs, drift, args.tolerance,
                     baseline_eval_id=read_eval_id(baseline_json),
                     candidate_eval_id=read_eval_id(candidate_json),
                     ui_base_url=args.ui_base_url,
@@ -647,11 +771,17 @@ def main(argv: list[str] | None = None) -> int:
                     candidate_curls=build_curls(candidate_json, base_dir, args.candidate_url)),
         encoding="utf-8",
     )
-    print(
-        f"{counts['improved']} improved, {counts['regressed']} regressed, "
-        f"{counts['within']} within, {counts['new']} new, "
-        f"{counts['removed']} removed -> {args.out}"
+    msg = (
+        f"rubric: {counts['improved']} improved, {counts['regressed']} regressed, "
+        f"{counts['within']} within, {counts['new']} new, {counts['removed']} removed"
     )
+    if det["total_passes"] or det["total_fails"]:
+        msg += (
+            f" | deterministic: {det['new_passes']} new passes, "
+            f"{det['new_fails']} new fails, {det['total_passes']} total passes, "
+            f"{det['total_fails']} total fails"
+        )
+    print(f"{msg} -> {args.out}")
     return 0
 
 

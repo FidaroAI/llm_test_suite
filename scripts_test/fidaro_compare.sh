@@ -19,7 +19,6 @@ export SUITE_GENERATION_CONFIG_FILE=scripts_test/fidaro_compare_config.json
  pnpm exec promptfoo eval \
   --config promptfooconfig.yaml \
   --filter-providers fidaro_plaintext_gateway_phala_prod \
-  --filter-metadata suite=multifaceted \
   --output results/local/latest.json \
   --no-cache \
   --description "Baseline prod run"
@@ -34,7 +33,6 @@ set +e
 pnpm exec promptfoo eval \
   --config promptfooconfig.yaml \
   --filter-providers fidaro_plaintext_gateway_phala_dev \
-  --filter-metadata suite=multifaceted \
   --output results/local/latest.json \
   --no-cache \
   --description "Comparison dev run"

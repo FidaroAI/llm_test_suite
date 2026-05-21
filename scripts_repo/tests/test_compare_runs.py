@@ -2,12 +2,12 @@ import json
 import re
 
 from scripts_repo.compare_runs import (
-    DEFAULT_SUITES,
     CellKey,
     extract_cells,
     classify,
     diff_cells,
     summarize,
+    summarize_deterministic,
     diff_test_keys,
     read_eval_id,
     errored_tests,
@@ -18,13 +18,11 @@ from scripts_repo.compare_runs import (
     render_html,
     main,
 )
-from scripts_repo.tests._fixtures import rubric_result, make_eval_json
-
-
-def test_default_suites_includes_the_rubric_suites():
-    assert set(DEFAULT_SUITES) == {
-        "research_rubrics", "agentharm_refusal", "multifaceted"
-    }
+from scripts_repo.tests._fixtures import (
+    rubric_result,
+    deterministic_result,
+    make_eval_json,
+)
 
 
 # --- extract_cells -------------------------------------------------------
@@ -38,34 +36,58 @@ def test_extract_cells_one_per_assertion():
             [0.8, 0.4],
         ),
     ])
-    cells = extract_cells(ev, DEFAULT_SUITES)
+    cells = extract_cells(ev)
     assert len(cells) == 2
     k = CellKey(test="t1", prompt="user_only", assertion="cover period")
     assert cells[k].score == 0.8
     assert cells[k].metric == "Explicit"
     assert cells[k].weight == 5
     assert cells[k].suite == "research_rubrics"
+    assert cells[k].kind == "rubric"
 
 
-def test_extract_cells_filters_by_suite():
-    # A no-suite entry (deterministic fact test) must be dropped.
-    fact = {
-        "provider": {"label": "prod"},
-        "prompt": {"label": "user_only"},
-        "testCase": {"description": "fact", "metadata": {}, "assert": [
-            {"type": "contains", "value": "Paris"}]},
-        "gradingResult": {"componentResults": [{"score": 1.0}]},
-    }
-    rubric = rubric_result(
-        "prod", "t1", "agentharm_refusal", [("no refusal", "non_refusal", 1)], [1.0]
-    )
-    cells = extract_cells(make_eval_json([fact, rubric]), DEFAULT_SUITES)
+def test_extract_cells_includes_all_suites():
+    # No allowlist anymore: a suite we never special-cased is still extracted.
+    ev = make_eval_json([
+        rubric_result("prod", "t1", "some_new_suite", [("a", "X", 1)], [0.8]),
+    ])
+    cells = extract_cells(ev)
+    assert {c.suite for c in cells.values()} == {"some_new_suite"}
+
+
+def test_extract_cells_suite_filter_still_available():
+    ev = make_eval_json([
+        rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.8]),
+        rubric_result("prod", "h1", "agentharm_refusal", [("nr", "nr", 1)], [1.0]),
+    ])
+    cells = extract_cells(ev, suites=["research_rubrics"])
     assert {k.test for k in cells} == {"t1"}
 
 
-def test_extract_cells_skips_non_llm_rubric_but_keeps_index_alignment():
-    # assert[0] is a python assert (skip), assert[1] is llm-rubric (keep).
-    # Its score must come from componentResults[1], not [0].
+def test_extract_cells_suiteless_test_grouped_under_no_suite():
+    fact = deterministic_result("prod", "fact", None, [("icontains", "Paris")], [True])
+    cells = extract_cells(make_eval_json([fact]))
+    cell = next(iter(cells.values()))
+    assert cell.suite == "(no suite)"
+    assert cell.kind == "deterministic"
+    assert cell.passed is True
+
+
+def test_extract_cells_deterministic_kind_and_pass():
+    ev = make_eval_json([
+        deterministic_result("prod", "f1", "simple_facts",
+                             [("icontains", "Paris"), ("icontains", "London")],
+                             [True, False]),
+    ])
+    cells = extract_cells(ev)
+    paris = cells[CellKey("f1", "user_only", "Paris")]
+    london = cells[CellKey("f1", "user_only", "London")]
+    assert paris.kind == "deterministic" and paris.passed is True
+    assert london.kind == "deterministic" and london.passed is False
+
+
+def test_extract_cells_mixed_kinds_in_one_test():
+    # assert[0] python (deterministic), assert[1] llm-rubric (rubric).
     entry = {
         "provider": {"label": "prod"},
         "prompt": {"label": "user_only"},
@@ -77,11 +99,14 @@ def test_extract_cells_skips_non_llm_rubric_but_keeps_index_alignment():
                 {"type": "llm-rubric", "value": "quality", "metric": "Q", "weight": 1},
             ],
         },
-        "gradingResult": {"componentResults": [{"score": 0.0}, {"score": 0.9}]},
+        "gradingResult": {"componentResults": [{"score": 1.0, "pass": True},
+                                               {"score": 0.9, "pass": True}]},
     }
-    cells = extract_cells(make_eval_json([entry]), DEFAULT_SUITES)
-    k = CellKey(test="t1", prompt="user_only", assertion="quality")
-    assert cells[k].score == 0.9
+    cells = extract_cells(make_eval_json([entry]))
+    py = cells[CellKey("t1", "user_only", "file://x.py")]
+    rub = cells[CellKey("t1", "user_only", "quality")]
+    assert py.kind == "deterministic" and py.passed is True
+    assert rub.kind == "rubric" and rub.score == 0.9
 
 
 def test_extract_cells_disambiguates_duplicate_rubric_text():
@@ -92,7 +117,7 @@ def test_extract_cells_disambiguates_duplicate_rubric_text():
             [0.2, 0.7],
         ),
     ])
-    cells = extract_cells(ev, DEFAULT_SUITES)
+    cells = extract_cells(ev)
     assert cells[CellKey("t1", "user_only", "same text")].score == 0.2
     assert cells[CellKey("t1", "user_only", "same text#1")].score == 0.7
 
@@ -108,19 +133,34 @@ def test_extract_cells_null_score_coerced_to_zero():
         },
         "gradingResult": {"componentResults": [{"score": None}]},
     }
-    cells = extract_cells(make_eval_json([entry]), DEFAULT_SUITES)
+    cells = extract_cells(make_eval_json([entry]))
     assert cells[CellKey("t1", "user_only", "q")].score == 0.0
+
+
+def test_extract_cells_deterministic_pass_falls_back_to_score():
+    # componentResult lacks an explicit "pass"; derive it from score >= 0.5.
+    entry = {
+        "provider": {"label": "prod"},
+        "prompt": {"label": "user_only"},
+        "testCase": {
+            "description": "t1",
+            "metadata": {"suite": "simple_facts"},
+            "assert": [{"type": "icontains", "value": "Paris"}],
+        },
+        "gradingResult": {"componentResults": [{"score": 1.0}]},
+    }
+    cells = extract_cells(make_eval_json([entry]))
+    assert cells[CellKey("t1", "user_only", "Paris")].passed is True
 
 
 # --- diff / classify / summary / drift -----------------------------------
 
 
 def _cells(ev):
-    return extract_cells(ev, DEFAULT_SUITES)
+    return extract_cells(ev)
 
 
 def test_classify_boundaries():
-    # Exactly at the band is "within"; strictly beyond flips.
     assert classify(0.05, 0.05) == "within"
     assert classify(-0.05, 0.05) == "within"
     assert classify(0.06, 0.05) == "improved"
@@ -145,6 +185,25 @@ def test_diff_improved_regressed_within():
     assert round(diffs["a"].delta, 2) == 0.40
 
 
+def test_diff_deterministic_transitions():
+    base = _cells(make_eval_json([
+        deterministic_result("prod", "f1", "simple_facts",
+                             [("icontains", "a"), ("icontains", "b"), ("icontains", "c")],
+                             [False, True, True]),
+    ]))
+    cand = _cells(make_eval_json([
+        deterministic_result("cand", "f1", "simple_facts",
+                             [("icontains", "a"), ("icontains", "b"), ("icontains", "c")],
+                             [True, False, True]),
+    ]))
+    diffs = {d.key.assertion: d for d in diff_cells(base, cand, 0.05)}
+    assert diffs["a"].status == "improved"   # fail -> pass
+    assert diffs["b"].status == "regressed"  # pass -> fail
+    assert diffs["c"].status == "same"       # pass -> pass
+    assert all(d.delta is None for d in diffs.values())
+    assert diffs["a"].kind == "deterministic"
+
+
 def test_diff_new_and_removed():
     base = _cells(make_eval_json([
         rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.5]),
@@ -161,14 +220,16 @@ def test_diff_new_and_removed():
     assert by_status["removed"] == ["g"]
 
 
-def test_summarize_counts():
+def test_summarize_counts_rubric_only():
     base = _cells(make_eval_json([
         rubric_result("prod", "t1", "research_rubrics",
                       [("a", "X", 1), ("b", "X", 1)], [0.5, 0.9]),
+        deterministic_result("prod", "f1", "simple_facts", [("icontains", "x")], [True]),
     ]))
     cand = _cells(make_eval_json([
         rubric_result("cand", "t1", "research_rubrics",
                       [("a", "X", 1), ("b", "X", 1)], [0.9, 0.4]),
+        deterministic_result("cand", "f1", "simple_facts", [("icontains", "x")], [False]),
     ]))
     counts = summarize(diff_cells(base, cand, 0.05))
     assert counts["improved"] == 1
@@ -176,6 +237,28 @@ def test_summarize_counts():
     assert counts["within"] == 0
     assert counts["new"] == 0
     assert counts["removed"] == 0
+
+
+def test_summarize_deterministic_counts():
+    base = _cells(make_eval_json([
+        deterministic_result("prod", "f1", "simple_facts",
+                             [("icontains", "a"), ("icontains", "b"),
+                              ("icontains", "c"), ("icontains", "d")],
+                             [False, True, True, False]),
+        rubric_result("prod", "t1", "research_rubrics", [("r", "X", 1)], [0.5]),
+    ]))
+    cand = _cells(make_eval_json([
+        deterministic_result("cand", "f1", "simple_facts",
+                             [("icontains", "a"), ("icontains", "b"),
+                              ("icontains", "c"), ("icontains", "d")],
+                             [True, False, True, False]),
+        rubric_result("cand", "t1", "research_rubrics", [("r", "X", 1)], [0.9]),
+    ]))
+    det = summarize_deterministic(diff_cells(base, cand, 0.05))
+    assert det["new_passes"] == 1   # a: fail -> pass
+    assert det["new_fails"] == 1    # b: pass -> fail
+    assert det["total_passes"] == 2  # a, c pass in candidate
+    assert det["total_fails"] == 2   # b, d fail in candidate
 
 
 def test_diff_test_keys():
@@ -205,12 +288,52 @@ def test_render_html_contains_summary_and_markers():
                       [("a", "X", 1), ("b", "X", 1)], [0.9, 0.4]),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), ([], []), 0.05)
+    out = render_html(diffs, ([], []), 0.05)
     assert "<html" in out.lower()
+    assert "Rubric Tests:" in out
     assert "1 improved" in out
     assert "1 regressed" in out
     assert "research_rubrics" in out
     assert "status-improved" in out
+    assert "status-regressed" in out
+
+
+def test_render_html_per_suite_and_aggregate_summaries():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.9]),
+        deterministic_result("prod", "f1", "simple_facts",
+                             [("icontains", "x"), ("icontains", "y")], [True, True]),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t1", "research_rubrics", [("a", "X", 1)], [0.4]),
+        deterministic_result("cand", "f1", "simple_facts",
+                             [("icontains", "x"), ("icontains", "y")], [True, False]),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, ([], []), 0.05)
+    # Both suites grouped and labelled.
+    assert "research_rubrics" in out and "simple_facts" in out
+    # Per-suite deterministic summary present.
+    assert "Deterministic Tests:" in out
+    assert "1 new fails" in out
+    assert "total passes" in out
+    # Aggregate at the very top includes both kinds.
+    agg = out.split("research_rubrics")[0]
+    assert "Rubric Tests:" in agg
+    assert "Deterministic Tests:" in agg
+
+
+def test_render_html_deterministic_shows_pass_fail_and_blank_delta():
+    base = _cells(make_eval_json([
+        deterministic_result("prod", "f1", "simple_facts", [("icontains", "x")], [True]),
+    ]))
+    cand = _cells(make_eval_json([
+        deterministic_result("cand", "f1", "simple_facts", [("icontains", "x")], [False]),
+    ]))
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, ([], []), 0.05)
+    assert ">pass<" in out  # baseline verdict
+    assert ">fail<" in out  # candidate verdict
     assert "status-regressed" in out
 
 
@@ -222,7 +345,7 @@ def test_render_html_shows_drift_banner():
         rubric_result("cand", "t1", "research_rubrics", [("a", "X", 1)], [0.5]),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), (["t_missing"], []), 0.05)
+    out = render_html(diffs, (["t_missing"], []), 0.05)
     assert "config drift" in out.lower()
     assert "t_missing" in out
 
@@ -237,7 +360,7 @@ def test_render_html_escapes_markup():
                       [("<script>x</script>", "X", 1)], [0.9]),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), ([], []), 0.05)
+    out = render_html(diffs, ([], []), 0.05)
     assert "<script>x</script>" not in out
     assert "&lt;script&gt;" in out
 
@@ -253,12 +376,10 @@ def _write(tmp_path, name, ev):
 
 def test_main_writes_report_and_returns_zero(tmp_path, capsys):
     base = _write(tmp_path, "base.json", make_eval_json([
-        rubric_result("prod", "t1", "research_rubrics",
-                      [("a", "X", 1)], [0.5]),
+        rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.5]),
     ]))
     cand = _write(tmp_path, "cand.json", make_eval_json([
-        rubric_result("cand", "t1", "research_rubrics",
-                      [("a", "X", 1)], [0.9]),
+        rubric_result("cand", "t1", "research_rubrics", [("a", "X", 1)], [0.9]),
     ]))
     out = tmp_path / "report.html"
     rc = main([str(base), str(cand), "--out", str(out)])
@@ -268,8 +389,24 @@ def test_main_writes_report_and_returns_zero(tmp_path, capsys):
     assert "1 improved" in capsys.readouterr().out
 
 
+def test_main_compares_all_suites_by_default(tmp_path):
+    # No --suite given: both rubric and deterministic suites appear.
+    base = _write(tmp_path, "base.json", make_eval_json([
+        rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.5]),
+        deterministic_result("prod", "f1", "simple_facts", [("icontains", "x")], [True]),
+    ]))
+    cand = _write(tmp_path, "cand.json", make_eval_json([
+        rubric_result("cand", "t1", "research_rubrics", [("a", "X", 1)], [0.9]),
+        deterministic_result("cand", "f1", "simple_facts", [("icontains", "x")], [True]),
+    ]))
+    out = tmp_path / "report.html"
+    main([str(base), str(cand), "--out", str(out)])
+    text = out.read_text(encoding="utf-8")
+    assert "research_rubrics" in text
+    assert "simple_facts" in text
+
+
 def test_main_respects_suite_override(tmp_path):
-    # Only research_rubrics requested; agentharm cells must be excluded.
     base = _write(tmp_path, "base.json", make_eval_json([
         rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.5]),
         rubric_result("prod", "h1", "agentharm_refusal", [("nr", "non_refusal", 1)], [1.0]),
@@ -289,7 +426,6 @@ def test_main_respects_suite_override(tmp_path):
 
 
 def _row_parities_by_test(out, test_descs):
-    """Map each test description -> set of parity classes (a/b) on its rows."""
     result = {t: set() for t in test_descs}
     for cls, body in re.findall(r'<tr class="([^"]*)">(.*?)</tr>', out, re.DOTALL):
         parity = "a" if "test-a" in cls else "b" if "test-b" in cls else None
@@ -312,18 +448,15 @@ def test_render_html_rows_of_same_test_share_one_parity():
         rubric_result("cand", "t_b", "research_rubrics",
                       [("c", "C", 1), ("d", "D", 1)], [0.6, 0.6]),
     ]))
-    out = render_html(diff_cells(base, cand, 0.05),
-                      summarize(diff_cells(base, cand, 0.05)), ([], []), 0.05)
+    out = render_html(diff_cells(base, cand, 0.05), ([], []), 0.05)
     parities = _row_parities_by_test(out, ["t_a", "t_b"])
-    # each test's rows share exactly one parity, and the two tests differ
     assert len(parities["t_a"]) == 1
     assert len(parities["t_b"]) == 1
     assert parities["t_a"] != parities["t_b"]
 
 
 def test_render_html_defines_neutral_row_colors():
-    out = render_html([], {"improved": 0, "regressed": 0, "within": 0,
-                           "new": 0, "removed": 0}, ([], []), 0.05)
+    out = render_html([], ([], []), 0.05)
     assert ".test-a" in out and ".test-b" in out
 
 
@@ -335,7 +468,7 @@ def test_extract_cells_search_prefers_metadata_id():
         rubric_result("prod", "researchrubrics[X] abc123", "research_rubrics",
                       [("a", "A", 1)], [0.5], metadata_extra={"sample_id": "abc123"}),
     ])
-    cell = next(iter(extract_cells(ev, DEFAULT_SUITES).values()))
+    cell = next(iter(extract_cells(ev).values()))
     assert cell.search == "abc123"
 
 
@@ -344,7 +477,7 @@ def test_extract_cells_search_falls_back_to_description():
         rubric_result("prod", "agentharm[x] 9-2 foo", "agentharm_refusal",
                       [("nr", "non_refusal", 1)], [1.0]),
     ])
-    cell = next(iter(extract_cells(ev, DEFAULT_SUITES).values()))
+    cell = next(iter(extract_cells(ev).values()))
     assert cell.search == "agentharm[x] 9-2 foo"
 
 
@@ -366,7 +499,7 @@ def test_render_html_links_scores_when_eval_ids_given():
                       [("a", "A", 1)], [0.9], metadata_extra={"sample_id": "abc123"}),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+    out = render_html(diffs, ([], []), 0.05,
                       baseline_eval_id="eval-base", candidate_eval_id="eval-cand")
     assert 'href="http://localhost:3000/eval/eval-base?search=abc123"' in out
     assert 'href="http://localhost:3000/eval/eval-cand?search=abc123"' in out
@@ -383,7 +516,7 @@ def test_render_html_custom_base_url():
                       metadata_extra={"sample_id": "s1"}),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+    out = render_html(diffs, ([], []), 0.05,
                       baseline_eval_id="e1", candidate_eval_id="e2",
                       ui_base_url="http://host:9999")
     assert 'href="http://host:9999/eval/e1?search=s1"' in out
@@ -397,21 +530,19 @@ def test_render_html_no_links_without_eval_ids():
         rubric_result("cand", "t", "research_rubrics", [("a", "A", 1)], [0.9]),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), ([], []), 0.05)
+    out = render_html(diffs, ([], []), 0.05)
     assert "<a href" not in out
 
 
 def test_render_html_no_link_for_missing_side():
-    # 'new' cell: present only in candidate -> baseline shows em dash, no link.
     base = _cells(make_eval_json([]))
     cand = _cells(make_eval_json([
         rubric_result("cand", "t", "research_rubrics", [("a", "A", 1)], [0.9],
                       metadata_extra={"sample_id": "s1"}),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+    out = render_html(diffs, ([], []), 0.05,
                       baseline_eval_id="e1", candidate_eval_id="e2")
-    # candidate links, baseline cell is the em dash with no anchor
     assert 'href="http://localhost:3000/eval/e2?search=s1"' in out
     assert "/eval/e1?" not in out
 
@@ -420,7 +551,6 @@ def test_render_html_no_link_for_missing_side():
 
 
 def _provider_error_entry(desc, sample_id, label="cand"):
-    """A result whose test errored at the provider level (no grading)."""
     return {
         "provider": {"label": label},
         "prompt": {"label": "user_only"},
@@ -450,11 +580,10 @@ def test_errored_tests_detects_provider_and_grader_errors():
         grader_err,
         rubric_result("p", "ok", "research_rubrics", [("a", "A", 1)], [0.9]),
     ])
-    assert errored_tests(ev, DEFAULT_SUITES) == {"prov_err", "grader_err"}
+    assert errored_tests(ev) == {"prov_err", "grader_err"}
 
 
 def test_errored_tests_clean_zero_is_not_error():
-    # A real refusal judgement scored 0 must not count as errored.
     refusal = {
         "provider": {"label": "p"}, "prompt": {"label": "user_only"},
         "failureReason": 1, "error": "Aggregate score 0.00 < 0.5 threshold",
@@ -464,7 +593,7 @@ def test_errored_tests_clean_zero_is_not_error():
         "gradingResult": {"componentResults": [
             {"score": 0, "reason": "The output is a refusal to assist."}]},
     }
-    assert errored_tests(make_eval_json([refusal]), DEFAULT_SUITES) == set()
+    assert errored_tests(make_eval_json([refusal])) == set()
 
 
 def test_render_html_missing_errored_cell_shows_error_link():
@@ -473,11 +602,11 @@ def test_render_html_missing_errored_cell_shows_error_link():
                       metadata_extra={"sample_id": "sid-err"}),
     ]))
     cand_json = make_eval_json([_provider_error_entry("t_err", "sid-err")])
-    cand = extract_cells(cand_json, DEFAULT_SUITES)  # no cell: it errored
-    diffs = diff_cells(base, cand, 0.05)  # status "removed"
-    out = render_html(diffs, summarize(diffs), (["t_err"], []), 0.05,
+    cand = extract_cells(cand_json)
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, (["t_err"], []), 0.05,
                       baseline_eval_id="eval-base", candidate_eval_id="eval-cand",
-                      candidate_errored=errored_tests(cand_json, DEFAULT_SUITES))
+                      candidate_errored=errored_tests(cand_json))
     assert ">ERROR</a>" in out
     assert 'href="http://localhost:3000/eval/eval-cand?search=sid-err"' in out
 
@@ -486,9 +615,9 @@ def test_render_html_missing_not_errored_stays_dash():
     base = _cells(make_eval_json([
         rubric_result("prod", "gone", "research_rubrics", [("g", "G", 1)], [0.5]),
     ]))
-    cand = _cells(make_eval_json([]))  # candidate simply did not run it
+    cand = _cells(make_eval_json([]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), (["gone"], []), 0.05,
+    out = render_html(diffs, (["gone"], []), 0.05,
                       baseline_eval_id="eb", candidate_eval_id="ec",
                       candidate_errored=set())
     assert "ERROR" not in out
@@ -497,15 +626,15 @@ def test_render_html_missing_not_errored_stays_dash():
 
 def test_render_html_new_errored_cell_links_to_baseline():
     base_json = make_eval_json([_provider_error_entry("t_new", "sidn", label="prod")])
-    base = extract_cells(base_json, DEFAULT_SUITES)  # no cell: it errored
+    base = extract_cells(base_json)
     cand = _cells(make_eval_json([
         rubric_result("cand", "t_new", "research_rubrics", [("a", "A", 1)], [0.9],
                       metadata_extra={"sample_id": "sidn"}),
     ]))
-    diffs = diff_cells(base, cand, 0.05)  # status "new"
-    out = render_html(diffs, summarize(diffs), ([], ["t_new"]), 0.05,
+    diffs = diff_cells(base, cand, 0.05)
+    out = render_html(diffs, ([], ["t_new"]), 0.05,
                       baseline_eval_id="eb", candidate_eval_id="ec",
-                      baseline_errored=errored_tests(base_json, DEFAULT_SUITES))
+                      baseline_errored=errored_tests(base_json))
     assert 'href="http://localhost:3000/eval/eb?search=sidn"' in out
     assert ">ERROR</a>" in out
 
@@ -555,7 +684,7 @@ def test_build_curl_has_endpoint_model_messages_and_shell_escapes():
     assert '"model": "Qwen/Q"' in curl
     assert '"temperature": 0.7' in curl
     assert '"max_tokens": 100000' in curl
-    assert "'\\''" in curl  # single quote in content is shell-escaped
+    assert "'\\''" in curl
 
 
 def test_build_curl_empty_when_no_url():
@@ -585,27 +714,25 @@ def test_render_html_copy_button_on_score_and_error_cells():
                       metadata_extra={"sample_id": "s1"}),
     ]))
     cand_json = make_eval_json([_provider_error_entry("t_ok", "s1")])
-    cand = extract_cells(cand_json, DEFAULT_SUITES)  # errored -> removed cell
+    cand = extract_cells(cand_json)
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), (["t_ok"], []), 0.05,
-                      candidate_errored=errored_tests(cand_json, DEFAULT_SUITES),
+    out = render_html(diffs, (["t_ok"], []), 0.05,
+                      candidate_errored=errored_tests(cand_json),
                       baseline_curls={"t_ok": "curl http://b/v1/chat/completions"},
                       candidate_curls={"t_ok": "curl http://c/v1/chat/completions"})
     assert "copy-btn" in out
     assert "navigator.clipboard.writeText" in out
-    assert 'data-curl="curl http://b/v1/chat/completions"' in out  # baseline score
-    assert 'data-curl="curl http://c/v1/chat/completions"' in out  # candidate ERROR
+    assert 'data-curl="curl http://b/v1/chat/completions"' in out
+    assert 'data-curl="curl http://c/v1/chat/completions"' in out
 
 
 def test_render_html_no_copy_button_for_bare_missing():
     base = _cells(make_eval_json([
         rubric_result("prod", "gone", "research_rubrics", [("g", "G", 1)], [0.5]),
     ]))
-    cand = _cells(make_eval_json([]))  # candidate absent (not errored)
+    cand = _cells(make_eval_json([]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), (["gone"], []), 0.05,
-                      candidate_curls={})  # no curl for the absent candidate
-    # the .copy-btn CSS/JS is always present; assert no button element rendered
+    out = render_html(diffs, (["gone"], []), 0.05, candidate_curls={})
     assert '<button type="button" class="copy-btn"' not in out
 
 
@@ -620,7 +747,7 @@ def test_render_html_shows_eval_names_in_header():
         rubric_result("cand", "t", "research_rubrics", [("a", "A", 1)], [0.9]),
     ]))
     diffs = diff_cells(base, cand, 0.05)
-    out = render_html(diffs, summarize(diffs), ([], []), 0.05,
+    out = render_html(diffs, ([], []), 0.05,
                       baseline_eval_id="eval-base-123",
                       candidate_eval_id="eval-cand-456")
     assert "Baseline" in out and "Candidate" in out
@@ -630,7 +757,6 @@ def test_render_html_shows_eval_names_in_header():
 
 
 def test_render_html_eval_header_handles_missing_id():
-    out = render_html([], {"improved": 0, "regressed": 0, "within": 0,
-                           "new": 0, "removed": 0}, ([], []), 0.05)
+    out = render_html([], ([], []), 0.05)
     assert "Baseline" in out and "Candidate" in out
     assert "(unknown)" in out

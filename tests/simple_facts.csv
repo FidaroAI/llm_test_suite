@@ -1,28 +1,28 @@
-user,__expected
-"What software company is headquartered in Redmond, Washington?","icontains:Microsoft"
-"What is a word, phrase, number, or other sequence of characters that reads the same backward as forward?","icontains:Palindrome"
-"What is the world’s largest retailer as of 2026?","icontains:Walmart"
-"Which day of the week does the Jewish Sabbath begin?","icontains:Friday"
-"What phone company produced the 3310?","icontains:Nokia"
-"What company was initially known as "Blue Ribbon Sports"?","icontains:Nike"
-"Which country has the highest life expectancy as of 2026?","icontains:Monaco"
-"What is the most common surname in the United States?","icontains:Smith"
-"What art form is described as "decorative handwriting or handwritten lettering"?","icontains:Calligraphy"
-"What is acrophobia a fear of?","icontains:Heights"
-"What is the name of the Chinese philosophical system that emphasizes harmony with nature?","icontains:Taoism"
-"What is the 4th letter of the Greek alphabet?","icontains:Delta"
-"How many dots appear on a pair of dice?","icontains:42"
-"Who was the Ancient Greek God of the Sun?","icontains:Apollo"
-"Aureolin is a shade of what color?","icontains:Yellow"
-"How many faces does a Dodecahedron have?","icontains:12"
-"How many minutes are in a full week?","icontains:10,080"
-"Where would you be if you were standing on the Spanish Steps?","icontains:Rome"
-"What city is known as "The Eternal City"?","icontains:Rome"
-"In which country would you find Mount Kilimanjaro?","icontains:Tanzania"
-"True or false: Halloween originated as an ancient Irish festival.","icontains:True"
-"What is the capital of Ireland?","icontains:Dublin"
-"What is the state capital of New York?","icontains:Albany"
-"What is the smallest U.S. state by area?","icontains:Rhode Island"
-"What river flows through the Grand Canyon?","icontains:Colorado River"
-"True or false: Holland is a region in The Netherlands?","icontains:True"
-"What is the capital of Canada?","icontains:Ottawa"
+user,__expected,__metadata:suite
+"What software company is headquartered in Redmond, Washington?","icontains:Microsoft",simple_facts
+"What is a word, phrase, number, or other sequence of characters that reads the same backward as forward?","icontains:Palindrome",simple_facts
+"What is the world’s largest retailer as of 2026?","icontains:Walmart",simple_facts
+"Which day of the week does the Jewish Sabbath begin?","icontains:Friday",simple_facts
+"What phone company produced the 3310?","icontains:Nokia",simple_facts
+"What company was initially known as "Blue Ribbon Sports"?","icontains:Nike",simple_facts
+"Which country has the highest life expectancy as of 2026?","icontains:Monaco",simple_facts
+"What is the most common surname in the United States?","icontains:Smith",simple_facts
+"What art form is described as "decorative handwriting or handwritten lettering"?","icontains:Calligraphy",simple_facts
+"What is acrophobia a fear of?","icontains:Heights",simple_facts
+"What is the name of the Chinese philosophical system that emphasizes harmony with nature?","icontains:Taoism",simple_facts
+"What is the 4th letter of the Greek alphabet?","icontains:Delta",simple_facts
+"How many dots appear on a pair of dice?","icontains:42",simple_facts
+"Who was the Ancient Greek God of the Sun?","icontains:Apollo",simple_facts
+"Aureolin is a shade of what color?","icontains:Yellow",simple_facts
+"How many faces does a Dodecahedron have?","icontains:12",simple_facts
+"How many minutes are in a full week?","icontains:10,080",simple_facts
+"Where would you be if you were standing on the Spanish Steps?","icontains:Rome",simple_facts
+"What city is known as "The Eternal City"?","icontains:Rome",simple_facts
+"In which country would you find Mount Kilimanjaro?","icontains:Tanzania",simple_facts
+"True or false: Halloween originated as an ancient Irish festival.","icontains:True",simple_facts
+"What is the capital of Ireland?","icontains:Dublin",simple_facts
+"What is the state capital of New York?","icontains:Albany",simple_facts
+"What is the smallest U.S. state by area?","icontains:Rhode Island",simple_facts
+"What river flows through the Grand Canyon?","icontains:Colorado River",simple_facts
+"True or false: Holland is a region in The Netherlands?","icontains:True",simple_facts
+"What is the capital of Canada?","icontains:Ottawa",simple_facts

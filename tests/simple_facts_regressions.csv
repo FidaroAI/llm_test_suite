@@ -1,6 +1,6 @@
-user,__expected
-"What do you know about Zig?","icontains:0.16"
-"What do you know about Zig?","icontains:0.16"
-"What do you know about Zig?","icontains:0.16"
-"What do you know about Zig?","icontains:0.16"
-"What do you know about Zig?","icontains:0.16"
+user,__expected,__metadata:suite
+"What do you know about Zig?","icontains:0.16",simple_facts
+"What do you know about Zig?","icontains:0.16",simple_facts
+"What do you know about Zig?","icontains:0.16",simple_facts
+"What do you know about Zig?","icontains:0.16",simple_facts
+"What do you know about Zig?","icontains:0.16",simple_facts

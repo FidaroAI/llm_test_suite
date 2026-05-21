@@ -43,6 +43,42 @@ def rubric_result(
     }
 
 
+def deterministic_result(
+    provider_label,
+    description,
+    suite,
+    asserts,
+    passes,
+    prompt_label="user_only",
+    metadata_extra=None,
+):
+    """Build one result entry of deterministic (non-llm-rubric) asserts.
+
+    asserts: list of (type, value) tuples, e.g. ("icontains", "Paris").
+    passes:  list of booleans, index-aligned with asserts.
+    """
+    metadata = {"suite": suite} if suite is not None else {}
+    if metadata_extra:
+        metadata.update(metadata_extra)
+    assert_objs = [{"type": t, "value": v} for (t, v) in asserts]
+    comps = [{"score": 1.0 if p else 0.0, "pass": p} for p in passes]
+    return {
+        "provider": {"id": "x", "label": provider_label},
+        "prompt": {"label": prompt_label},
+        "vars": {"user": "..."},
+        "testCase": {
+            "description": description,
+            "vars": {"user": "..."},
+            "assert": assert_objs,
+            "metadata": metadata,
+        },
+        "gradingResult": {
+            "score": (sum(1 for p in passes if p) / len(passes)) if passes else 0,
+            "componentResults": comps,
+        },
+    }
+
+
 def make_eval_json(results, eval_id="eval-test"):
     """Wrap a list of result entries in the eval-result-JSON envelope."""
     return {"evalId": eval_id, "results": {"results": list(results)}}
