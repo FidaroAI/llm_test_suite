@@ -23,14 +23,15 @@ Required:
                             http://host.docker.internal:8000/v1
                           For a Phala ZT-TLS endpoint, use a URL of the form:
                             https://*-8000.dstack-pha-use1.phala.network
+  --brave-api-key KEY     Brave Search API key.
+
+Options:
   --vllm-dev-url URL      Base URL of the vLLM OpenAI-compatible endpoint for development.
+                          If not supplied, only the production gateway will be run.
                           If running vLLM locally, use:
                             http://host.docker.internal:8000/v1
                           For a Phala ZT-TLS endpoint, use a URL of the form:
                             https://*-8000.dstack-pha-use1.phala.network
-  --brave-api-key KEY     Brave Search API key.
-
-Options:
   --log-level LEVEL       Gateway log level (default: info).
   --max-tool-calls N      Max tool calls per request (default: 10).
   --docker-image IMAGE    Docker image to run (default: secure-enclave-gateway-plaintext).
@@ -88,12 +89,6 @@ if [[ -z "$HOST_OPENAI_BASE_URL_PROD" ]]; then
   exit 1
 fi
 
-if [[ -z "$HOST_OPENAI_BASE_URL_DEV" ]]; then
-  echo "Error: --vllm-dev-url is required." >&2
-  usage >&2
-  exit 1
-fi
-
 if [[ -z "$BRAVE_API_KEY" ]]; then
   echo "Error: --brave-api-key is required." >&2
   usage >&2
@@ -121,6 +116,11 @@ docker run --rm -p 127.0.0.1:8082:8080 \
   -e HOST_MAX_TOOL_CALLS_PER_REQUEST="${HOST_MAX_TOOL_CALLS_PER_REQUEST}" \
   "${DOCKER_IMAGE}" \
   uv run uvicorn llm_gateway.dev_plaintext_main:app --host 0.0.0.0 --port 8080
+
+if [[ -z "$HOST_OPENAI_BASE_URL_DEV" ]]; then
+  echo "No development vLLM URL provided; skipping dev gateway."
+  exit 0
+fi
 
 docker run --rm -p 127.0.0.1:8084:8080 \
   -d \

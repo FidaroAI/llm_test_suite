@@ -84,7 +84,7 @@ jobs:
       - name: Start gateway container
         run: |
           image="${ECR_REGISTRY}/fidaro/dev/cvm-llm-gateway:${GATEWAY_IMAGE_TAG}"
-          ./scripts_repo/run_plaintext_gateway.sh --docker-image "$image" --vllm-url "$HOST_OPENAI_BASE_URL" --brave-api-key "$BRAVE_API_KEY"
+          ./scripts_repo/run_plaintext_gateway.sh --docker-image "$image" --vllm-prod-url "$HOST_OPENAI_BASE_URL" --brave-api-key "$BRAVE_API_KEY"
 
       - name: Fetch datasets
         run: pnpm dataset
