@@ -57,6 +57,29 @@ The interesting tests for a human to run are
 
 TODO: Continue
 
+## Comparison runs (config-driven)
+
+[run_comparison.py](../scripts_repo/run_comparison.py) drives a whole prod-vs-dev
+comparison from a single config file, so gateway/model configuration and the test
+run stay together. Put a named config in `comparisons/` (e.g.
+`comparisons/prod_vs_dev_gemma.json`; see [example.json](../comparisons/example.json))
+and run:
+
+```
+python scripts_repo/run_comparison.py comparisons/prod_vs_dev_gemma.json
+```
+
+Outputs (timestamped prod/dev results, the comparison report, the rendered
+compose, and the vLLM-options cache) land in `comparisons/<name>/`, which is
+gitignored; only the config JSONs are tracked. The script validates the config,
+optionally redeploys the Phala dev CVM when `vllm-options` change (after
+confirmation — see [deploy_phala.py](../scripts_repo/deploy_phala.py)), starts
+both plaintext gateways (mounting a dev system prompt if given), runs both
+passes, and opens the report. It does **not** freeze a baseline. `BRAVE_API_KEY`
+must be in the environment; a Phala redeploy also needs `PHALA_DOCKER_COMPOSE_FILE`
+set and `.env.phala` in the repo root. Full design:
+[the spec](superpowers/specs/2026-05-22-comparison-orchestrator-design.md).
+
 ## Project Structure
 
 Note: There's a lot of experimentation cruft in the repo that will eventually be

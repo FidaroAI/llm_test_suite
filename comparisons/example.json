@@ -1,0 +1,23 @@
+{
+  "vllm-prod-url": "https://<prod-cvm-id>-8000.dstack-pha-use1.phala.network/v1",
+  "vllm-dev-url": "https://<dev-cvm-id>-8000.dstack-pha-use1.phala.network/v1",
+  "system-prompt-file": "system_prompts/example_core_system_prompt.md",
+  "phala-dev-instance-id": "<dev-cvm-id>",
+  "vllm-options": {
+    "model": "google/gemma-4-31B-it",
+    "reasoning-parser": "gemma4",
+    "enable-auto-tool-choice": true,
+    "tool-call-parser": "gemma4"
+  },
+  "promptfoo-filters": {
+    "filter-metadata": "suite=simple_facts"
+  },
+  "suite-generation-config": {
+    "simple_facts": {
+      "number_to_generate": 5,
+      "randomize_selection": true,
+      "random_seed": 0,
+      "max_rubrics": 3
+    }
+  }
+}

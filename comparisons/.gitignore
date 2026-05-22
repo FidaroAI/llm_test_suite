@@ -1,0 +1,5 @@
+# Each comparison's run outputs (results, reports, rendered compose, caches)
+# live in a per-comparison subdirectory and are regenerated, so they are not
+# tracked. The named config JSONs at the top level ARE tracked.
+*/
+!.gitignore
