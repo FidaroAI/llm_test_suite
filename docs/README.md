@@ -85,15 +85,31 @@ user_prompts     IGNORE: Not currently used. Will probably go away.
 
 ## Cheat sheet
 
-This is lazy documentation:
+This is lazy, terse documentation. Can be expanded later.
 
-TODO: Not done yet
+* Promptfoo has a UI for viewing results. It's backed by a local database. Test runs done locally automatically populate the database. External runs can be imported. You can run the gateway temporarily with `pnpm view` or you can have it running inside docer using [run_promptfoo_docker.sh](../scripts_repo/run_promptfoo_docker.sh).
+** The [fidaro.sh](scripts_test/fidaro.sh) script will automatically run the docker container to display results.
+** Warning, I've seen the docker container crash a lot.
+* We have scripts for generating custom reports for comparing a baseline of test results against a new run.
+** Again see the [fidaro.sh](scripts_test/fidaro.sh) script as this demonstrates report generation.
+** There's handy clipboard icon in the results to get a curl command to rerun the test manually.
+** The report by [compare_matrix.py](../scripts_repo/compare_matrix.py) isn't really used right now. It might go away.
+* We can't get thinking blocks before websearch from the plaintext gateway right now. This is because it doesn't use SSE.
+* The reason we have \n\n\n in our responses after thinking is that deepseek_r1's parse strips <thinking> tags but swaps them for new lines. So we basically get two newlines for the tags and one for the already existing whitespace. See [strip_before_triple_newline.py](../hooks/strip_before_triple_newline.py)
+* CI Is somewhat usesless right now. It's just a sanity check things are working. Probably for later we will make it run a set of tests and compare against the baseline and error if we regressed too much. This is still ;likely to be flakey.
+* Rubric LLM (non-deterministic) tests are being evaluated in Bedrock right now. See [promptfooconfig.yaml](../promptfooconfig.yaml)
+* Promptfoo can parallelize tests. See `maxConcurrency` in [promptfooconfig.yaml](../promptfooconfig.yaml)
 
-* The reason we have \n\n\n in our responses after thinking is that deepseek_r1's parse strips <thinking> tags but swaps them for new lines. So we basically get two newlines for the tags and one for the already existing whitespace.
-* Document that we only generate 3 rubrics.
-* Test generation, random selection, configs.
-* Promptfoo UI
-* Document the report and the clipboard
+
+### Data import and transform
+
+We import data from various data sources and transform it into test cases. Data must be downloaded once in advance by the user. See `pnpm dataset`.
+
+Generation logic is in files called `tests/xxx_gen.py`. Any python file ending in `_gen.py` is assumed to be a genertor. Those tests go into a suite with the suite name `xxx`. Suites are our own invention, not promptfoos. We add meta data to tests to identify which suite they belong to. They can be filtered during test runs using `--filter-metadata suite=xxx`.
+
+Generated tests use a single configuration file. The default is [suite_generation_config.json](../tests/suite_generation_config.json) but can be overridden with the env var `SUITE_GENERATION_CONFIG_FILE`. The config file lets you adjust how many tests from each generator are actually generated. It also lets you randomize the tests (with a fixed seed).
+
+We have an option to restrict the number of rubrics for each test case. These data sets often have a lot of assertions and it would take too long to run them all if we used every rubric.
 
 ## Gotchas
 
@@ -101,13 +117,61 @@ TODO: Not done yet
 
 * Be aware of promptfoos caching behaviour. If it sees a test case that it's run before and has data for then it'll use a cached result. This may happen without you realising. Use `--no-cache` to prevent this.
 
-* Currently we lose pre-web_search reasoning because the plaintext API doesn't use streaming. I'm not even sure if promptfoo can use streaming
-
-
 # Quick Feature Backlog
+
+* Script that let's us change the Fidaro system prompt. We can do that by creating a sys prompts in this repo and then changing the docker run command for the gateway to mount the prompt file(s). Need to be careful as our prompts expect a certain placeholder for the websearch prompt.
+* Audit the generated tests and find a "good" subset that gives us good converage (of the use cases we want). Can use an LLM to audit. Too big for humans
+* Categorise tests! See below
+* Do sys prompt iterations :)
+* Need to be able to iterate on model config. This requires a restart of vllm. Can be done against dev. Needs scripting. WARNING: We must be very careful when using the phala CLI. There's no gate to prevent messing with prod. Should probably create a service account and restrict access to prod (if possible)
+* Need to be able to iterate on the choice of model. Similar challenge to the previous point.
+* Configure a provider to run Perplexity or Venice and run tests against those. Do a comparison with Fidaro.
+** Do this with their APIs - might not be the same quality as their web app.
+** Do this with e.g. Playwright automation to get full web experience.
+* IDEA: To speed up tests, maybe we try using bedrock with the same model as us. Tool calls will be tricky. Might need to build a small client somewhere that handles the tool calls. We could test quality without tool calls, but results will be limited.
+* Stress test tests for testing Fidaro's capacity. Note that I've seen API timeout errors due to (seemingly) overloading the number of tests.
+* Get more data sets?
+
+## Ideas for test categorisation
+
+### Use cases
+
+#### Type of request
+
+* Answering simple factual questions
+* Answering simple factual questions about current affairs
+* Planning
+* Coding
+* Research
+* Data analysis
+* Creative writing
+
+#### Domain
+
+* Finance
+* Holiday planning
+* Shopping
+* Personal medical
+* Legal
+* Sciences
+* Literature
+
+### Rubric based tests
+
+- Facts: Achieved the goal of the user requst
+- Tone: Terse, partonisning, helpful explanatory (Match this using personal settings)
+- Bias: Did it give a bias result
+- Gatekeeping/Refusal: Did it say no
+
+### Deterministic tests
+- substring/regex matches: Does the response contain particular text
+- length of response:
+- web search
+
 
 
 ## TODO
 
 * Make the whole dev setup and plaintext gateway stuff less error prone for users, e.g. use a just script.
 * Add a clean requirements doc and point claude at it
+
