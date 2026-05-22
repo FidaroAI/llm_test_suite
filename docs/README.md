@@ -86,6 +86,10 @@ tests            test cases. 3 formats: yaml configs, csv lists promptfoo uses t
 user_prompts     IGNORE: not currently used. Will probably go away.
 ```
 
+## Requirements
+
+See [REQUIREMENTS.md](./REQUIREMENTS.md)
+
 ## Cheat sheet
 
 Lazy, terse documentation. Can be expanded later.
@@ -158,42 +162,6 @@ lot of assertions, and running every rubric would take too long.
   seem to come from overloading the number of tests.
 * Get more datasets?
 
-## Ideas for test categorisation
-
-### Use cases
-
-#### Type of request
-
-* Answering simple factual questions
-* Answering simple factual questions about current affairs
-* Planning
-* Coding
-* Research
-* Data analysis
-* Creative writing
-
-#### Domain
-
-* Finance
-* Holiday planning
-* Shopping
-* Personal medical
-* Legal
-* Sciences
-* Literature
-
-### Rubric based tests
-
-* Facts: achieved the goal of the user request
-* Tone: terse, patronising, helpful, explanatory (match this using personal settings)
-* Bias: did it give a biased result
-* Gatekeeping/Refusal: did it say no
-
-### Deterministic tests
-
-* substring/regex matches: does the response contain particular text
-* length of response
-* web search
 
 ## TODO
 
