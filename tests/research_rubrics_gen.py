@@ -25,6 +25,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import classification  # noqa: E402
 import suite_config  # noqa: E402
 
 SUITE = suite_config.suite_name(__file__)
@@ -64,7 +65,7 @@ def _row_to_test(row, max_num_criteria=None):
     sample_id = row.get("sample_id", "unknown")
     domain = row.get("domain", "unknown")
 
-    return {
+    test = {
         "description": f"researchrubrics[{domain}] {sample_id}",
         "vars": {"user": row["prompt"]},
         "assert": asserts,
@@ -72,12 +73,15 @@ def _row_to_test(row, max_num_criteria=None):
         "metadata": {
             "suite": SUITE,
             "sample_id": sample_id,
-            "domain": domain,
+            # The dataset's own domain label, kept for provenance. The unified
+            # cross-suite ``domain`` is added by classification.augment below.
+            "native_domain": domain,
             "conceptual_breadth": row.get("conceptual_breadth", "unknown"),
             "logical_nesting": row.get("logical_nesting", "unknown"),
             "exploration": row.get("exploration", "unknown"),
         },
     }
+    return classification.augment(test, SUITE, row["prompt"])
 
 
 def generate_tests():

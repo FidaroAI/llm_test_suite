@@ -29,6 +29,7 @@ def test_load_uses_defaults_when_file_missing(tmp_path, monkeypatch):
     assert cfg.randomize_selection is False
     assert cfg.random_seed == 0
     assert cfg.max_rubrics is None
+    assert cfg.stratify is None
 
 
 def test_load_uses_defaults_when_suite_key_absent(tmp_path, monkeypatch):
@@ -53,17 +54,29 @@ def test_load_merges_suite_values_over_defaults(tmp_path, monkeypatch):
 
 
 def _cfg(suite="s", number_to_generate=None, randomize_selection=False,
-         random_seed=0, max_rubrics=None):
+         random_seed=0, max_rubrics=None, stratify=None):
     return suite_config.SuiteConfig(suite, {
         "number_to_generate": number_to_generate,
         "randomize_selection": randomize_selection,
         "random_seed": random_seed,
         "max_rubrics": max_rubrics,
+        "stratify": stratify,
     })
 
 
 def _tests(n):
     return [{"description": str(i), "metadata": {"suite": "s"}} for i in range(n)]
+
+
+def _tests_by(groups):
+    """Build tests carrying a ``domain`` metadata value: groups maps value->count."""
+    out = []
+    i = 0
+    for value, count in groups.items():
+        for _ in range(count):
+            out.append({"description": f"{value}{i}", "metadata": {"domain": value}})
+            i += 1
+    return out
 
 
 def test_select_no_limit_returns_all_in_order():
@@ -104,4 +117,35 @@ def test_select_stamps_full_config_into_metadata():
             "randomize_selection": True,
             "random_seed": 7,
             "max_rubrics": 4,
+            "stratify": None,
         }
+
+
+def test_stratify_takes_per_group_quota_from_each_value():
+    cfg = _cfg(stratify={"by": "domain", "per_group": 2})
+    out = cfg.select(_tests_by({"a": 5, "b": 3, "c": 1}))
+    by_value = {}
+    for t in out:
+        by_value.setdefault(t["metadata"]["domain"], 0)
+        by_value[t["metadata"]["domain"]] += 1
+    assert by_value == {"a": 2, "b": 2, "c": 1}
+
+
+def test_stratify_groups_restricts_and_orders():
+    cfg = _cfg(stratify={"by": "domain", "per_group": 1, "groups": ["c", "a"]})
+    out = cfg.select(_tests_by({"a": 2, "b": 2, "c": 2}))
+    assert [t["metadata"]["domain"] for t in out] == ["c", "a"]
+
+
+def test_stratify_then_number_to_generate_caps_overall():
+    cfg = _cfg(number_to_generate=3, stratify={"by": "domain", "per_group": 2})
+    out = cfg.select(_tests_by({"a": 5, "b": 5}))
+    assert len(out) == 3
+
+
+def test_stratify_with_randomize_is_deterministic_for_a_seed():
+    mk = lambda: _cfg(randomize_selection=True, random_seed=42,
+                      stratify={"by": "domain", "per_group": 2})
+    a = mk().select(_tests_by({"a": 5, "b": 5}))
+    b = mk().select(_tests_by({"a": 5, "b": 5}))
+    assert [t["description"] for t in a] == [t["description"] for t in b]

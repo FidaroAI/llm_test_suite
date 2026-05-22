@@ -1,0 +1,1580 @@
+{
+  "_meta": {
+    "suite": "multifaceted",
+    "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "generated_at": "2026-05-22T08:07:06+00:00",
+    "count": 314
+  },
+  "classifications": {
+    "004420794b300aa4cf6581688651d26f6712a358": {
+      "request_type": "data_analysis",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "00e0c9ba422ea4b0c6061cdd2b61d485db567c14": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Bigbench: cs algorithms"
+    },
+    "0464be5362e50f606aa93e2dc01f5d368ae398a0": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "07e0075f9d96944543e3f5d5db9a19a4888b8da3": {
+      "request_type": "factual_qa",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Ethics_virtue"
+    },
+    "08f5ef9ef5dd969aaa831e8c6d2c42f26ad26111": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "0910895f02b406f3aeb43fa81c22f58f4a86eff9": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "0c70004fc11e71adeb433863f3f5310d9d4c4d26": {
+      "request_type": "factual_qa",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Crepe"
+    },
+    "0dc30ffbab1e4423caef7132525d0d128325bef8": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Wikitablequesitons"
+    },
+    "0e17c6ae1f844f5dc7d1cbf116298b638478bf1d": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "0e35eb61cc96c39773958c39fabac96149f87e06": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Hh-rlhf"
+    },
+    "0ee7a045c8b3ebf112e618e43b3e0877be6d83f8": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: discourse marker prediction"
+    },
+    "0ef13008bf956a23604205eae18deff438823481": {
+      "request_type": "advice_recommendation",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: koala"
+    },
+    "0f3c36046e5547387e8ca2cb3f666593a9918608": {
+      "request_type": "advice_recommendation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: koala"
+    },
+    "0f79a7f3510115ff1685753c5796eb3f6996b6b4": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: Bigbench: irony identification"
+    },
+    "0ff13f1337635ae8d31395802415217d2623c093": {
+      "request_type": "advice_recommendation",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Bigbench: moral permissibility"
+    },
+    "1063f6618c1579a4c26227eddc856857dbe6367f": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: Haiku generation"
+    },
+    "10823b778c063aeac5be9a51ce318a1ce0c76510": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Timedial"
+    },
+    "10a3a8e6d32b14792382cbbdb7dbe2e4342377a1": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "10e0fa91054d5662b8c4a2344f312183b72bd53f": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "11b2ec0588d2c0776d4cfb419d020994232a01e4": {
+      "request_type": "text_transformation",
+      "domain": "current_events",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "11b6a4fdfd81f6a10d7ee06fbbc290de20ed73d9": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "128339fc83aeefe4f5f9e05e9a6c90e6d17bf458": {
+      "request_type": "research_synthesis",
+      "domain": "current_events",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "13420651be28936d662cf391b718cc63f564ea2a": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "136301b914a2801afea5312cd2573b74d9a54575": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: koala"
+    },
+    "13db51facd526ea64dabd3d5a5b74d188b4c0efe": {
+      "request_type": "data_analysis",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "1529692df354680c09aa10fb907ede530229850f": {
+      "request_type": "advice_recommendation",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "1555455feab37de8c53e728726770d9c43c7b2a8": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "16f7f88b588c2229e680e37866857d55c40816f3": {
+      "request_type": "advice_recommendation",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "170833036c310c56fdd7082a30e41fea1a7d1ac8": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "171e6739f44df3a731457a54904916e4dbf35c88": {
+      "request_type": "creative_writing",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "19c2cd4b5f5dd9aa6febf7af836ed9471180b0ef": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "19d9d3bacfeb030950cae4ad9ef9974c0306c6b9": {
+      "request_type": "text_transformation",
+      "domain": "history_society",
+      "native_hint": "benchmark source: koala"
+    },
+    "1a78ddce632c6382175b5cdde99962a336f55787": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Inverse scaling prize: sig-figs classification"
+    },
+    "1a898f76d027abfd495043bbf29644e99c6497ed": {
+      "request_type": "text_transformation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: Winogender"
+    },
+    "1b2252832e1fc321d8fc7fcd974f06cfdc38f095": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "1be91122e8f9d2f128fbfc8e9ead31836353edfa": {
+      "request_type": "text_transformation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "1edf679cda63ab1139581df430d63948f8b438bc": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Canard"
+    },
+    "1f4b1a780ac673591e800e19908e8a4761ef36b6": {
+      "request_type": "factual_qa",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: koala"
+    },
+    "1f59a060370e4b521e4d9eb7b18cbcbabc80957c": {
+      "request_type": "data_analysis",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Diffqg"
+    },
+    "1f930aa05ffbeb437011f821f290f56f86bc917e": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Cicero"
+    },
+    "22c37d9a8fb12571f8216164e3bdb411cd5ba401": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "24a761851fd867d57c007d173bf9c33a33220f40": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Bigbench: periodic elements"
+    },
+    "24f829ea9ebb30a1506314fe280e84b0271b266e": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "2531cf7a23f1644c567a4fe72d7091be62949255": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: koala"
+    },
+    "25a57a67dce78eba6e603d9bc4b751b465d329a9": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Bigbench: conlang translation"
+    },
+    "265ab74a24f1a7b0c1889898916fdaa44e0c63be": {
+      "request_type": "text_transformation",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Ethics_justice"
+    },
+    "26a6417ac0ea4f9176fded411829266ce2ff6dd8": {
+      "request_type": "math_reasoning",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "26e617c1a35abb1f1757a0e1a4866f2c6e231d53": {
+      "request_type": "factual_qa",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Ethics_deontology"
+    },
+    "277c461c962eee2f834066cb00a145691d29f9e1": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "287bc358cb412bd9e7786e61318aa1781507759d": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "29b4b64f3ab40095643b9846cf3d059d378d2425": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: abstract narrative understanding"
+    },
+    "2a044b84b65846d2e1b595a0839dc623c83d2713": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "2b0c1b2d4433170e95b7bf626d48859695b2e7d6": {
+      "request_type": "factual_qa",
+      "domain": "current_events",
+      "native_hint": "benchmark source: Vitaminc fact verification"
+    },
+    "2be65a0d5b4076dc201f4c3acfcbd3343bd2f745": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: minute mysteries qa"
+    },
+    "2c206334da094eb1af24d72532869c41a1417dd3": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: checkmate in one"
+    },
+    "2c4d8a707c2e08e34ce1e72f961a85f6304f4293": {
+      "request_type": "text_transformation",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "2c5088187c615c0cd29f81c84a61242065f1f28e": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "2e39cfe104621101d4c7ca287f6567d44cfbbca7": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Common_gen"
+    },
+    "2e96ac05ba0e9d065158a3d8927f4aa2d4c562e0": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "2f5577a706e3d53a8ebac486d98507fe50bcf856": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "2fe0bfaee9e1e765fbb3b1b3433ccdab2838127b": {
+      "request_type": "data_analysis",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "30517a7112faccf70bb25457109347e739cf0183": {
+      "request_type": "math_reasoning",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Inverse scaling prize: modus-tollens classification"
+    },
+    "30debaa66a45849153985bae649883dc22a657ae": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Commonsenseqa 2.0"
+    },
+    "311e3159b91943f79e06f3a1b14d0045831880fc": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: koala"
+    },
+    "322c826616d357ab19c50a9593a9c053119a05b5": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: E2e_nlg"
+    },
+    "3323f351da8a9866b3b95a21b9cc492cbce6550b": {
+      "request_type": "math_reasoning",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: Inverse scaling prize: hindsight-neglect classification"
+    },
+    "332d080e954bf86c4a0affc36662a7f3f5c71e2e": {
+      "request_type": "creative_writing",
+      "domain": "history_society",
+      "native_hint": "benchmark source: koala"
+    },
+    "37ffab241c31360c6c8199b0180be194be438a26": {
+      "request_type": "advice_recommendation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "382f28ea569caa0a5e34697197342e760660dd6d": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "391d86c02e81f470b10ddcf37ffe7a758a826c23": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: koala"
+    },
+    "399678550461f2b402bfe7b32441e5b3d47c6ccd": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bbq"
+    },
+    "3b4eb1e3dcaf6de3f54472c7e4ec11e7003b2240": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "3bffbb215e01beef7cebbdaf56096c90c0fbb0f0": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: cryptonite"
+    },
+    "3c2c8f911845d1d9319251cbc972404572989eec": {
+      "request_type": "text_transformation",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "3d634ed602338e7a8c490652c0dd0ec4d15600be": {
+      "request_type": "text_transformation",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Ethics_commonsense"
+    },
+    "40245874281991668c5a65c194fbbb6424a200c3": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: E-care"
+    },
+    "40b0050a7ffaf3210d2ce06ceeb82487e7c067f7": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Bigbench: chinese remainder theorem"
+    },
+    "419c637acb4facd6e4f31c3eb49e5e9b2549ce80": {
+      "request_type": "factual_qa",
+      "domain": "current_events",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "41dcf06ef94ef76aae6f8b6f0d50e3642782ab2f": {
+      "request_type": "text_transformation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "41ded72c894a5cbdc7d7b794932d350fe15fe8c1": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: koala"
+    },
+    "427210a82c2264f5ea982cc44f2e11f6bee45537": {
+      "request_type": "coding",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "4278e39c934591a781c7bd0f854bfe4a516c22e8": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "432cb27229096eafcc3751e90d706467852a0360": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "43db550b326fdf3af3539e70e692ba46c108e12a": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "4515b9f58fb5a6596610fa9b50223f1140b3773a": {
+      "request_type": "factual_qa",
+      "domain": "history_society",
+      "native_hint": "benchmark source: Hotpotqa"
+    },
+    "4573b32f10ced612e222b9ad4782afa83b97029c": {
+      "request_type": "advice_recommendation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "46bad0d1ea88c37670bb460776b33ebef8f1fa1c": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "47ddd8f17693aac82acd4297cca540de98d35395": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "4888deeb8cfc43f5337082eb6635e94c0b884cb1": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Hades"
+    },
+    "49625d02829b21b0003520a7f0813575d4241d8b": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Vicuna"
+    },
+    "4a1b05cfa8a721895249a7c537cd908fd0323c78": {
+      "request_type": "factual_qa",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "4aa2872ba48b07f751cf4a5710290a6c6958a163": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "4b606f48f90d23a561fb430c6c707d64988e4d4c": {
+      "request_type": "factual_qa",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "4ba57e81f4526bb86b1fe6046b98a34bcf87b844": {
+      "request_type": "factual_qa",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "4c3f103cc5df4868db247785064ffb3e71dbeb3f": {
+      "request_type": "creative_writing",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: koala"
+    },
+    "4ceb242afbd58a9c6b93fcc40c35c1df624d5065": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Bigbench: semantic parsing in context sparc"
+    },
+    "4d0078e30674139085e5fb3f9ed0ff8736df2fb3": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "4d635799c998161a9624a9f92d2de3e03d017417": {
+      "request_type": "factual_qa",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Bigbench: self-awareness"
+    },
+    "4f93b35a18e742c5131c924f96296d71d67a72dc": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Concode"
+    },
+    "4fcdb6c1c9db294662603c06a00615ab4c209f0b": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: riddle sense"
+    },
+    "505616d47276c918702065b7063f28a01a8b6c22": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: koala"
+    },
+    "518d23e5f913da650cb25463f9f7df2e774cf331": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "5523373399ef406bb7279210d0eface18c4ff1a6": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "5536f1d22828c2095390562a06d5986df8f08e64": {
+      "request_type": "research_synthesis",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "55df66c0dff2a723cc42cab53fe71fd84d3c4516": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Bbh"
+    },
+    "56303f449fd7e7412067a5a015e724319c91cce1": {
+      "request_type": "text_transformation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "56a2731799b9367d5be9da81ed44171e37b4261b": {
+      "request_type": "math_reasoning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "56eb6af4ee825095e711bc2124f5480d45033508": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "56fed9ab531fcc03549511a43ced085db83c7732": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: color"
+    },
+    "57d547f2c50de32426191091897de0a847ecf09b": {
+      "request_type": "factual_qa",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: Faviq"
+    },
+    "58301958cc74b1c736c75815db4947a47aeafacd": {
+      "request_type": "data_analysis",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: Finqa"
+    },
+    "5861ffb9c2e18c02ec2dc2f8e49f5465ea7737ea": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "58d428c142e87b45d096cd3683188864af93fcd7": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: Topiocqa"
+    },
+    "5a960b45fe32382c5770d09cb2f440819b85556b": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Cosqa"
+    },
+    "5b0a7ec5ac424c06a40376a60d67fb76c09c6bc6": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "5b2f94f946b2f03663537734138314942e892679": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "5bebc66318977875b00e5e85f9f390474752402e": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Inverse scaling prize: redefine classification"
+    },
+    "5d84897fe6e6a7753dccbce6b9b670ed68ae2743": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: cause and effect"
+    },
+    "5ec003bc3f86eccb85decfa9c853160cac57dd4e": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "5f315fd019956bf0cb03dadf72e6b6c7c9a074f6": {
+      "request_type": "advice_recommendation",
+      "domain": "history_society",
+      "native_hint": "benchmark source: Prosocialdialog"
+    },
+    "60e1c7bde0269deea5558900e383966227fb1854": {
+      "request_type": "text_transformation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "61c25db35b5ecea00ad3845c9d06cd7143ac6625": {
+      "request_type": "advice_recommendation",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: koala"
+    },
+    "61df91d32a20bb00ae195f5f1b009d2f90f9a96f": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Folio"
+    },
+    "61f05fd02ac6e9fb38dd5255445a2e1f76bddf10": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "63df4e9703fbb6ced815eb579989bd913b3ef385": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "65c96e417ba19ef930c8074684dea583ebb2c263": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "66b1a6673462ae2b3ad6baf06b36101475250603": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: Writingprompts"
+    },
+    "671bf46115b67a8de17113712391622009177cd9": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "6a2ed12d5e826a177f71dd5891b442eff9af6faf": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "6a8a8befe1cdd6e9b5ba46552a11fce2154f2183": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: word unscrambling"
+    },
+    "6b65feae048e160f19750d99ab857efcb208d67d": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Bigbench: physics"
+    },
+    "6b97ee55446a65508d12b7687d296d424c19eea8": {
+      "request_type": "creative_writing",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: koala"
+    },
+    "6babe02b23037474fdebfc61f9272078e234a4a5": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "6bfc9a8ecd9390d1fedd4b20261c1cc0f9f15203": {
+      "request_type": "text_transformation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "6ca0c10cb9272bab358da85d0548bd4db6d72748": {
+      "request_type": "text_transformation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: Lfqa_summary"
+    },
+    "6d572a055156f41ae4e8a3272f6201eeec089ef8": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Mmlu"
+    },
+    "6fbd695e80c87f988646568a10f74d52c6c7b086": {
+      "request_type": "research_synthesis",
+      "domain": "current_events",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "70e31f7eb121b596e506905755d8e1c41c6aa4c2": {
+      "request_type": "planning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: koala"
+    },
+    "717f32262b68dedb2e5b3cdfa52e53de215d31af": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "71bf2583cc2e0d7cd5c3169f1f0babe04a87bc8e": {
+      "request_type": "text_transformation",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "727783f8ac7e3f78681ebd330774bf50820df0a5": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "72d742735a3227a6b95aa91f985d729dbcb235ac": {
+      "request_type": "advice_recommendation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "7324cb56785af64b52619ad6d2a9d3c0d9f46c36": {
+      "request_type": "text_transformation",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: koala"
+    },
+    "7353c10a460f4f88abd75395e84bd733f82fb749": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Fever"
+    },
+    "7373cca158808848f3a3622cf955297e81599fb9": {
+      "request_type": "text_transformation",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "752f7e27b676c703f9a8719b4401dccfe28caa15": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Bigbench: nonsense words grammar"
+    },
+    "7577c67c7975cac54d41f4e09dd347e97728d78d": {
+      "request_type": "text_transformation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "76a8b82af71daa973b7a8b7d7d944b87c15b1b25": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "77845c52ce3d02c87d6eb6cac8e1568fe3fe5a45": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Leetcode"
+    },
+    "7919be8f80b6c52e25019cb13485fc1c27192376": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Open relation modeling"
+    },
+    "7a60aa1ba845e4f8c798b37e070c4af4f44a6249": {
+      "request_type": "factual_qa",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "7afe2cad31af414dc8d8d61bce3d1c40d44f8851": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "7d14d61949d555a010e4fe54381baf61d52d1617": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "800466e47b76371cd8ec69d1e0118dfd87ee529d": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "8073a21f417b2961c75c681ff27dc1a427dfb2fe": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "80b1a4517383828cc8b2ae24d064f75011f82c93": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "8128d43409dd69d22df37a4d31191dc31d4ae8dc": {
+      "request_type": "data_analysis",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Fetaqa"
+    },
+    "81c67615c61b818832b29016d0f3f31a0ae8abc5": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "82010e700e95b7d987d96f1c804c53290ebfa693": {
+      "request_type": "text_transformation",
+      "domain": "current_events",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "829c1d22ff373d0c69d330ec50dbbfe3824256d5": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Humaneval"
+    },
+    "837c89e4d9184b8695f5291f3d1d31ca913f74c8": {
+      "request_type": "factual_qa",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "85dd8b57954f40680e1f3f55995dea6de358b7d4": {
+      "request_type": "factual_qa",
+      "domain": "current_events",
+      "native_hint": "benchmark source: koala"
+    },
+    "875be77b727001f1f6b99e5802b9d3abf56d41a4": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "876861a4798d349a568ccb3eff911e156ca52d84": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "8777f370d61376388a8f504fb7c01e9400bc43c8": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "87f2a40ff2ffb04f4d6617cc30c225c430908aaa": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Inverse scaling prize: resisting-correction classification"
+    },
+    "8818efcf4300a7a2826f2c4dd131b792e45f1987": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: novel concepts"
+    },
+    "881a9d177560ba7dfac073f962949eba017da5d4": {
+      "request_type": "data_analysis",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "888447a2622eba29e8a3f9fd1a6ebf364c74597e": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "88d2e6934ea2bde27fafa851420a7b861e430ba4": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: Bigbench: emoji movie"
+    },
+    "88f7e0e47f4e34c25b08ce4c1ea3986e95c4dd5c": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "8934c7cc1290a0487eaefa8cfffce87da2aa8dae": {
+      "request_type": "data_analysis",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Bigbench: mnist ascii"
+    },
+    "89a65df0e7c43881b6e611a78d392a284566f9ee": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "8aef45a7b4db5cd54f6ebc53dd17ef6b80a456a3": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: koala"
+    },
+    "8b923ff2781f53fdcee5fa5f831a77048eb10589": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Timetravel"
+    },
+    "8d83e56e9c3546b8f9ef8d917c16e77398f0c63d": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Bigbench: semantic parsing spider"
+    },
+    "8e4ae4dee310f3978aedc7d316e7207f77921282": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: koala"
+    },
+    "8e6e83fda8f2813a211e2017260f405d3fdd883a": {
+      "request_type": "text_transformation",
+      "domain": "history_society",
+      "native_hint": "benchmark source: koala"
+    },
+    "8e8873836fd880c9bd63f38a3a9961167ec42d0c": {
+      "request_type": "factual_qa",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: Gpt-4 paper"
+    },
+    "8ff7cc072ffe702d0e14b3c7b714d1399c903d9c": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Inverse scaling prize: memo-trap classification"
+    },
+    "905f0a9fc17888c06764ed4666d704c2a61665b7": {
+      "request_type": "factual_qa",
+      "domain": "history_society",
+      "native_hint": "benchmark source: Bigbench: misconceptions"
+    },
+    "90727bc1657b3193af9460b513a9ec53f254b20b": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: inverse scaling prize: pattern-matching-suppression classification"
+    },
+    "90c7114b016d47f0c3066a2b12e638db04d57da9": {
+      "request_type": "advice_recommendation",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "91993f608b501070c4619eb3d89b64bc694c6bfd": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: codenames"
+    },
+    "9201c754b46a736556f95b744bf5fd0cf7d35b35": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "94861b570c8e71b89841d1a18400e6e84e981664": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "94add290686f3386c95642336bfdc392f048b42c": {
+      "request_type": "advice_recommendation",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "959fc0c3456c146323f4b296dcf4cfcbfc685c85": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "95bec180c60d9238a9ad060b29b8c76206b2e0b6": {
+      "request_type": "text_transformation",
+      "domain": "current_events",
+      "native_hint": "benchmark source: Real toxicity prompts"
+    },
+    "96497e2b0122eb9d88eecc80f298e26645ee4812": {
+      "request_type": "planning",
+      "domain": "history_society",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "97203891f0bb4beda5353603966e9c2c5eca1709": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "992246f2afad29b6ed4060b0b47f1f839c343bce": {
+      "request_type": "factual_qa",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Bigbench: understanding fables"
+    },
+    "9959f636dbfd269bab40741fa22d93d271f36193": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Pocketdoc/rucaibox-story-generation-alpaca"
+    },
+    "9a333c625e16a88ba3c9eb37523bfc35369f2360": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "9ab4c85fcff2a68d709927c2affabe999de8ff4b": {
+      "request_type": "advice_recommendation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "9ad729dcde82436029237a4bc3c330e0ddf74bf8": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Realtimeqa"
+    },
+    "9ad7cb21e0740cbcd631e1aed82c466a40d3a055": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "9c8533b605e55ebb9d6b3dc5cf737b16e84e71f1": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "9d544358a53b8d0835ba1bc2f64da4176978b400": {
+      "request_type": "advice_recommendation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: Conditionalqa"
+    },
+    "9d853ca983c4d10430f8179cba8fec9944a88c59": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: Popqa"
+    },
+    "9ddc87daa173e3e2600b4f5fd6374b792bc0c5ba": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "9e4eaa4fbf9cbcafb56c9ba0cfb2e71dbe4abaf1": {
+      "request_type": "factual_qa",
+      "domain": "current_events",
+      "native_hint": "benchmark source: Truthfulqa"
+    },
+    "9eef4afb5a8e55df0c3227aff48b6546131a36ec": {
+      "request_type": "math_reasoning",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Bigbench: fantasy reasoning"
+    },
+    "a0623bc85b2cbc9a2cc70b551760b49f09b42c9f": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: ascii word recognition"
+    },
+    "a1736b3cb102c9dd2e998fae533602d96255b3a3": {
+      "request_type": "research_synthesis",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "a2a736b091a9ec5371e07e2db11fd4044c7a8a5d": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "a3c60a17dd0aec3ddc2eedafc31b2fa5fcb9615e": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "a45e569fa13235d382cb8d758369bccb68690ba4": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "a5f44a2c585d151b939d6c45345a0a05527bd3ef": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Hhh-alignment"
+    },
+    "a71566f7df20917d12b8914473924c5ea2ab87c4": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Soda"
+    },
+    "a7d3ebc7f721c1bad5745192a15840a6cb5f01a3": {
+      "request_type": "research_synthesis",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "a95f0f2c6aedb2cb02c9d9bf46189683adc4916d": {
+      "request_type": "advice_recommendation",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "aa50b407b2bdcdc6688a20fc55fdafef039e3393": {
+      "request_type": "research_synthesis",
+      "domain": "general_other",
+      "native_hint": "benchmark source: koala"
+    },
+    "aae2528c1f7b43c101e202901d09264ff875df97": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "ab10e4c5144761c375194745a7fb4f04ff806f03": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: koala"
+    },
+    "ab5aadfa899eb0ec1225a040fc58689e1a9d9b41": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "ac5351024b50f86995f4017de67d16846ef652ac": {
+      "request_type": "text_transformation",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "ace4e6058f6a349bd3e805932699e42df58782c1": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "adcfecf48ee227cdf63abd47a181f49b1b34b9b9": {
+      "request_type": "factual_qa",
+      "domain": "history_society",
+      "native_hint": "benchmark source: koala"
+    },
+    "ade4988ba7430504599a5dd0abdc512ac1e551f3": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "ae45bd25940cec15412265500f1a7daefb8476bf": {
+      "request_type": "advice_recommendation",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: koala"
+    },
+    "af17cd6c88a10a5b7415c373dda580c656188942": {
+      "request_type": "factual_qa",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: koala"
+    },
+    "b0f70fac792cdbf42312d636f5afd902a8de430d": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "b315aa7329f34d1bc84783495fee3abec1ff752f": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "b3f518d17c7621e452776d62e3fed34ced9c5196": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "b72f2564b18dd63aaf86b9a869f30c036c80bb68": {
+      "request_type": "factual_qa",
+      "domain": "history_society",
+      "native_hint": "benchmark source: Finegrained-rlhf"
+    },
+    "b7b5e4c06f90f9c60452235120d4e3c909564502": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Delta-nli"
+    },
+    "b909282ed1e86637a30862dffa2d4e3aea473143": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "b976c2f91961c7087ef939390c6cf086d4048038": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Barda"
+    },
+    "b9fcfb64c1eac9e27e54be9aa43873c45bacb97e": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Gsm8k"
+    },
+    "ba432e49a51c1d1b435c97f5940b36a73d5bfae2": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "bd303a71d7b7c591e46df621548a682782bc1f1b": {
+      "request_type": "factual_qa",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Piqa"
+    },
+    "bdee456aa4d98bd38c34bf6658dff66917279f69": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "c0e28cbb1aa58c3f1a9d9b01a3d396a257aa00cb": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "c1660dfb84b168535a742c87354d8436a4d8a6ba": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "c16cf930d371e6b89896edfff12a7925603b1933": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "c187fac2af59bc986abdc74a09e704ffa592b642": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "c1b33e5256f3ef1cacc1634679e698d86de1659e": {
+      "request_type": "data_analysis",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "c2cebbaa5729a9dbb3368896e3b0abcd4e43fb00": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Saycan"
+    },
+    "c2d3d6d20d4d218b73f87e1536ae6a8ec31d92a8": {
+      "request_type": "text_transformation",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "c3026f65c54bc63c9b7549848ac5ee94d7640e27": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Textbookqa"
+    },
+    "c31bce835e25e36049e609216b3d7f40e381c661": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "c3e814b2f7a29e6bae4266c0af9e5d675aa0ce31": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Agieval - math (amc + aime)"
+    },
+    "c5e9f37b535d86ca8e7e6a802fa60138b36fd3b2": {
+      "request_type": "planning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "c63833933bde5f4f87893adf5c014765d31fe0d2": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "c7786cbbc69ee8eaedf322819507fbbf7bd8310c": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Inverse scaling prize: repetitive-algebra classification"
+    },
+    "c790cd09dd28dc957869b6987508fd23cf166d16": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "c81fbe6cd1ef22b7839d089bcf2cfdd2fcd4b801": {
+      "request_type": "planning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "c8a6b192784e0e419b5c0a1b2617ea01f11f23fd": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Factscore"
+    },
+    "c901430ad2ba47bb864f2f61067e250d20f0a211": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "caa122f8274b17ecf2461e30f11b2d60a597272e": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "caaad1103866f42ec96f5416fdfe0126caa09713": {
+      "request_type": "factual_qa",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "cc3c0b87657bf04d4712d17e1c762feedaaa482f": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: koala"
+    },
+    "cc61ddf5d641ce140b25561b6f49f031dff14c36": {
+      "request_type": "factual_qa",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: koala"
+    },
+    "cd023b299842c1582f10a577969ec47f908c5b4d": {
+      "request_type": "advice_recommendation",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: Bigbench: simple ethical questions"
+    },
+    "cd3e99ed9eb9f750d39d2f7f3b41fd22f3eccc33": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Alpha-nlg (art)"
+    },
+    "cd9e4ac913a6be8cca1548cbec91520a96131429": {
+      "request_type": "math_reasoning",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Bigbench: autodebugging"
+    },
+    "cdbc613b5bbd846e75226c922abd3869c4d836eb": {
+      "request_type": "creative_writing",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "cdca35d3c5666504171667eb1f5e50e6376ce560": {
+      "request_type": "text_transformation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "cddd3ea3f3f96dd1bc1ffe3f9b25603844505e9e": {
+      "request_type": "data_analysis",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "cf6fabe4290e55769bec3aed25739cb96273aab9": {
+      "request_type": "advice_recommendation",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "d1cdecdeec1c219fa27bb9450e697f4ce83ea84f": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Proscript"
+    },
+    "d4f8783165823a17b48c0596e404e4f94c9215f1": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "d5236b6e21a6f876e375f09f7223f74ac3294b29": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Decontextualization"
+    },
+    "d5ef96474250f042be73304ce693bdaeed1cb5b1": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Strategyqa"
+    },
+    "d73e807a77d6fddd8b905c7e2e9d11007d6c07ad": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "d9120163cc2d3d703ffb59b850ef3fc44a11768f": {
+      "request_type": "advice_recommendation",
+      "domain": "philosophy_ethics",
+      "native_hint": "benchmark source: koala"
+    },
+    "d98f832ff0061ebcfacac66803a9b12e69f8e5e5": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Shp"
+    },
+    "d994202a7dc3bfb504cd45d29a42ede81a790a92": {
+      "request_type": "factual_qa",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: Wizardlm"
+    },
+    "d9b7d19e81a64d326d24ace10c4f2923aa17e0e5": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "d9bee42a87790e197dc6af593e7c24e8742b984e": {
+      "request_type": "research_synthesis",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Asqa"
+    },
+    "da87ba73a85ba06cbca7d7051d45f6c26005747f": {
+      "request_type": "advice_recommendation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Inverse scaling prize: into-the-unknown classification"
+    },
+    "daca72fc355d5905d4dd744d366ec5a452e56ce1": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "dbb261adb7f54fa43fe0eb72eae8e9ab08a9a42d": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: sports understanding"
+    },
+    "dc25cce60a6abb0e9410894d58c4703392b7f7ac": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: koala"
+    },
+    "dc37e0a4a640d669528c76e2a850d53af2776231": {
+      "request_type": "research_synthesis",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "dc8a0bec6820e5bf218593d9bd418ebc06698264": {
+      "request_type": "text_transformation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Bigbench: real or fake text"
+    },
+    "dd8e10be669d21c29dea6d68d757c2f8053065ba": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Lfqa_discourse"
+    },
+    "dedf5d4fe34047d2b6c359c6ce66a1be01a92940": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: strange stories"
+    },
+    "e009b700d7e66f1335f886266b9bf4b8ebd9a794": {
+      "request_type": "text_transformation",
+      "domain": "current_events",
+      "native_hint": "benchmark source: koala"
+    },
+    "e03a7088247cc4ea3a735512fed07b124022b8c0": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "e0deb10165af085c7315d40f7c5a568aab705c86": {
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "e138dc017f81b533f68d8fa57606ecd2cbfc43d2": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "e1589c93ec6b43d952348d5e2de458d701c6c4d3": {
+      "request_type": "math_reasoning",
+      "domain": "general_other",
+      "native_hint": "benchmark source: koala"
+    },
+    "e1cd872e407587a3a06aa1332e39bba79dfe26a8": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Bigbench: movie dialog same or different"
+    },
+    "e2b1e4bcc3717bc06ab955a72eb0fe30f96fe830": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Cola"
+    },
+    "e2c5290057b6b5a0af5eec8a51c1c971fae7272f": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "e4e7e84441f9e7217f5b1ea1071db7c426d09d01": {
+      "request_type": "data_analysis",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Romqa"
+    },
+    "e4ecf8c772f867cbf42112e1c7c39d367ce83e58": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "e592dd6356f2106d2e419ac039aaf04c0c63a0af": {
+      "request_type": "text_transformation",
+      "domain": "medicine_health",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "e69aa46d55419b34a3993508e93c9562f9d47263": {
+      "request_type": "advice_recommendation",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "e712310d772d7daedf352bf4c8ce01649c051ee9": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "e72d6aae584577b13a4063637d22d6af13134b39": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: Mbpp"
+    },
+    "e9fcecd701642e0d9d29ce274a25568c61e8efe2": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "ea5ed6082f4793063be8d7e54aa9219787014e1d": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "eb78740edab09e53fd32bdf4557afef2e6cd066d": {
+      "request_type": "advice_recommendation",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "ecaf7203372a241f1af5ad83ee8c441cd5e06559": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: self-instruct"
+    },
+    "ed77d096244d163f60ad9f49857df79f44aef690": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "benchmark source: koala"
+    },
+    "ef65876ee21781eb4e86f519462fc017108a7f4b": {
+      "request_type": "factual_qa",
+      "domain": "finance_business",
+      "native_hint": "benchmark source: Bigbench: forcasting subquestions"
+    },
+    "efc79c6a42971eaae59dedff4ddd91497c4b71fe": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: koala"
+    },
+    "f026a78731e27f3760ebc43c56418f748adbfbdd": {
+      "request_type": "factual_qa",
+      "domain": "arts_literature",
+      "native_hint": "benchmark source: Fairytaleqa"
+    },
+    "f2c32f69f1edaa0d8a18a38ca2b11ff5ed7779dc": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "f4255e6a1f2b12d6953209465b7534fb1d3e3100": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "f69e4dbb2eeb9b4b53e8a462586743ab85beedc6": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: theoremqa"
+    },
+    "f7b676bacaafb10f5d67ef32b3af90133bf56b12": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "f8a102457aa428c22b371309aa153d7838a8ddc2": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "f934e5e5d7b4ea3dd6c9e9992e7ae7f9aee25e5e": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Resq (real-world spatial question answering)"
+    },
+    "f969534b08a62c65339c602490a9f43ee3a38db5": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "benchmark source: mt-bench"
+    },
+    "f9b91dce068daa268eca70b57270feb57b45f536": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Scone"
+    },
+    "fa3ad056c9f2e18330a51b8aa65cca602e05e146": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "fb801cf06eaf4749f363516812f55b75857366a0": {
+      "request_type": "creative_writing",
+      "domain": "history_society",
+      "native_hint": "benchmark source: alpaca"
+    },
+    "fcb10d745925043aa7295c20e47b1c521dde4470": {
+      "request_type": "text_transformation",
+      "domain": "general_other",
+      "native_hint": "benchmark source: Inscit"
+    },
+    "ff079f660cca2b189325f1392b7b4b7bd7d32dfb": {
+      "request_type": "factual_qa",
+      "domain": "law_policy",
+      "native_hint": "benchmark source: Contractnli"
+    },
+    "ff3d8d6541711e5b203e1802299511074f85e889": {
+      "request_type": "math_reasoning",
+      "domain": "science_stem",
+      "native_hint": "benchmark source: Prm800k"
+    }
+  }
+}

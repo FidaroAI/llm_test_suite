@@ -1,0 +1,515 @@
+{
+  "_meta": {
+    "suite": "research_rubrics",
+    "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "generated_at": "2026-05-22T08:05:44+00:00",
+    "count": 101
+  },
+  "classifications": {
+    "012cce2da8f5093485835a1578b4c2fa8c5b87dc": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "01848b7e44b4edf6f97ef03b4ed0c5913da2c8c7": {
+      "request_type": "research_synthesis",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "03fc124c5b83143559a4dc83a737e20000733204": {
+      "request_type": "research_synthesis",
+      "domain": "current_events",
+      "native_hint": "dataset domain: Current Events"
+    },
+    "050b3808070c9b9b790b740baee69889acb9dae6": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "06075790add29c8446d04fe241a4943a8a3fd07e": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Other"
+    },
+    "09c39a0a888509cb904370c7e3d4f83c2f3b92a6": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "dataset domain: Other"
+    },
+    "0c3f14d0f0d9aeac7abb198ce4593a71e7cd2763": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "11e4eea0c619cd579fdb717f2e4f9760959e05e9": {
+      "request_type": "research_synthesis",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "152c7be47452f7a48a07199caf152f606074867c": {
+      "request_type": "research_synthesis",
+      "domain": "arts_literature",
+      "native_hint": "dataset domain: Other"
+    },
+    "163d98027faefd9ad0672148986593c307490fe4": {
+      "request_type": "research_synthesis",
+      "domain": "current_events",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "1bfbcf9ded6210c4a18c179f5df4f90030e7ecfe": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "1dd5685902a16cd9d58c43730391e9d0f3f9d868": {
+      "request_type": "research_synthesis",
+      "domain": "law_policy",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "248021635de2546fd3085c0c0c00e61e36504f2b": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "29d22ec8a541a8f5608e602c98a37be82a7a194f": {
+      "request_type": "data_analysis",
+      "domain": "consumer_lifestyle",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "2a539ab8d6bcc001dd4adb5d6fd56708f4f2af92": {
+      "request_type": "research_synthesis",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "2a96de103d792e8c312de3ce9e9aec3de12f497e": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "2ed3b8549b3b4024d2bc04f1178f6f964ba9822e": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "dataset domain: Creative Writing"
+    },
+    "3303cdada92b5cb0d5b9b88c9e38dd16f3e1292a": {
+      "request_type": "creative_writing",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "3654074ccab3fd4992e043230f90c187716a811e": {
+      "request_type": "research_synthesis",
+      "domain": "arts_literature",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "37f629f707c431cfc0e0c70fea3a3219e42d4135": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "dataset domain: Creative Writing"
+    },
+    "4071e22320a2a31de81c25e337440ebb57df3b48": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "42025578db28170a2191d8257085a58fc04fe727": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "4cb9f756268a9d442318fc22d66061da056a6619": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "4defa1ac917f9ea297a289d1e2b8ac63bbb1ee00": {
+      "request_type": "creative_writing",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "4ebc7b180fec85d9a1d499cd8c6324fe65abc4d4": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "4f8b0e4b4af7fd3be9ad65e2d10f752cfad81b02": {
+      "request_type": "planning",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "51d0263aec594e552648e8e185c4ce8f2d65a0cc": {
+      "request_type": "creative_writing",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "5317b277d31155d8d6cbe35cb83a3337ecdf72ef": {
+      "request_type": "planning",
+      "domain": "general_other",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "545643ddca59b1e36c82c07820be82d80089acb5": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "571c6449a4af9cc1bbea21a96956c0c6884b296f": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "5821dc99f2d56dc3dbc2171d2f2a7ffd275d3cad": {
+      "request_type": "planning",
+      "domain": "medicine_health",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "584a39e36357d622db9e6f7c6f6977790a51b275": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "5abf340be1977a9a667f3c2abd5f5c0e7fa38ae2": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "5b685d2ab1cb5ad70c768d7ae65f40639210dcd5": {
+      "request_type": "planning",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: Creative Writing"
+    },
+    "5ba0064020bcb73da2ad5834b4011aaf32c399a4": {
+      "request_type": "research_synthesis",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "62cda292ae39e8777ca428acf2ebde4d1b7c401f": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "dataset domain: Other"
+    },
+    "633e5c7a211e2ed598668bcf58f93451d9babce8": {
+      "request_type": "research_synthesis",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "6450997d845490d54f22b8edcc97b958a1e9daf5": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "64e96ab81f69bea4fcb038a74a90508fe6127dc1": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "65350eaaa1739d75b9a28d91f704511ec7f463c6": {
+      "request_type": "research_synthesis",
+      "domain": "medicine_health",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "6892035dea65a5d7c36f9243b7663477b17bd797": {
+      "request_type": "planning",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "6a362259adf8c9fc17faf866c8f3bdce3c241070": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "6b9bdc9b9567e330a1838bc0aba437520b767f4d": {
+      "request_type": "planning",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "6ca54e83701adb7f934df166159e32d12ba4f95d": {
+      "request_type": "planning",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "73ac126763f63b61b479085481f2acc1fdd3a622": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "7663974b355e7b77322e6e9fa2ea69e8013fbf77": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "79dfae35bbec0beb34c153023cef6088b654fcdd": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "7f77d9d984d97147a243365c50243dcd62997635": {
+      "request_type": "creative_writing",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "8099eaeb5c724111660812c258a965f3f01820d4": {
+      "request_type": "research_synthesis",
+      "domain": "law_policy",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "8667e8d1de2f4f14ec3d0b29dd47fd8fbf404726": {
+      "request_type": "research_synthesis",
+      "domain": "current_events",
+      "native_hint": "dataset domain: Current Events"
+    },
+    "8a9975cf88bc6963ad69e85641bee1e9aeab2153": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "8b26ca71d775e49cecee8286122d92e0434c3c02": {
+      "request_type": "planning",
+      "domain": "current_events",
+      "native_hint": "dataset domain: Current Events"
+    },
+    "8d3fa8f4ea8a58cb6e7009f77b6e6a7511f9d72c": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Creative Writing"
+    },
+    "8da3e5fdec62b894a0ddd9f7fc18dbf8e6b84d0c": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "8f36916f3c8d0dfd64fb25b812ab4db9157589e1": {
+      "request_type": "creative_writing",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "9039354beb327a0c981eb54cec5d930341e7b9fc": {
+      "request_type": "creative_writing",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Creative Writing"
+    },
+    "909316fecae7949bf9d9185f40ac97b7377ce3db": {
+      "request_type": "planning",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "921c4682827342115e0f3aab2581e2a5ef43f27d": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "9385c756a9e1dab42d8590aaab72592ebfd2b5aa": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "94a5a2322bbb5d912aecedec8b7b61a8b4830d6d": {
+      "request_type": "research_synthesis",
+      "domain": "current_events",
+      "native_hint": "dataset domain: Current Events"
+    },
+    "9ae780d088f6a2ac3414218cf1debe3f127a4ee1": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "9e65a8db8ea75845c0375b2540bbc45a17d4ecb0": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "a113db47b04cc4a793603508128104fa57cc22a7": {
+      "request_type": "planning",
+      "domain": "law_policy",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "a30205e0609dc5b2e270b74ee39c8fb779b26b89": {
+      "request_type": "research_synthesis",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "a5d0aba6b6c81042ce5a7a5576391039880f23a3": {
+      "request_type": "creative_writing",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "a69635ce87e6941dc1c2c4567eca7c7fbbfe61ee": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "a7278010badb5ec7b9bc626e6245f5938f85853e": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "a7cd6380def9d5d0974c6a936dba383681ae4b07": {
+      "request_type": "creative_writing",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "acbe22f46b93edc2a2d473be376704b553261300": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "b000806b1c3c429bc4c3021f94e4bacd400231b4": {
+      "request_type": "research_synthesis",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "b1228e7ba53601dc8315768e27b5691c7ba4a8f0": {
+      "request_type": "research_synthesis",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "b73eb2aafb942ebad85935926a8ff9af67eb054d": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "b969bcf274b4925f218df818e0fdcb6ba83b51de": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "b9fa135103a92c6ff9001291eb891eb9f41ad712": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "ba473d9ef8a303ca934f35ba0c3b76ddbd2058f8": {
+      "request_type": "creative_writing",
+      "domain": "arts_literature",
+      "native_hint": "dataset domain: Creative Writing"
+    },
+    "bae57451ba0b0cd0b4a9b7883859f54496123acc": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "be1848ef8ed40f19fc306ea9fb5f6fc1de753a22": {
+      "request_type": "research_synthesis",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "c05a52ff9515d9635dbc7c9007570cb396800c0a": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "c600d3c93a81aceabd851e81b1e8fe412599b20c": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "c80a2cdd44d4c7d051000399a18161881a7401ff": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "c904fd755f4a2ece2ec7c1d066c393982223c618": {
+      "request_type": "creative_writing",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "cf59094ffea54a35855518860ce779255460e255": {
+      "request_type": "research_synthesis",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "d1beda14f8a2d9b7b0e6039afee69dc87bd45859": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "d20766cd4e8d6305639597ecc8f600e8cab26bde": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "d5f96533f04c9b0f5ba4eeef6c278d663a87e96d": {
+      "request_type": "research_synthesis",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "db1013310ed903ad808881101ee0aef03f5e5d34": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "e3096207a49e5c0c1d093bdb0f3489b74e7748e2": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: General Consumer Research"
+    },
+    "e5f754336fdf4bd5a9ada3b7d00bda2a90b5014a": {
+      "request_type": "advice_recommendation",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "e716f7b754292389452995b4f7018caebc4fc00e": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Other"
+    },
+    "e7bbf911c10c1e52261df90642872feea0a48f59": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "ec100c07ee0e38fc0d969675062aa2a800bdc621": {
+      "request_type": "research_synthesis",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "ed825f5ef06788e268c27353fb4d3de20451e1a6": {
+      "request_type": "research_synthesis",
+      "domain": "science_stem",
+      "native_hint": "dataset domain: STEM"
+    },
+    "eee2141efa4fa820bf2c77a074729e0dafdde457": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "ef46fabdf1546e90b7c5ef7b73bfb907d01004bf": {
+      "request_type": "research_synthesis",
+      "domain": "finance_business",
+      "native_hint": "dataset domain: Business Planning & Research"
+    },
+    "ef550bd0829e475bdc5883de3dd03bdc22ab7b90": {
+      "request_type": "data_analysis",
+      "domain": "current_events",
+      "native_hint": "dataset domain: Current Events"
+    },
+    "f0eeed9183c608bb77ab1d2b06f506c0e9caaac0": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: Technical Documentation"
+    },
+    "f268a7227454ed522557cc90534c4db21545d54a": {
+      "request_type": "math_reasoning",
+      "domain": "philosophy_ethics",
+      "native_hint": "dataset domain: Hypotheticals & Philosophy"
+    },
+    "f357ed65570e5036a2df077e07292303ca296a7c": {
+      "request_type": "research_synthesis",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "f4ab607999d6b99fcb422765de668fc85845a362": {
+      "request_type": "planning",
+      "domain": "history_society",
+      "native_hint": "dataset domain: Historical Analysis"
+    },
+    "f5068d640c9825cb9a37322dbf8bfc9667f2bc11": {
+      "request_type": "research_synthesis",
+      "domain": "technology_ai",
+      "native_hint": "dataset domain: AI & ML"
+    },
+    "f792529d6a084c175522484e701441f13d40e5aa": {
+      "request_type": "advice_recommendation",
+      "domain": "consumer_lifestyle",
+      "native_hint": "dataset domain: Other"
+    }
+  }
+}

@@ -33,6 +33,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import classification  # noqa: E402
 import suite_config  # noqa: E402
 
 SUITE = suite_config.suite_name(__file__)
@@ -105,7 +106,7 @@ def _row_to_test(row, index, max_num_criteria=None):
     ]
 
     source = row.get("source", "unknown")
-    return {
+    test = {
         "description": f"multifaceted[{source}] {index}",
         "vars": {"user": row["prompt"]},
         "assert": asserts,
@@ -117,6 +118,7 @@ def _row_to_test(row, index, max_num_criteria=None):
             "source": source,
         },
     }
+    return classification.augment(test, SUITE, row["prompt"])
 
 
 def generate_tests():
