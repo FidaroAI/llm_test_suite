@@ -13,12 +13,25 @@ suite maps to:
     randomize_selection bool         shuffle before capping
     random_seed         int          seed for the shuffle (default 0)
     max_rubrics         int | null   cap rubrics per row (null = all)
+    stratify            obj | null   take a quota per classification (null = off)
+
+``stratify`` lets a run draw an even sample across a classification dimension
+instead of an undifferentiated cap. It is an object::
+
+    {"by": "domain", "per_group": 3, "groups": ["finance_business", "coding"]}
+
+``by`` is the ``metadata`` key to group on (e.g. ``domain`` or
+``request_type``), ``per_group`` is how many tests to keep from each group, and
+the optional ``groups`` list restricts to (and orders by) those values; omit it
+to use every value present. ``number_to_generate`` still applies afterwards as
+an overall ceiling.
 
 A missing file or missing suite key falls back to DEFAULTS. Generators build
 their candidate tests, drop any with no gradable assertions, then call
 ``cfg.select(tests)`` which applies the (optionally seeded) random selection,
-caps to ``number_to_generate``, and stamps the resolved config onto each
-selected test's ``metadata.config`` so the run is reproducible.
+the optional per-class stratification, caps to ``number_to_generate``, and
+stamps the resolved config onto each selected test's ``metadata.config`` so the
+run is reproducible.
 """
 
 import json
@@ -33,6 +46,7 @@ DEFAULTS = {
     "randomize_selection": False,
     "random_seed": 0,             # used when randomize_selection is on but unset
     "max_rubrics": None,          # None => all rubrics
+    "stratify": None,             # None => no per-class quota
 }
 
 
@@ -64,12 +78,39 @@ class SuiteConfig:
         self.randomize_selection = values["randomize_selection"]
         self.random_seed = values["random_seed"]
         self.max_rubrics = values["max_rubrics"]
+        self.stratify = values["stratify"]
+
+    def _stratified(self, tests):
+        """Keep ``per_group`` tests from each group of ``metadata[by]``.
+
+        Operates on the already-(optionally)-shuffled list, so per-group picks
+        are random-but-reproducible. Group order follows the explicit
+        ``groups`` list if given, else first-seen order.
+        """
+        by = self.stratify["by"]
+        per_group = self.stratify["per_group"]
+        wanted = self.stratify.get("groups")
+
+        kept = {}  # group value -> list of tests, capped at per_group
+        order = list(wanted) if wanted else []
+        for test in tests:
+            value = (test.get("metadata") or {}).get(by)
+            if wanted is not None and value not in wanted:
+                continue
+            bucket = kept.setdefault(value, [])
+            if value not in order:
+                order.append(value)
+            if len(bucket) < per_group:
+                bucket.append(test)
+        return [test for value in order for test in kept.get(value, [])]
 
     def select(self, tests):
-        """Apply random selection + cap, stamping config onto chosen tests."""
+        """Apply selection (shuffle, stratify, cap), stamping config on output."""
         chosen = list(tests)
         if self.randomize_selection:
             random.Random(self.random_seed).shuffle(chosen)
+        if self.stratify:
+            chosen = self._stratified(chosen)
         if self.number_to_generate is not None:
             chosen = chosen[: self.number_to_generate]
         for test in chosen:

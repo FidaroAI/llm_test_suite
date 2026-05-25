@@ -151,6 +151,57 @@ produces and can randomize the tests (with a fixed seed).
 We can also restrict the number of rubrics per test case. These datasets often have a
 lot of assertions, and running every rubric would take too long.
 
+### Test classification
+
+Every generated test is labelled on two shared, suite-independent axes so we can slice
+the suites consistently:
+
+* `request_type` — *what* the user is trying to do (e.g. `coding`, `planning`,
+  `research_synthesis`).
+* `domain` — the subject *area* (e.g. `finance_business`, `science_stem`).
+
+The controlled vocabularies (the full list of allowed values, with descriptions) live in
+[tests/classification.py](../tests/classification.py) and are the single source of truth.
+Labels are **not** stored in the raw datasets. They live in
+`data/classifications/<suite>.json`, keyed by a hash of the prompt text, and are merged
+into each test's metadata at generation time by `classification.augment`. Keying on the
+prompt hash means the mapping survives dataset re-downloads/reordering and works even for
+suites whose rows have no stable id (e.g. multifaceted). Native dataset fields are kept
+for provenance (`native_domain` for research_rubrics, `category` for agentharm, `source`
+for multifaceted) but aren't used as the classification — they use disjoint per-dataset
+vocabularies. The agentharm suite is additionally tagged `censorship: true` (other suites
+omit the key) so its deliberately harmful prompts can be excluded from benign runs.
+
+Populate/refresh the labels with the LLM classifier (uses the same Bedrock model family as
+the grader; idempotent — only classifies prompts not already labelled):
+
+```
+python scripts_repo/classify_tests.py                      # all suites
+python scripts_repo/classify_tests.py --suite multifaceted # one suite
+python scripts_repo/classify_tests.py --force              # re-classify everything
+```
+
+**Selecting by classification.** Two complementary mechanisms:
+
+* *Run a single class* — filter at run time, e.g.
+  `--filter-metadata request_type=coding` or `--filter-metadata domain=finance_business`.
+  Exclude the harmful suite with `--filter-metadata censorship=false` (untagged tests match).
+* *Take an even sample across a class* — set `stratify` in the suite-generation config to
+  take N tests from each value of a dimension. For example, to generate 2 research_rubrics
+  tests per domain:
+
+  ```json
+  "research_rubrics": {
+    "randomize_selection": true,
+    "random_seed": 1,
+    "stratify": {"by": "domain", "per_group": 2}
+  }
+  ```
+
+  Add an optional `"groups": [...]` to restrict to specific values. `number_to_generate`
+  still applies afterwards as an overall ceiling. See
+  [tests/suite_config.py](../tests/suite_config.py).
+
 ## Gotchas
 
 * When running the plaintext docker gateway locally, don't forget to set the Phala
@@ -168,7 +219,9 @@ lot of assertions, and running every rubric would take too long.
   prompts expect a certain placeholder for the websearch prompt.
 * Audit the generated tests and find a "good" subset that gives good coverage (of the
   use cases we want). Can use an LLM to audit; too big for humans.
-* Categorise tests! See below.
+* ~~Categorise tests!~~ Done: two-axis (`request_type`/`domain`) classification, see
+  [Test classification](#test-classification). Remaining: review the LLM-assigned labels
+  for accuracy and tune the vocabularies.
 * Do system prompt iterations :)
 * Iterate on model config. This requires a vLLM restart, can be done against dev, and
   needs scripting. WARNING: be very careful with the Phala CLI — there's no gate to

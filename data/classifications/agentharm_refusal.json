@@ -1,0 +1,230 @@
+{
+  "_meta": {
+    "suite": "agentharm_refusal",
+    "model": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "generated_at": "2026-05-22T08:04:24+00:00",
+    "count": 44
+  },
+  "classifications": {
+    "04c12a85512048d67c4d429de11e129a25ac30b9": {
+      "request_type": "creative_writing",
+      "domain": "current_events",
+      "native_hint": "harm category: Hate"
+    },
+    "12694a790470e4f4c66702b3588fb9ac9b23f86a": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Cybercrime"
+    },
+    "2bd8bcd1e04656d36f4dd534ecd5ace9cf15dc5b": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Hate"
+    },
+    "32d5f9ef1e496a6494af6dcee00eb808de75e858": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Hate"
+    },
+    "330b894f6ccca1795ca17500f08627b9b5125255": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Harassment"
+    },
+    "33d43992245f4aa2492b571a9bd7276d554cfb92": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Drugs"
+    },
+    "35901bbfff9c948dd6d92865e29b511ffa341ead": {
+      "request_type": "creative_writing",
+      "domain": "medicine_health",
+      "native_hint": "harm category: Drugs"
+    },
+    "38488a532cb2045f2efec64058b677c9db63a300": {
+      "request_type": "planning",
+      "domain": "current_events",
+      "native_hint": "harm category: Sexual"
+    },
+    "419c473d33a4ff15b2697acabf8a543dc595a403": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Harassment"
+    },
+    "424e89dc0ce0b916c3e2ce936e112de6ba31344e": {
+      "request_type": "text_transformation",
+      "domain": "medicine_health",
+      "native_hint": "harm category: Drugs"
+    },
+    "474b0dddb3425ade4271a2bd58195bc993837c59": {
+      "request_type": "planning",
+      "domain": "finance_business",
+      "native_hint": "harm category: Fraud"
+    },
+    "4cdc09e78c6435a07affd23bf4f940773ed99316": {
+      "request_type": "advice_recommendation",
+      "domain": "general_other",
+      "native_hint": "harm category: Harassment"
+    },
+    "4cf4d04fb7b6e06177bba1a37a52982346768e2b": {
+      "request_type": "advice_recommendation",
+      "domain": "finance_business",
+      "native_hint": "harm category: Disinformation"
+    },
+    "61fd72bd35ddbb30b52ba8cfb6a7b8738fcf8a92": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Sexual"
+    },
+    "627dfef053082f7e6652ab621571c43b0e425acf": {
+      "request_type": "planning",
+      "domain": "finance_business",
+      "native_hint": "harm category: Cybercrime"
+    },
+    "6aa040267e2cd2862b52ab716ac756761731bcaf": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Cybercrime"
+    },
+    "707b8982ae92d202bafd9275f803510615f0e59c": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Fraud"
+    },
+    "7163bc0fdee592ba175c61eb549d1c6898f3fe82": {
+      "request_type": "planning",
+      "domain": "general_other",
+      "native_hint": "harm category: Drugs"
+    },
+    "737da59230810847a6b15b451354120d66ba720a": {
+      "request_type": "text_transformation",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Copyright"
+    },
+    "7be0ac854e183ba6707c8894c751911e7b5bc47d": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Disinformation"
+    },
+    "7c1ea52c3643bff56d57f212c7053caf98896d08": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Fraud"
+    },
+    "8204341214c561ad87186cbd0d2cc9d2b34fa1c4": {
+      "request_type": "coding",
+      "domain": "finance_business",
+      "native_hint": "harm category: Fraud"
+    },
+    "87acc9f1bff908771c6825285cbef8b7bb748933": {
+      "request_type": "text_transformation",
+      "domain": "arts_literature",
+      "native_hint": "harm category: Copyright"
+    },
+    "8d5d79bf1a7187d9e206c41c3ad123caae90d608": {
+      "request_type": "advice_recommendation",
+      "domain": "law_policy",
+      "native_hint": "harm category: Fraud"
+    },
+    "983c8488b000b8d0ed1887a82033b68c7ecb6dbc": {
+      "request_type": "creative_writing",
+      "domain": "medicine_health",
+      "native_hint": "harm category: Harassment"
+    },
+    "a1cc006f7e35580826bcc8a5509c1ae982693e7e": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Sexual"
+    },
+    "b10d1dc8cefe06342acac6d2b99484f2c7eaa16d": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Cybercrime"
+    },
+    "bfa4cd20ce31c7f4cd7b20b6589106f93b66f8a7": {
+      "request_type": "coding",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Cybercrime"
+    },
+    "ca6040dce98124a372ccdb83e2ceb308a24098b6": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "harm category: Drugs"
+    },
+    "ccf009628a02b4efadcdcf7d41fee207d61f7fd7": {
+      "request_type": "creative_writing",
+      "domain": "current_events",
+      "native_hint": "harm category: Disinformation"
+    },
+    "cd2c2f1217d343aa69a2bf2cbde277df26c11c2b": {
+      "request_type": "creative_writing",
+      "domain": "consumer_lifestyle",
+      "native_hint": "harm category: Copyright"
+    },
+    "ce9764aacd6f33cf85bcab207bcfc9ed5e591e82": {
+      "request_type": "advice_recommendation",
+      "domain": "current_events",
+      "native_hint": "harm category: Hate"
+    },
+    "d838ceb844ef54e5590505f02823fd94165ec845": {
+      "request_type": "advice_recommendation",
+      "domain": "law_policy",
+      "native_hint": "harm category: Sexual"
+    },
+    "d89ab64b4c8405333e653043b0922142c402d09f": {
+      "request_type": "planning",
+      "domain": "general_other",
+      "native_hint": "harm category: Harassment"
+    },
+    "db0acc806ad5ca5c67d9d0b809c38fed0cf30c88": {
+      "request_type": "planning",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Copyright"
+    },
+    "dd08e352dbcd772407ee9c82846de1f444b36252": {
+      "request_type": "planning",
+      "domain": "consumer_lifestyle",
+      "native_hint": "harm category: Copyright"
+    },
+    "e035bc6b4edecf6342e5634446768d77c80c442c": {
+      "request_type": "factual_qa",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Fraud"
+    },
+    "e599bea364fbb664a7328e8109a8b8e0c8bcfea1": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Disinformation"
+    },
+    "ecdc930c6bbac7cf61611099dfd891bf38d37aae": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Hate"
+    },
+    "f2a1cf45a9537258d6d81c80fa710b34244f47c8": {
+      "request_type": "factual_qa",
+      "domain": "general_other",
+      "native_hint": "harm category: Sexual"
+    },
+    "f449cb8db46fe2c1b3aa29aaa35c5316ecd4e210": {
+      "request_type": "creative_writing",
+      "domain": "general_other",
+      "native_hint": "harm category: Sexual"
+    },
+    "f538c2b58a8a2bcb9ef095b52fc03846f5ed20f0": {
+      "request_type": "advice_recommendation",
+      "domain": "general_other",
+      "native_hint": "harm category: Harassment"
+    },
+    "f82cb155ff9d0359a7b3345f65d20a4d582c75a7": {
+      "request_type": "text_transformation",
+      "domain": "technology_ai",
+      "native_hint": "harm category: Disinformation"
+    },
+    "fdb408639fdd5fc19627862720de8f284fc0a8ae": {
+      "request_type": "text_transformation",
+      "domain": "current_events",
+      "native_hint": "harm category: Copyright"
+    }
+  }
+}

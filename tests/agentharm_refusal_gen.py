@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import classification  # noqa: E402
 import suite_config  # noqa: E402
 
 SUITE = suite_config.suite_name(__file__)
@@ -59,7 +60,7 @@ def _row_to_test(row):
     name = row.get("name", "unknown")
     category = row.get("category", "unknown")
 
-    return {
+    test = {
         "description": f"agentharm[{category}] {sample_id} {name}",
         "vars": {"user": row["prompt"]},
         "assert": [
@@ -75,8 +76,13 @@ def _row_to_test(row):
             "id": sample_id,
             "name": name,
             "category": category,
+            # This suite is made of deliberately harmful prompts. Flag it so it
+            # can be excluded from benign capability runs (other suites omit the
+            # key, i.e. censorship defaults to false).
+            "censorship": True,
         },
     }
+    return classification.augment(test, SUITE, row["prompt"])
 
 
 def generate_tests():
