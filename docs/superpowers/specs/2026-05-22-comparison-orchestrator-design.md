@@ -79,23 +79,27 @@ Keys are kebab-case to match the requested spec.
 
 1. Parse the config path; derive the comparison name from the filename stem
    (`prod_vs_dev_gemma.json` → `prod_vs_dev_gemma`).
-2. Create `comparisons/<name>/`.
+2. Create the comparison dir `comparisons/<name>/` and a fresh per-run
+   subdirectory `comparisons/<name>/run_<YYYYMMDD-HHMMSS>/`. All run-specific
+   outputs go in the run dir, so runs never overwrite each other; only the
+   vLLM-options cache (step 5) lives at the comparison level, where it persists
+   across runs.
 3. Validate the config.
 4. Write `suite-generation-config` to
-   `comparisons/<name>/suite_generation_config.json` and export
+   `comparisons/<name>/run_<...>/suite_generation_config.json` and export
    `SUITE_GENERATION_CONFIG_FILE` pointing at it.
 5. **Redeploy decision** (only if `vllm-options` present):
-   - Read `comparisons/<name>/vllm_options_cache.json`.
+   - Read `comparisons/<name>/vllm_options_cache.json` (comparison level).
    - If the cache exists and equals the current options → skip redeploy.
    - Otherwise warn the user and ask for confirmation (always — this is an
      infrastructure action; a `--yes` flag bypasses for automation). On
      confirmation, call `deploy_phala.py`; on success write the cache (an
      identical copy of the options json).
 6. **`deploy_phala.py`**:
-   - Copy `PHALA_DOCKER_COMPOSE_FILE` → `comparisons/<name>/deployed_compose.yaml`.
+   - Copy `PHALA_DOCKER_COMPOSE_FILE` → `comparisons/<name>/run_<...>/deployed_compose.yaml`.
    - Inject `vllm-options` into the `vllm` service's `command` list, preserving
      `--host 0.0.0.0` and `--port 8000`.
-   - Run `phala deploy --cvm-id <id> --compose comparisons/<name>/deployed_compose.yaml -e .env.phala`.
+   - Run `phala deploy --cvm-id <id> --compose <run-dir>/deployed_compose.yaml -e .env.phala`.
    - Poll `GET <vllm-dev-url>/v1/models` until HTTP 200 (long timeout, minutes;
      log progress).
 7. **Start gateways in Python** (mirroring `run_plaintext_gateway.sh`'s docker
@@ -105,15 +109,15 @@ Keys are kebab-case to match the requested spec.
      `system-prompt-file` set, add
      `-v <abs>:/app/src/llm_gateway/prompts/core_system_prompt.md:ro` (dev only).
    - `BRAVE_API_KEY` from env. Poll each gateway's `/v1/models` until ready.
-8. **Run tests** (no baseline freeze), each into the comparison dir with a
-   timestamp:
-   - prod → `comparisons/<name>/prod_results_<YYYYMMDD-HHMMSS>.json`,
+8. **Run tests** (no baseline freeze), each into the run dir with a timestamp:
+   - prod → `comparisons/<name>/run_<...>/prod_results_<YYYYMMDD-HHMMSS>.json`,
      `--filter-providers fidaro_plaintext_gateway_phala_prod`.
-   - dev → `comparisons/<name>/dev_results_<YYYYMMDD-HHMMSS>.json`,
+   - dev → `comparisons/<name>/run_<...>/dev_results_<YYYYMMDD-HHMMSS>.json`,
      `--filter-providers fidaro_plaintext_gateway_phala_dev`.
    - Both passes also receive the pass-through `promptfoo-filters`.
-9. `compare_runs.py <prod_results> <dev_results> --out comparisons/<name>/report__<YYYYMMDD-HHMMSS>.html`
-   (report written into the same directory as the run results), then `open` it.
+9. `compare_runs.py <prod_results> <dev_results> --out <run-dir>/report__<YYYYMMDD-HHMMSS>.html`
+   (report written into the same run directory as the result files), then
+   `open` it.
 10. Ensure the promptfoo viewer container is up via `run_promptfoo_docker.sh`.
 
 ## vLLM options → command mapping

@@ -1,0 +1,25 @@
+# Dynamic dev provider, driven by run_comparison.py.
+#
+# Unlike the static fidaro_plaintext_gateway_phala_dev.yaml (which freezes its
+# model/temperature/max_tokens), the model / temperature / max_tokens here are
+# templated from environment variables that run_comparison.py sets per run from
+# the comparison config's dev-provider-options. promptfoo renders {{ env.* }} in
+# the provider id and config at load time (renderEnvOnlyInObject), so this
+# reflects a gateway the run reconfigured. Keeping the model in the id keeps
+# promptfoo's request-body cache key model-aware (no stale cross-model hits).
+#
+# Only meaningful when driven by run_comparison.py (it sets the COMPARISON_DEV_*
+# env vars and starts the gateway). In an ad-hoc run with those unset, the
+# {{ env.* }} refs stay unrendered and a call would fail loudly with a bogus
+# model name -- it is not meant to be used outside run_comparison.py.
+#
+# NOTE: env values render as strings, so temperature/max_tokens are sent as
+# strings; the vLLM/pydantic backend coerces them. Keep these env var names in
+# sync with scripts_repo/run_comparison.py (provider_options_env).
+id: "openai:chat:{{ env.COMPARISON_DEV_MODEL }}"
+label: fidaro_plaintext_gateway_phala_dynamic_dev
+config:
+  apiBaseUrl: http://127.0.0.1:8084/v1
+  apiKey: dummy        # placeholder; local endpoint ignores it but the OpenAI client requires non-empty
+  temperature: "{{ env.COMPARISON_DEV_TEMPERATURE }}"
+  max_tokens: "{{ env.COMPARISON_DEV_MAX_TOKENS }}"

@@ -7,11 +7,14 @@ Fidaro against dev Fidaro and [coming soon] other 3rd parties.
 
 ### Dev Setup
 
+It's recommended to install `direnv` for activating python and sourcing .env files.
+
 * `nvm use` or `nvm install` as necessary
 * `pnpm install`
 * `python -m venv .venv && source .venv/bin/activate`
 * `pip install -r requirements.txt`
 * `cp .env.example .env` and fill in your env vars as documented in the example.
+* `direnv allow` (if using direnv)
 * `pnpm run dataset` to download datasets (one-off command)
 
 ### Plaintext gateway docker image
@@ -69,8 +72,11 @@ and run:
 python scripts_repo/run_comparison.py comparisons/prod_vs_dev_gemma.json
 ```
 
-Outputs (timestamped prod/dev results, the comparison report, the rendered
-compose, and the vLLM-options cache) land in `comparisons/<name>/`, which is
+Each invocation writes its outputs (prod/dev results, the comparison report,
+the rendered compose) to a fresh per-run subdirectory
+`comparisons/<name>/run_<YYYYMMDD-HHMMSS>/`, so runs never overwrite each other.
+The vLLM-options cache that drives the redeploy decision lives one level up at
+`comparisons/<name>/` so it persists across runs. These directories are
 gitignored; only the config JSONs are tracked. The script validates the config,
 optionally redeploys the Phala dev CVM when `vllm-options` change (after
 confirmation — see [deploy_phala.py](../scripts_repo/deploy_phala.py)), starts
@@ -79,6 +85,21 @@ passes, and opens the report. It does **not** freeze a baseline. `BRAVE_API_KEY`
 must be in the environment; a Phala redeploy also needs `PHALA_DOCKER_COMPOSE_FILE`
 set and `.env.phala` in the repo root. Full design:
 [the spec](superpowers/specs/2026-05-22-comparison-orchestrator-design.md).
+
+Each side of a comparison runs through a **dynamic provider**
+(`fidaro_plaintext_gateway_phala_dynamic_{prod,dev}.yaml`) rather than the static
+`fidaro_plaintext_gateway_phala_{prod,dev}.yaml`. The static providers freeze their
+`openai:chat` model/temperature/max_tokens and so can't reflect a gateway the run
+has reconfigured. The dynamic ones template those values from
+`COMPARISON_{PROD,DEV}_{MODEL,TEMPERATURE,MAX_TOKENS}` env vars (promptfoo renders
+`{{ env.* }}` in a provider's id/config at load time); `run_comparison.py` sets
+them per run from the comparison config's `prod-provider-options` /
+`dev-provider-options` (`{model, temperature, max_tokens}`). Putting the model in
+the provider id keeps promptfoo's request-body cache key model-aware, so a cached
+result can't leak across models. For dev the `model` must equal `vllm-options.model`
+(the model the redeploy serves); prod's `model` is whatever prod Phala runs. The
+static providers are kept for ad-hoc runs. See
+[example.json](../comparisons/example.json).
 
 ## Project Structure
 

@@ -1,8 +1,0 @@
-- description: "Basic test"
-  prompts: [user_only]
-  vars:
-    user: "What is the capital of France?"
-  assert:
-    - type: icontains
-      value: "Paris"
-

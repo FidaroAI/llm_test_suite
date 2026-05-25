@@ -1,0 +1,76 @@
+# Committed template. finalize-phala-manifest.sh substitutes the three image
+# refs, VLLM_MODEL, VLLM_REASONING_PARSER, and VLLM_TOOL_CALL_PARSER into the
+# generated compose file under build/phala-<version>/. Substitution happens
+# at finalize time (not deploy time) so compose_hash binds the TDX
+# attestation to a specific model, reasoning parser, and tool-call parser.
+#
+# Placeholders use plain `${VAR}` form, not `${VAR:?msg}`: envsubst (which
+# finalize-phala-manifest.sh uses for substitution) does not interpret the
+# `:?` fail-fast syntax. Fail-fast validation happens in the finalize script
+# itself, which exits before calling envsubst if VLLM_MODEL,
+# VLLM_REASONING_PARSER, or VLLM_TOOL_CALL_PARSER is unset.
+#
+# BRAVE_API_KEY is read from the deploy environment (not baked into the
+# manifest) and forwarded to the gateway. It is the only secret in this
+# compose file; pass it via Phala Cloud's encrypted env (`phala deploy
+# --env-file ...`) so it never lands in source control or compose_hash.
+#
+# DO NOT commit substituted versions of this file. The committed copy always
+# uses ${VAR} placeholders; the generated file under build/phala-<version>/
+# contains the resolved literal values.
+
+services:
+  vllm:
+    image: vllm/vllm-openai@sha256:04563c302537a91aa49ebdfbceda96111c5712275999b7e8804fa598f0b5641d
+    runtime: nvidia
+    # Published (not just exposed) so Phala's dstack-gateway wraps the port
+    # with TLS and serves it at `<cvm-id>-8000s.<base-domain>`. Note this
+    # bypasses the Noise NK envelope - traffic hitting vLLM directly is
+    # plaintext-to-gateway, TLS-to-client only.
+    # TODO: We need to remove this before a big launch.
+    ports:
+      - "8000:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    command:
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--model"
+      - "google/gemma-4-31B-it"
+      - "--reasoning-parser"
+      - "gemma4"
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser"
+      - "gemma4"
+
+  crypto-module:
+    image: 434247560915.dkr.ecr.us-east-1.amazonaws.com/fidaro/prod/cvm-enclave@sha256:5409f23783ec78654cd3e7db352ce0d7b568a10d8ee600025e7550655297b310
+    expose:
+      - "5000"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    environment:
+      - RUST_LOG=info
+
+  gateway:
+    image: 434247560915.dkr.ecr.us-east-1.amazonaws.com/fidaro/prod/cvm-llm-gateway@sha256:6c06a43a901f9ba0d87c67f2a70ecf689a6b29c70b1f250dfc7b37568904e17e
+    ports:
+      - "443:8080"
+    environment:
+      - HOST_CRYPTO_TRANSPORT=phala
+      - HOST_PHALA_CRYPTO_URL=http://crypto-module:5000
+      - HOST_LLM_PROVIDER=vllm
+      - HOST_VLLM_URL=http://vllm:8000/v1
+      # Read at deploy time from the operator's environment - the finalize
+      # script's envsubst allowlist deliberately excludes BRAVE_API_KEY so
+      # this placeholder survives into the deployed compose file unchanged
+      # and docker-compose resolves it when `phala deploy` runs. Gateway
+      # treats an unset/empty value as "web search disabled".
+      - BRAVE_API_KEY=${BRAVE_API_KEY}
+    depends_on:
+      crypto-module:
+        condition: service_started
+      vllm:
+        condition: service_started

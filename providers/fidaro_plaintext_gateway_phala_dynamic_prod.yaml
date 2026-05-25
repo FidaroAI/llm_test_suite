@@ -1,0 +1,13 @@
+# Dynamic prod provider, driven by run_comparison.py. See the dev counterpart
+# (fidaro_plaintext_gateway_phala_dynamic_dev.yaml) for the full rationale: the
+# model / temperature / max_tokens are templated from COMPARISON_PROD_* env vars
+# that run_comparison.py sets per run from the comparison config's
+# prod-provider-options. Keep these env var names in sync with
+# scripts_repo/run_comparison.py (provider_options_env).
+id: "openai:chat:{{ env.COMPARISON_PROD_MODEL }}"
+label: fidaro_plaintext_gateway_phala_dynamic_prod
+config:
+  apiBaseUrl: http://127.0.0.1:8082/v1
+  apiKey: dummy        # placeholder; local endpoint ignores it but the OpenAI client requires non-empty
+  temperature: "{{ env.COMPARISON_PROD_TEMPERATURE }}"
+  max_tokens: "{{ env.COMPARISON_PROD_MAX_TOKENS }}"

@@ -6,7 +6,8 @@ TODO: Tidy up this file
 * https://huggingface.co/datasets/prometheus-eval/Feedback-Bench/viewer/default/train?row=7
 
 # Lists of data sets
-META: https://www.evidentlyai.com/llm-evaluation-benchmarks-datasets
+* https://www.evidentlyai.com/llm-evaluation-benchmarks-datasets
+* https://www.evidentlyai.com/llm-evaluation-benchmarks-datasets
 
 # Specific data sets
 

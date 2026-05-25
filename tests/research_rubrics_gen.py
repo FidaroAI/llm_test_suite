@@ -99,4 +99,4 @@ def generate_tests():
 
 if __name__ == "__main__":
     result = generate_tests()
-    print(json.dumps(result[0], indent=2))
+    print(json.dumps(result, indent=2))

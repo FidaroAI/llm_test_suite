@@ -94,26 +94,20 @@ def render_compose(template_path: Path, out_path: Path, options: dict) -> Path:
     return out_path
 
 
-def models_url(vllm_base_url: str) -> str:
-    """The OpenAI `/models` endpoint for a vLLM base URL ending in `/v1`."""
-    return vllm_base_url.rstrip("/") + "/models"
-
-
-def wait_for_vllm(
-    vllm_base_url: str,
+def wait_for_url(
+    url: str,
     timeout_s: float,
     interval_s: float = 10.0,
     get_fn=requests.get,
     sleep_fn=time.sleep,
     now_fn=time.monotonic,
 ) -> None:
-    """Poll `<vllm_base_url>/models` until it returns HTTP 200.
+    """Poll `url` until it returns HTTP 200.
 
     Blocks up to `timeout_s` seconds (the CVM can take minutes to come up).
     Raises TimeoutError if the endpoint never returns 200 in time. Network
     errors are treated like a not-ready response and retried.
     """
-    url = models_url(vllm_base_url)
     deadline = now_fn() + timeout_s
     last = "no response yet"
     while True:
@@ -125,10 +119,8 @@ def wait_for_vllm(
         except Exception as exc:  # noqa: BLE001 - retry on any transport error
             last = repr(exc)
         if now_fn() >= deadline:
-            raise TimeoutError(
-                f"vLLM at {url} not ready after {timeout_s:.0f}s (last: {last})"
-            )
-        print(f"  waiting for vLLM at {url} ... ({last})", flush=True)
+            raise TimeoutError(f"{url} not ready after {timeout_s:.0f}s (last: {last})")
+        print(f"  waiting for {url} ... ({last})", flush=True)
         sleep_fn(interval_s)
 
 
@@ -169,7 +161,7 @@ def deploy(
     rendered = render_compose(template_path, out_path, options)
     phala_deploy(cvm_id, rendered, env_file)
     print(f"  deploy submitted; waiting for {vllm_url} to come up ...", flush=True)
-    wait_for_vllm(vllm_url, timeout_s=timeout_s)
+    wait_for_url(vllm_url, timeout_s=timeout_s)
     return rendered
 
 

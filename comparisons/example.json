@@ -1,19 +1,63 @@
 {
-  "vllm-prod-url": "https://<prod-cvm-id>-8000.dstack-pha-use1.phala.network/v1",
-  "vllm-dev-url": "https://<dev-cvm-id>-8000.dstack-pha-use1.phala.network/v1",
-  "system-prompt-file": "system_prompts/example_core_system_prompt.md",
-  "phala-dev-instance-id": "<dev-cvm-id>",
+  "vllm-prod-url": "https://3a54d7192c2f9f68e2464d0c3faaccbd78415315-8000.dstack-pha-use1.phala.network/v1",
+  "vllm-dev-url": "https://ac072fe38afe8ba6bc925a56f7e0a18aedacade2-8000.dstack-pha-use1.phala.network/v1",
+  "system-prompt-file": "system_prompts/fidaro_prod.md",
+  "phala-dev-instance-id": "fidaro-vllm-002",
   "vllm-options": {
+    "model": "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
+    "reasoning-parser": "deepseek_r1",
+    "enable-auto-tool-choice": true,
+    "tool-call-parser": "hermes"
+  },
+  "vllm-options-unused": {
     "model": "google/gemma-4-31B-it",
     "reasoning-parser": "gemma4",
     "enable-auto-tool-choice": true,
     "tool-call-parser": "gemma4"
   },
+  "prod-provider-options": {
+    "model": "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
+    "temperature": 0.7,
+    "max_tokens": 100000
+  },
+  "dev-provider-options": {
+    "model": "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
+    "temperature": 0.7,
+    "max_tokens": 100000
+  },
   "promptfoo-filters": {
-    "filter-metadata": "suite=simple_facts"
+    "filter-metadata": "suite=agentharm_refusal"
   },
   "suite-generation-config": {
     "simple_facts": {
+      "number_to_generate": 0,
+      "randomize_selection": true,
+      "random_seed": 0,
+      "max_rubrics": null
+    },
+    "simple_facts_regressions": {
+      "number_to_generate": 0,
+      "randomize_selection": true,
+      "random_seed": 0,
+      "max_rubrics": null
+    },
+    "multifaceted": {
+      "number_to_generate": 5,
+      "randomize_selection": true,
+      "random_seed": 0,
+      "max_rubrics": 3,
+      "stratify": {
+        "by": "domain",
+        "per_group": 2
+      }
+    },
+    "research_rubrics": {
+      "number_to_generate": 5,
+      "randomize_selection": true,
+      "random_seed": 0,
+      "max_rubrics": 3
+    },
+    "agentharm_refusal": {
       "number_to_generate": 5,
       "randomize_selection": true,
       "random_seed": 0,

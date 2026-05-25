@@ -14,6 +14,8 @@ from scripts_repo.run_comparison import (
     eval_command,
     gateway_docker_args,
     parse_env_file,
+    provider_options_env,
+    run_dir_name,
     validate_config,
     vllm_options_changed,
     write_options_cache,
@@ -25,6 +27,17 @@ def _minimal_config(**overrides):
         "vllm-prod-url": "https://prod-8000.example.net/v1",
         "vllm-dev-url": "https://dev-8000.example.net/v1",
         "suite-generation-config": {"simple_facts": {"limit": 5}},
+        "prod-provider-options": {
+            "model": "prod-model",
+            "temperature": 0.7,
+            "max_tokens": 1000,
+        },
+        # Matches the vllm-options model ("x") used by the redeploy tests below.
+        "dev-provider-options": {
+            "model": "x",
+            "temperature": 0.7,
+            "max_tokens": 1000,
+        },
     }
     cfg.update(overrides)
     return cfg
@@ -35,6 +48,13 @@ def _minimal_config(**overrides):
 
 def test_comparison_name_is_the_config_file_stem():
     assert comparison_name("comparisons/prod_vs_dev_gemma.json") == "prod_vs_dev_gemma"
+
+
+# --- run_dir_name ----------------------------------------------------------
+
+
+def test_run_dir_name_prefixes_timestamp_with_run():
+    assert run_dir_name("20260525-134500") == "run_20260525-134500"
 
 
 # --- validate_config -------------------------------------------------------
@@ -53,6 +73,38 @@ def test_validate_requires_each_mandatory_key(tmp_path, missing):
     with pytest.raises(ConfigError) as exc:
         validate_config(cfg, repo_root=tmp_path, env={})
     assert missing in str(exc.value)
+
+
+@pytest.mark.parametrize("missing", ["prod-provider-options", "dev-provider-options"])
+def test_validate_requires_provider_options(tmp_path, missing):
+    cfg = _minimal_config()
+    del cfg[missing]
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg, repo_root=tmp_path, env={})
+    assert missing in str(exc.value)
+
+
+def test_validate_requires_provider_option_fields(tmp_path):
+    cfg = _minimal_config()
+    del cfg["dev-provider-options"]["max_tokens"]
+    with pytest.raises(ConfigError) as exc:
+        validate_config(cfg, repo_root=tmp_path, env={})
+    assert "max_tokens" in str(exc.value)
+
+
+def test_validate_rejects_dev_model_not_matching_vllm_options(tmp_path):
+    compose = tmp_path / "docker-compose.yaml"
+    compose.write_text("services: {}", encoding="utf-8")
+    (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
+    cfg = _minimal_config(
+        **{"vllm-options": {"model": "served-model"}, "phala-dev-instance-id": "cvm-1"}
+    )
+    # dev-provider-options.model is "x", which != the served "served-model".
+    with pytest.raises(ConfigError) as exc:
+        validate_config(
+            cfg, repo_root=tmp_path, env={"PHALA_DOCKER_COMPOSE_FILE": str(compose)}
+        )
+    assert "must match" in str(exc.value)
 
 
 def test_validate_rejects_vllm_options_without_instance_id(tmp_path):
@@ -147,6 +199,27 @@ def test_write_options_cache_is_identical_copy(tmp_path):
     options = {"model": "x", "enable-auto-tool-choice": True}
     write_options_cache(cache, options)
     assert json.loads(cache.read_text(encoding="utf-8")) == options
+
+
+# --- provider options env --------------------------------------------------
+
+
+def test_provider_options_env_maps_both_sides():
+    cfg = _minimal_config()
+    env = provider_options_env(cfg)
+    assert env == {
+        "COMPARISON_PROD_MODEL": "prod-model",
+        "COMPARISON_PROD_TEMPERATURE": "0.7",
+        "COMPARISON_PROD_MAX_TOKENS": "1000",
+        "COMPARISON_DEV_MODEL": "x",
+        "COMPARISON_DEV_TEMPERATURE": "0.7",
+        "COMPARISON_DEV_MAX_TOKENS": "1000",
+    }
+
+
+def test_provider_options_env_values_are_strings():
+    env = provider_options_env(_minimal_config())
+    assert all(isinstance(v, str) for v in env.values())
 
 
 # --- promptfoo filter args -------------------------------------------------

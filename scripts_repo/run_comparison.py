@@ -42,11 +42,14 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts_repo.deploy_phala import deploy as phala_deploy_and_wait
-from scripts_repo.deploy_phala import wait_for_vllm
+from scripts_repo.deploy_phala import wait_for_url
 
 # promptfoo provider labels the orchestrator drives for each side of the run.
-PROD_PROVIDER = "fidaro_plaintext_gateway_phala_prod"
-DEV_PROVIDER = "fidaro_plaintext_gateway_phala_dev"
+# The dynamic providers template their model / temperature / max_tokens from the
+# COMPARISON_{PROD,DEV}_* env vars set below (see provider_options_env), so they
+# reflect a reconfigured gateway (the static YAML providers can't).
+PROD_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_prod"
+DEV_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_dev"
 
 # Host ports the prod/dev plaintext gateways are published on (matches
 # run_plaintext_gateway.sh). The gateway listens on 8080 inside the container.
@@ -65,6 +68,17 @@ DEFAULT_GATEWAY_IMAGE = "secure-enclave-gateway-plaintext"
 RESERVED_FILTER_KEYS = {"filter-providers"}
 
 REQUIRED_KEYS = ("vllm-prod-url", "vllm-dev-url", "suite-generation-config")
+
+# Per-side provider config the dynamic providers read (via provider_options_env).
+# Each must carry these keys; see providers/*_dynamic_*.yaml.
+PROVIDER_OPTIONS_KEYS = ("prod-provider-options", "dev-provider-options")
+REQUIRED_PROVIDER_OPTION_FIELDS = ("model", "temperature", "max_tokens")
+
+# Being super cautious here. We really must be careful not to deploy to prod.
+# TODO: Separate prod and dev instances so that phala CLI can't touch prod.
+WHITELISTED_CVM_IDS = [
+    "fidaro-vllm-002",
+]
 
 
 class ConfigError(Exception):
@@ -91,10 +105,35 @@ def validate_config(
         if key not in config or config[key] in (None, ""):
             raise ConfigError(f"config is missing required key {key!r}")
 
+    # The dynamic providers need a {model, temperature, max_tokens} block per side.
+    for key in PROVIDER_OPTIONS_KEYS:
+        opts = config.get(key)
+        if not opts:
+            raise ConfigError(f"config is missing required key {key!r}")
+        missing = [f for f in REQUIRED_PROVIDER_OPTION_FIELDS if f not in opts]
+        if missing:
+            raise ConfigError(f"{key!r} is missing fields: {missing}")
+
     has_options = bool(config.get("vllm-options"))
+
+    # For dev, the served model is whatever vllm-options deploys, so the dev
+    # provider's model must match it (when a redeploy is configured).
+    if has_options:
+        vllm_model = config["vllm-options"].get("model")
+        dev_model = config["dev-provider-options"]["model"]
+        if vllm_model and dev_model != vllm_model:
+            raise ConfigError(
+                f"dev-provider-options.model ({dev_model!r}) must match "
+                f"vllm-options.model ({vllm_model!r})"
+            )
     if has_options and not config.get("phala-dev-instance-id"):
         raise ConfigError(
             "vllm-options requires phala-dev-instance-id (a redeploy target)"
+        )
+
+    if config.get("phala-dev-instance-id") not in WHITELISTED_CVM_IDS:
+        raise ConfigError(
+            f"phala-dev-instance-id {config['phala-dev-instance-id']} is not in the whitelist of allowed CVM IDs"
         )
 
     prompt_file = config.get("system-prompt-file")
@@ -108,13 +147,11 @@ def validate_config(
                 "vllm-options requires the PHALA_DOCKER_COMPOSE_FILE env var"
             )
         if not Path(compose).is_file():
-            raise ConfigError(
-                f"PHALA_DOCKER_COMPOSE_FILE does not exist: {compose}"
-            )
+            raise ConfigError(f"PHALA_DOCKER_COMPOSE_FILE does not exist: {compose}")
         env_phala = repo_root / ".env.phala"
-        if not env_phala.is_file():
+        if not env_phala.exists():
             raise ConfigError(
-                f"vllm-options requires {env_phala} (provided by the operator)"
+                f"vllm-options requires an env variable file at {env_phala}. Prefer to use 1Password environments for this."
             )
 
 
@@ -132,6 +169,24 @@ def write_options_cache(cache_path: Path, options: dict) -> None:
     cache_path = Path(cache_path)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     cache_path.write_text(json.dumps(options, indent=2), encoding="utf-8")
+
+
+def provider_options_env(config: dict) -> dict[str, str]:
+    """Map the per-side provider options to the env vars the dynamic providers read.
+
+    The dynamic YAML providers template their model/temperature/max_tokens from
+    COMPARISON_{PROD,DEV}_{MODEL,TEMPERATURE,MAX_TOKENS} (see
+    providers/fidaro_plaintext_gateway_phala_dynamic_{prod,dev}.yaml). Keep these
+    names in sync with those files. Values are stringified because env vars (and
+    promptfoo's {{ env.* }} rendering) are strings; the backend coerces the numbers.
+    """
+    env: dict[str, str] = {}
+    for side, prefix in (("prod", "COMPARISON_PROD"), ("dev", "COMPARISON_DEV")):
+        opts = config[f"{side}-provider-options"]
+        env[f"{prefix}_MODEL"] = str(opts["model"])
+        env[f"{prefix}_TEMPERATURE"] = str(opts["temperature"])
+        env[f"{prefix}_MAX_TOKENS"] = str(opts["max_tokens"])
+    return env
 
 
 def build_filter_args(filters: dict | None) -> list[str]:
@@ -270,6 +325,11 @@ def timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def run_dir_name(ts: str) -> str:
+    """The per-run subdirectory name for a given timestamp."""
+    return f"run_{ts}"
+
+
 # --- side-effecting orchestration -----------------------------------------
 
 
@@ -298,7 +358,7 @@ def start_gateway(repo_root: Path, args: list[str], name: str) -> None:
 
 def gateway_health_url(port: int) -> str:
     """The OpenAI base URL of a locally published gateway."""
-    return f"http://127.0.0.1:{port}/v1"
+    return f"http://127.0.0.1:{port}/v1/health"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -313,9 +373,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the confirmation prompt before a Phala redeploy.",
     )
     parser.add_argument(
-        "--cache",
-        action="store_true",
-        help="Allow promptfoo result caching (default: --no-cache for fresh runs).",
+        "--cache-prod",
+        type=bool,
+        action="store",
+        default=True,
+        help="Allow promptfoo result caching for prod results. Defaults to true as prod should be stable across runs.",
+    )
+    parser.add_argument(
+        "--cache-dev",
+        type=bool,
+        action="store",
+        default=False,
+        help="Allow promptfoo result caching for dev results. Defaults to false as dev can change. TODO: we should make sure promptfoo understands the provider so we don't have to micromanage this",
     )
     parser.add_argument(
         "--docker-image",
@@ -334,6 +403,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=120.0,
         help="Seconds to wait for each local gateway to come up.",
     )
+    parser.add_argument(
+        "--skip-phala-deploy",
+        action="store_true",
+        default=False,
+        help="Skip the Phala redeploy step. Useful for debugging.",
+    )
     return parser
 
 
@@ -345,8 +420,13 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config)
     config = json.loads(config_path.read_text(encoding="utf-8"))
     name = comparison_name(config_path)
-    out_dir = repo_root / "comparisons" / name
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # run_dir isolates everything produced by this single run so runs never
+    # overwrite each other.
+    comparison_dir = repo_root / "comparisons" / name
+    ts = timestamp()
+    run_dir = comparison_dir / run_dir_name(ts)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Run outputs: {run_dir}")
 
     validate_config(config, repo_root=repo_root)
 
@@ -356,32 +436,43 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     # Suite-generation config: write it out and point promptfoo at the file.
-    suite_cfg_path = out_dir / "suite_generation_config.json"
+    # These are set on os.environ (not a throwaway copy) so the promptfoo eval
+    # subprocesses, which inherit os.environ, actually see them.
+    suite_cfg_path = run_dir / "suite_generation_config.json"
     suite_cfg_path.write_text(
         json.dumps(config["suite-generation-config"], indent=2), encoding="utf-8"
     )
-    run_env = dict(os.environ)
-    run_env["SUITE_GENERATION_CONFIG_FILE"] = str(suite_cfg_path)
+    os.environ["SUITE_GENERATION_CONFIG_FILE"] = str(suite_cfg_path)
+    # The dynamic providers template their model/temperature/max_tokens from these
+    # COMPARISON_{PROD,DEV}_* env vars (see providers/*_dynamic_*.yaml).
+    os.environ.update(provider_options_env(config))
 
     # Redeploy the dev CVM only when vLLM options changed.
     options = config.get("vllm-options")
     if options:
-        cache = out_dir / "vllm_options_cache.json"
+        # The cache is global (repo root) because there is only one dev Phala
+        # instance: any run's vLLM options describe the same shared CVM, so the
+        # redeploy decision must persist across comparisons, not per comparison.
+        # The rendered compose remains a per-run artifact.
+        cache = repo_root / ".vllm_options_cache.json"
         if vllm_options_changed(cache, options):
-            if not args.yes and not _confirm_redeploy(name, options):
-                print("Aborted before Phala redeploy.", file=sys.stderr)
-                return 1
-            print(f"Redeploying dev CVM {config['phala-dev-instance-id']} ...")
-            phala_deploy_and_wait(
-                cvm_id=config["phala-dev-instance-id"],
-                template_path=Path(os.environ["PHALA_DOCKER_COMPOSE_FILE"]),
-                out_path=out_dir / "deployed_compose.yaml",
-                options=options,
-                vllm_url=config["vllm-dev-url"],
-                env_file=repo_root / ".env.phala",
-                timeout_s=args.deploy_timeout,
-            )
-            write_options_cache(cache, options)
+            if args.skip_phala_deploy:
+                print("Force skipping Phala redeploy.")
+            else:
+                if not args.yes and not _confirm_redeploy(name, options):
+                    print("Aborted before Phala redeploy.", file=sys.stderr)
+                    return 1
+                print(f"Redeploying dev CVM {config['phala-dev-instance-id']} ...")
+                phala_deploy_and_wait(
+                    cvm_id=config["phala-dev-instance-id"],
+                    template_path=Path(os.environ["PHALA_DOCKER_COMPOSE_FILE"]),
+                    out_path=run_dir / "deployed_compose.yaml",
+                    options=options,
+                    vllm_url=config["vllm-dev-url"],
+                    env_file=repo_root / ".env.phala",
+                    timeout_s=args.deploy_timeout,
+                )
+                write_options_cache(cache, options)
         else:
             print("vLLM options unchanged since last run; skipping Phala redeploy.")
 
@@ -410,32 +501,51 @@ def main(argv: list[str] | None = None) -> int:
         ),
         name="fidaro-gateway-dev",
     )
-    wait_for_vllm(gateway_health_url(PROD_GATEWAY_PORT), timeout_s=args.gateway_timeout)
-    wait_for_vllm(gateway_health_url(DEV_GATEWAY_PORT), timeout_s=args.gateway_timeout)
+    # Wait for vLLM in the server to be available. This will help spot problems before we start the eval runs
+    print("Waiting for vLLM phala endpoints to be ready ...")
+    wait_for_url(
+        config.get("vllm-prod-url").rstrip("/") + "/models",
+        timeout_s=args.gateway_timeout,
+    )
+    wait_for_url(
+        config.get("vllm-dev-url").rstrip("/") + "/models",
+        timeout_s=args.gateway_timeout,
+    )
+
+    # Also check for the gateways to be running. Defence in depth for bugs
+    print("Waiting for local plaintext gateways to be ready ...")
+    wait_for_url(gateway_health_url(PROD_GATEWAY_PORT), timeout_s=args.gateway_timeout)
+    wait_for_url(gateway_health_url(DEV_GATEWAY_PORT), timeout_s=args.gateway_timeout)
 
     # Run both passes (no baseline freeze). Eval exits non-zero on test
     # failures, which is expected here, so we do not abort on it.
-    ts = timestamp()
     filter_args = build_filter_args(config.get("promptfoo-filters"))
-    no_cache = not args.cache
-    prod_out = out_dir / f"prod_results_{ts}.json"
-    dev_out = out_dir / f"dev_results_{ts}.json"
+    prod_out = run_dir / f"prod_results_{ts}.json"
+    dev_out = run_dir / f"dev_results_{ts}.json"
 
     print("Running prod pass ...")
     _run(
-        eval_command(PROD_PROVIDER, str(prod_out), filter_args, no_cache, f"{name} prod"),
+        eval_command(
+            PROD_PROVIDER,
+            str(prod_out),
+            filter_args,
+            not args.cache_prod,
+            f"{name} prod",
+        ),
         cwd=repo_root,
         check=False,
     )
     print("Running dev pass ...")
     _run(
-        eval_command(DEV_PROVIDER, str(dev_out), filter_args, no_cache, f"{name} dev"),
+        eval_command(
+            DEV_PROVIDER, str(dev_out), filter_args, not args.cache_dev, f"{name} dev"
+        ),
         cwd=repo_root,
         check=False,
     )
 
     # Compare and open the report (prod is the baseline side, dev the candidate).
-    report = out_dir / f"report__{ts}.html"
+    report = run_dir / f"report__{ts}.html"
     _run(
         [
             sys.executable,
@@ -449,7 +559,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Bring the promptfoo viewer container up (it does not hot-reload its DB).
-    _run([str(repo_root / "scripts_repo" / "run_promptfoo_docker.sh")], cwd=repo_root, check=False)
+    _run(
+        [str(repo_root / "scripts_repo" / "run_promptfoo_docker.sh")],
+        cwd=repo_root,
+        check=False,
+    )
     _run(["open", str(report)], cwd=repo_root, check=False)
 
     print(f"\nComparison complete. Report: {report}")
@@ -458,6 +572,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _confirm_redeploy(name: str, options: dict) -> bool:
     """Warn about a Phala redeploy and ask the operator to confirm."""
+
     print(
         f"\nWARNING: comparison {name!r} requires redeploying the Phala dev CVM "
         "with new vLLM options:",

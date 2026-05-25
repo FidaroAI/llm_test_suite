@@ -42,11 +42,11 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "suite_generation_config.json"
 
 DEFAULTS = {
-    "number_to_generate": None,   # None => all rows
+    "number_to_generate": 0,  # None => all rows
     "randomize_selection": False,
-    "random_seed": 0,             # used when randomize_selection is on but unset
-    "max_rubrics": None,          # None => all rubrics
-    "stratify": None,             # None => no per-class quota
+    "random_seed": 0,  # used when randomize_selection is on but unset
+    "max_rubrics": None,  # None => all rubrics
+    "stratify": None,  # None => no per-class quota
 }
 
 
