@@ -7,11 +7,14 @@ Fidaro against dev Fidaro and [coming soon] other 3rd parties.
 
 ### Dev Setup
 
+It's recommended to install `direnv` for activating python and sourcing .env files.
+
 * `nvm use` or `nvm install` as necessary
 * `pnpm install`
 * `python -m venv .venv && source .venv/bin/activate`
 * `pip install -r requirements.txt`
 * `cp .env.example .env` and fill in your env vars as documented in the example.
+* `direnv allow` (if using direnv)
 * `pnpm run dataset` to download datasets (one-off command)
 
 ### Plaintext gateway docker image
@@ -69,8 +72,11 @@ and run:
 python scripts_repo/run_comparison.py comparisons/prod_vs_dev_gemma.json
 ```
 
-Outputs (timestamped prod/dev results, the comparison report, the rendered
-compose, and the vLLM-options cache) land in `comparisons/<name>/`, which is
+Each invocation writes its outputs (prod/dev results, the comparison report,
+the rendered compose) to a fresh per-run subdirectory
+`comparisons/<name>/run_<YYYYMMDD-HHMMSS>/`, so runs never overwrite each other.
+The vLLM-options cache that drives the redeploy decision lives one level up at
+`comparisons/<name>/` so it persists across runs. These directories are
 gitignored; only the config JSONs are tracked. The script validates the config,
 optionally redeploys the Phala dev CVM when `vllm-options` change (after
 confirmation — see [deploy_phala.py](../scripts_repo/deploy_phala.py)), starts

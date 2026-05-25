@@ -14,6 +14,7 @@ from scripts_repo.run_comparison import (
     eval_command,
     gateway_docker_args,
     parse_env_file,
+    run_dir_name,
     validate_config,
     vllm_options_changed,
     write_options_cache,
@@ -35,6 +36,13 @@ def _minimal_config(**overrides):
 
 def test_comparison_name_is_the_config_file_stem():
     assert comparison_name("comparisons/prod_vs_dev_gemma.json") == "prod_vs_dev_gemma"
+
+
+# --- run_dir_name ----------------------------------------------------------
+
+
+def test_run_dir_name_prefixes_timestamp_with_run():
+    assert run_dir_name("20260525-134500") == "run_20260525-134500"
 
 
 # --- validate_config -------------------------------------------------------

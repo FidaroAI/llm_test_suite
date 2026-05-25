@@ -12,7 +12,7 @@ from scripts_repo.deploy_phala import (
     load_compose,
     models_url,
     vllm_options_to_command,
-    wait_for_vllm,
+    wait_for_url,
 )
 
 
@@ -32,6 +32,7 @@ def _responder(*status_codes):
             raise AssertionError("get_fn called more times than expected")
 
     return get
+
 
 # A trimmed but faithful copy of the committed Phala compose template: a vllm
 # service with a command list, plus another service and comments to prove the
@@ -149,7 +150,7 @@ def test_models_url_tolerates_trailing_slash():
 
 def test_wait_for_vllm_returns_when_ready_immediately():
     calls = []
-    wait_for_vllm(
+    wait_for_url(
         "https://host/v1",
         timeout_s=10,
         interval_s=1,
@@ -171,7 +172,7 @@ def test_wait_for_vllm_retries_until_ready():
         slept.append(s)
         clock[0] += s
 
-    wait_for_vllm(
+    wait_for_url(
         "https://host/v1",
         timeout_s=100,
         interval_s=5,
@@ -192,7 +193,7 @@ def test_wait_for_vllm_raises_timeout_when_never_ready():
         clock[0] += s
 
     with pytest.raises(TimeoutError):
-        wait_for_vllm(
+        wait_for_url(
             "https://host/v1",
             timeout_s=10,
             interval_s=5,

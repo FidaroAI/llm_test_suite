@@ -1,4 +1,16 @@
 {
+  "simple_facts": {
+    "number_to_generate": null,
+    "randomize_selection": false,
+    "random_seed": 0,
+    "max_rubrics": null
+  },
+  "simple_facts_regressions": {
+    "number_to_generate": null,
+    "randomize_selection": false,
+    "random_seed": 0,
+    "max_rubrics": null
+  },
   "multifaceted": {
     "number_to_generate": 50,
     "randomize_selection": true,

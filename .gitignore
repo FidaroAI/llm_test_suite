@@ -3,6 +3,7 @@ __pycache__
 .pnpm-store
 .env
 node_modules
+.direnv
 
 # Ignore eval artifacts but keep the results/ tree (and its subdirs) via .gitkeep
 results/**

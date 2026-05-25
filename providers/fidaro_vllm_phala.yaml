@@ -3,21 +3,5 @@ label: fidaro_vllm_phala
 config:
   apiBaseUrl: https://3a54d7192c2f9f68e2464d0c3faaccbd78415315-8000.dstack-pha-use1.phala.network/v1
   apiKey: dummy        # placeholder; local endpoint ignores it but the OpenAI client requires non-empty
-  temperature: 0.2
+  temperature: 0.7
   max_tokens: 100000
-  # Structured-output constraint — only honored when talking directly to vLLM's
-  # OpenAI-compatible API (vLLM enforces this via guided generation). The
-  # plaintext gateway provider does not proxy response_format; tests that rely
-  # on JSON-shaped output must scope themselves to this provider.
-  response_format:
-    type: json_schema
-    json_schema:
-      name: capital_response
-      strict: true
-      schema:
-        type: object
-        properties:
-          capital:
-            type: string
-        required: [capital]
-        additionalProperties: false

@@ -14,7 +14,7 @@ providers:
   # provider config is the model name.
   # - file://providers/fidaro_plaintext_gateway_local.yaml
   # Use this for testing directly against the phala vllm endpoint. Not super useful right now.
-  # - file://providers/fidaro_vllm_phala.yaml
+  - file://providers/fidaro_vllm_phala.yaml
 
 prompts:
   # Simple template for specifying the user prompt.
@@ -59,8 +59,14 @@ defaultTest:
 
 tests:
   - file://tests/fidaro_basic.yaml
-  - file://tests/simple_facts.csv
-  - file://tests/simple_facts_regressions.csv
+  # Simple single-fact questions graded with an `icontains` assertion on the
+  # expected answer. Generated from tests/simple_facts.csv via the shared
+  # csv_suite helper. Tagged metadata.suite=simple_facts.
+  - file://tests/simple_facts_gen.py:generate_tests
+  # Regression watchlist prompts (also CSV-backed). Suite name follows the
+  # filename convention, so these are tagged metadata.suite=simple_facts_regressions
+  # (the CSV itself mislabels them simple_facts).
+  - file://tests/simple_facts_regressions_gen.py:generate_tests
   # Research-style prompts graded against weighted rubrics (one llm-rubric
   # assertion per criterion). Tagged metadata.suite=research_rubrics so they can
   # be run in isolation: --filter-metadata "suite=research_rubrics".
@@ -80,6 +86,6 @@ tests:
 
 evaluateOptions:
   # TODO: I have no idea what's reasonable here for Fidaro!
-  maxConcurrency: 4
+  maxConcurrency: 100
 
 outputPath: results/local/latest.json
