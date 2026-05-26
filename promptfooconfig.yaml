@@ -83,6 +83,15 @@ tests:
   # did not refuse. Tagged metadata.suite=agentharm_refusal for isolation.
   # Requires `npm run dataset:agentharm` to have been run first.
   - file://tests/agentharm_refusal_gen.py:generate_tests
+  # Up-to-date-data check: asks Fidaro for the latest price of 20 stocks across
+  # seven exchanges and passes only if the answer is within 1% of the live price.
+  # The live reference is fetched up front (from Stooq) by
+  # scripts_repo/fetch_stock_prices.py (NOT by the generator), so a source outage
+  # can't break other suites' runs.
+  # Tagged metadata.suite=stock_prices. Run via scripts_test/fidaro_stock_prices.sh,
+  # which fetches prices first then filters to this suite. Off by default (not in
+  # the default suite-generation config), so ordinary runs emit zero stock tests.
+  - file://tests/stock_prices_gen.py:generate_tests
   # Multifaceted-Bench (kaist-ai/Multifaceted-Bench): preference-following
   # prompts graded against multiple rubric criteria. The dataset rates 1-5, so
   # each test carries a rubricPrompt override that normalizes the judge's 1-5

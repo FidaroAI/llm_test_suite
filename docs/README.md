@@ -60,6 +60,43 @@ The interesting tests for a human to run are
 
 TODO: Continue
 
+### Stock-price freshness suite (`stock_prices`)
+
+Checks whether Fidaro is fetching **up-to-date market data**: it asks for the
+latest price of 20 stocks across seven exchanges (US, London, Hong Kong, Tokyo,
+Amsterdam, Paris, Frankfurt) and passes only if the answer is within 1% of the
+live price.
+
+Run it (gateway must already be up):
+
+```
+./scripts_test/fidaro_stock_prices.sh
+```
+
+The script first runs the preflight
+[fetch_stock_prices.py](../scripts_repo/fetch_stock_prices.py), which fetches
+each symbol's live price from **Stooq** (free, no API key) and **fails fast** if
+any is unavailable, writing a timestamped snapshot to
+`tests/stock_prices_reference.json` (gitignored). It then runs the suite with
+`--no-cache` (a cached answer would defeat a freshness check). Stooq was chosen
+over Yahoo Finance because Yahoo hard-rate-limits (HTTP 429) unauthenticated
+clients; Stooq has no NSE coverage, which is why no Indian stocks are included.
+
+The fetch lives in the preflight, **not** the generator
+([stock_prices_gen.py](../tests/stock_prices_gen.py)), because promptfoo imports
+every generator on every run — a network call there would let a source outage
+break unrelated suites. The generator just bakes the snapshot prices into each
+test's metadata, and the assertion
+([assert_stock_price.py](../assertions/assert_stock_price.py)) does a pure-local
+1% comparison (handling the London pence-vs-pounds quirk). The prompts/symbols
+live in [stock_prices.csv](../tests/stock_prices.csv) (each row carries its Stooq
+symbol and quote currency); add or edit a row to change coverage. Design notes:
+[the spec](superpowers/specs/2026-05-25-stock-price-freshness-tests-design.md).
+
+The suite is **off by default** (not in the default suite-generation config), so
+ordinary runs emit zero stock tests; the wrapper enables it via
+[fidaro_stock_prices_config.json](../scripts_test/fidaro_stock_prices_config.json).
+
 ## Comparison runs (config-driven)
 
 [run_comparison.py](../scripts_repo/run_comparison.py) drives a whole prod-vs-dev

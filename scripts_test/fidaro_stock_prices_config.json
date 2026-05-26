@@ -1,0 +1,8 @@
+{
+  "stock_prices": {
+    "number_to_generate": null,
+    "randomize_selection": false,
+    "random_seed": 0,
+    "max_rubrics": null
+  }
+}
