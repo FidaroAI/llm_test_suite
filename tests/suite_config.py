@@ -26,6 +26,13 @@ the optional ``groups`` list restricts to (and orders by) those values; omit it
 to use every value present. ``number_to_generate`` still applies afterwards as
 an overall ceiling.
 
+The file may also carry a reserved ``default`` key, a suite-shaped block used
+for any suite *not* listed by name (e.g. give every un-listed suite a small
+sample). It is a fallback, not an overlay: a listed suite uses its own block
+only and never sees ``default``. With no ``default`` key present, an un-listed
+suite falls back to DEFAULTS as before (so it stays off). The code DEFAULTS
+still fill any field a block omits, ``default`` included.
+
 A missing file or missing suite key falls back to DEFAULTS. Generators build
 their candidate tests, drop any with no gradable assertions, then call
 ``cfg.select(tests)`` which applies the (optionally seeded) random selection,
@@ -122,7 +129,15 @@ class SuiteConfig:
 
 
 def load(file):
-    """Load the resolved :class:`SuiteConfig` for the generator at ``file``."""
+    """Load the resolved :class:`SuiteConfig` for the generator at ``file``.
+
+    A suite listed in the config uses its own block; the optional file-level
+    ``default`` block is *not* merged into it. A suite absent from the config
+    falls back to that ``default`` block instead. Either way the code DEFAULTS
+    fill any field left unspecified (so a partial ``default`` block is fine).
+    """
     suite = suite_name(file)
-    values = {**DEFAULTS, **_load_all().get(suite, {})}
+    all_cfg = _load_all()
+    suite_values = all_cfg[suite] if suite in all_cfg else all_cfg.get("default", {})
+    values = {**DEFAULTS, **suite_values}
     return SuiteConfig(suite, values)

@@ -53,6 +53,40 @@ def test_load_merges_suite_values_over_defaults(tmp_path, monkeypatch):
     assert cfg.max_rubrics == 3
 
 
+def test_load_uses_default_block_for_absent_suite(tmp_path, monkeypatch):
+    path = _write_config(
+        tmp_path,
+        {
+            "default": {"number_to_generate": 7, "randomize_selection": True,
+                        "random_seed": 3},
+            "other": {"number_to_generate": 9},
+        },
+    )
+    monkeypatch.setenv("SUITE_GENERATION_CONFIG_FILE", str(path))
+    cfg = suite_config.load("/x/tests/multifaceted_gen.py")
+    assert cfg.number_to_generate == 7
+    assert cfg.randomize_selection is True
+    assert cfg.random_seed == 3
+    # fields the default block omits fall back to the code DEFAULTS
+    assert cfg.max_rubrics is None
+    assert cfg.stratify is None
+
+
+def test_load_present_suite_ignores_default_block(tmp_path, monkeypatch):
+    path = _write_config(
+        tmp_path,
+        {
+            "default": {"number_to_generate": 7, "max_rubrics": 4},
+            "multifaceted": {"number_to_generate": 5},
+        },
+    )
+    monkeypatch.setenv("SUITE_GENERATION_CONFIG_FILE", str(path))
+    cfg = suite_config.load("/x/tests/multifaceted_gen.py")
+    assert cfg.number_to_generate == 5
+    # the default block is not merged in; the unspecified field uses code DEFAULTS
+    assert cfg.max_rubrics is None
+
+
 def _cfg(suite="s", number_to_generate=None, randomize_selection=False,
          random_seed=0, max_rubrics=None, stratify=None):
     return suite_config.SuiteConfig(suite, {
