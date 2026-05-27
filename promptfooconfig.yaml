@@ -36,15 +36,12 @@ prompts:
 defaultTest:
   options:
     cache: true
-    # This is hacky. It's very geared towards the output format for qwen80b. It's used to
-    # strip out the thinking block so that we can assert just on the response the user
-    # got and not the throught process. It's fine for now, but we may want to run
-    # tests on the thinking later.
-    transform: file://hooks/strip_before_triple_newline.py
-    # I think this normalize response is garbage. Claude was getting confused. The intent was for
-    # reasoning parsing. I think this can be done better by ensuring providers are returning
-    # reasoning data in a consistent way rather than offloading this to the test.
-    # transform: file://hooks/normalize_response.js
+    # NOTE: the reasoning-block strip (hooks/strip_before_triple_newline.py) is
+    # deliberately NOT wired here as a global output transform. A global transform
+    # overwrites the canonical response.output, discarding the model's pre-strip
+    # response. Instead the strip is attached to every assertion's `transform` in
+    # tests/classification.py (augment), so graders see the stripped final answer
+    # while the stored response.output keeps the full, pre-strip text.
     # LLM-as-judge for any `llm-rubric` assertions (e.g. the research_rubrics
     # and agentharm_refusal suites). AWS Bedrock so the same config works both
     # locally and in CI; credentials come from the standard AWS chain

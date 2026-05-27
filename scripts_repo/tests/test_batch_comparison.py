@@ -8,6 +8,7 @@ from pathlib import Path
 
 from scripts_repo.batch_comparison import (
     config_filename,
+    default_output_dir,
     discover_prompts,
     generate_config,
     run_comparison_command,
@@ -48,6 +49,19 @@ def test_discover_prompts_ignores_non_md_and_does_not_recurse(tmp_path: Path):
 
 def test_config_filename_is_prompt_stem_with_json_extension():
     assert config_filename(Path("/x/test_system_prompt_1.md")) == "test_system_prompt_1.json"
+
+
+# --- default_output_dir ----------------------------------------------------
+
+
+def test_default_output_dir_is_config_sibling_named_after_stem():
+    assert default_output_dir(Path("comparisons/example.json")) == Path(
+        "comparisons/example"
+    )
+
+
+def test_default_output_dir_handles_absolute_config_path():
+    assert default_output_dir(Path("/x/y/run.json")) == Path("/x/y/run")
 
 
 # --- generate_config -------------------------------------------------------

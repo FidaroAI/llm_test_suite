@@ -10,6 +10,7 @@ from scripts_repo.run_comparison import (
     CORE_SYSTEM_PROMPT_PATH,
     ConfigError,
     build_filter_args,
+    comparison_dir,
     comparison_name,
     eval_command,
     gateway_docker_args,
@@ -48,6 +49,21 @@ def _minimal_config(**overrides):
 
 def test_comparison_name_is_the_config_file_stem():
     assert comparison_name("comparisons/prod_vs_dev_gemma.json") == "prod_vs_dev_gemma"
+
+
+# --- comparison_dir --------------------------------------------------------
+
+
+def test_comparison_dir_is_config_sibling_named_after_stem(tmp_path):
+    cfg = tmp_path / "sub" / "myrun.json"
+    assert comparison_dir(cfg) == tmp_path / "sub" / "myrun"
+
+
+def test_comparison_dir_is_absolute_even_for_relative_config():
+    result = comparison_dir("comparisons/example.json")
+    assert result.is_absolute()
+    assert result.name == "example"
+    assert result.parent.name == "comparisons"
 
 
 # --- run_dir_name ----------------------------------------------------------

@@ -4,15 +4,15 @@
 Given a config JSON (see docs/superpowers/specs/
 2026-05-22-comparison-orchestrator-design.md), this script:
 
-  1. Creates an isolated output directory comparisons/<name>/ (name = config
-     filename stem).
+  1. Creates an isolated output directory beside the config file, named after
+     its stem (comparisons/example.json -> comparisons/example/).
   2. Validates the config.
   3. Redeploys the Phala dev CVM with new vLLM options *only* when they changed
      (decided via a cache file), after an explicit confirmation.
   4. Starts the prod and dev plaintext gateways in Docker (mounting a dev
      system prompt if given).
   5. Runs the promptfoo suite against prod and against dev, into timestamped
-     result files under comparisons/<name>/.
+     result files under that per-config output directory.
   6. Builds the comparison report and opens it, then ensures the promptfoo
      viewer container is up.
 
@@ -88,6 +88,18 @@ class ConfigError(Exception):
 def comparison_name(config_path) -> str:
     """The comparison name: the config filename without its extension."""
     return Path(config_path).stem
+
+
+def comparison_dir(config_path) -> Path:
+    """The directory holding a config's runs: a sibling named after its stem.
+
+    e.g. ``comparisons/example.json`` -> ``comparisons/example/``. Results land
+    beside the config that produced them, not in a fixed ``comparisons/`` dir.
+    Resolved to an absolute path so output lands in the right place regardless
+    of the process's working directory.
+    """
+    config_path = Path(config_path).resolve()
+    return config_path.parent / config_path.stem
 
 
 def validate_config(
@@ -420,11 +432,11 @@ def main(argv: list[str] | None = None) -> int:
     config_path = Path(args.config)
     config = json.loads(config_path.read_text(encoding="utf-8"))
     name = comparison_name(config_path)
-    # run_dir isolates everything produced by this single run so runs never
-    # overwrite each other.
-    comparison_dir = repo_root / "comparisons" / name
+    # Output lands beside the config that produced it (comparisons/example.json
+    # -> comparisons/example/), not in a fixed comparisons/ dir. run_dir isolates
+    # everything produced by this single run so runs never overwrite each other.
     ts = timestamp()
-    run_dir = comparison_dir / run_dir_name(ts)
+    run_dir = comparison_dir(config_path) / run_dir_name(ts)
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"Run outputs: {run_dir}")
 

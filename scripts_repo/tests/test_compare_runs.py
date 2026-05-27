@@ -153,6 +153,36 @@ def test_extract_cells_deterministic_pass_falls_back_to_score():
     assert cells[CellKey("t1", "user_only", "Paris")].passed is True
 
 
+def test_extract_cells_falls_back_to_prompt_when_no_description():
+    # The stock_prices suite gives every row the same file:// assertion and no
+    # description; keyed on description alone they'd collapse onto one CellKey.
+    # Fall back to the rendered prompt so distinct tests stay distinct.
+    def stock(prompt):
+        return {
+            "provider": {"label": "prod"},
+            "prompt": {"label": "user_only",
+                       "raw": json.dumps([{"role": "user", "content": prompt}])},
+            "testCase": {
+                "vars": {"user": prompt},
+                "metadata": {"suite": "stock_prices"},
+                "assert": [{"type": "python",
+                            "value": "file://assertions/assert_stock_price.py"}],
+            },
+            "gradingResult": {"componentResults": [{"score": 1.0, "pass": True}]},
+        }
+
+    ev = make_eval_json([
+        stock("Latest price of Arm Holdings (ARM)?"),
+        stock("Latest price of HSBC (HSBA)?"),
+    ])
+    cells = extract_cells(ev)
+    assert len(cells) == 2
+    assert {k.test for k in cells} == {
+        "Latest price of Arm Holdings (ARM)?",
+        "Latest price of HSBC (HSBA)?",
+    }
+
+
 # --- diff / classify / summary / drift -----------------------------------
 
 

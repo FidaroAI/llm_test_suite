@@ -20,8 +20,11 @@ Usage:
 
 Unrecognised arguments are forwarded verbatim to every run_comparison.py call.
 
-Note: ``--output-directory`` controls only where the generated *config* files
-are written. Per-run *results* still land in ``comparisons/<stem>/`` because
+``--output-directory`` controls where the generated *config* files are written;
+it defaults to a directory beside ``--template-config`` named after its stem
+(e.g. ``comparisons/example.json`` -> ``comparisons/example/``).
+
+Note: per-run *results* still land in ``comparisons/<stem>/`` because
 ``run_comparison.py`` hardcodes that location (and is intentionally left
 untouched).
 """
@@ -48,6 +51,16 @@ def discover_prompts(directory: Path) -> list[Path]:
 def config_filename(prompt_path: Path) -> str:
     """The generated config filename for a prompt: its stem plus ``.json``."""
     return f"{Path(prompt_path).stem}.json"
+
+
+def default_output_dir(template_config: Path) -> Path:
+    """Default config output dir: beside the template config, named after its stem.
+
+    e.g. ``comparisons/example.json`` -> ``comparisons/example``. The
+    relative-ness of ``template_config`` is preserved.
+    """
+    template_config = Path(template_config)
+    return template_config.parent / template_config.stem
 
 
 def generate_config(template: dict, prompt_path: Path) -> dict:
@@ -123,7 +136,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-directory",
         type=Path,
         default=None,
-        help="Where generated configs are written (default: --system-prompts-directory).",
+        help=(
+            "Where generated configs are written "
+            "(default: a directory beside --template-config named after its stem, "
+            "e.g. comparisons/example.json -> comparisons/example/)."
+        ),
     )
     return parser
 
