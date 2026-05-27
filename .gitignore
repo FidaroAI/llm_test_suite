@@ -2,8 +2,9 @@
 __pycache__
 .pnpm-store
 .env
-node_modules
+.env.phala
 .direnv
+node_modules
 
 # Global vLLM options cache: tracks the dev Phala CVM's last-deployed options
 # so run_comparison.py only redeploys when they change.
