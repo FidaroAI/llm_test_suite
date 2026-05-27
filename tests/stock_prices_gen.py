@@ -11,12 +11,16 @@ named stock; the ``assert_stock_price`` assertion checks the answer is within
 :mod:`csv_suite` helper, so the suite gains the standard generator envelope
 (suite naming, classification, config-driven selection).
 
-The live reference price is **not** fetched here — that would make every
-promptfoo run depend on Yahoo (promptfoo imports every generator on each run).
-Instead the preflight ``scripts_repo/fetch_stock_prices.py`` writes a snapshot
-that this generator bakes into each test's metadata. If the snapshot is absent
-(preflight not run), the reference fields are simply omitted and the assertion
-fails with a clear "run the preflight" message rather than the suite breaking.
+The live reference price is fetched here, but **only when the suite is actually
+selected**. The suite is off in the default config, so an ordinary run emits
+zero stock tests and never touches the network — important because promptfoo
+imports every generator on each config load, and a source outage must not break
+unrelated runs. When the suite *is* selected, the generator fetches every symbol
+via :mod:`stock_prices_ref`, writes a fresh snapshot, and bakes the live quote
+into each test's metadata. Any fetch failure aborts generation (fail fast) so
+the suite never grades against partial data. The preflight
+``scripts_repo/fetch_stock_prices.py`` remains available for warming or
+inspecting the snapshot out of band.
 
 Caching is disabled per test: a cached response would defeat the whole point of
 checking whether Fidaro is fetching *up-to-date* data.
@@ -59,10 +63,19 @@ def _bake_reference(test, quotes, fetched_at):
 
 def generate_tests():
     tests = csv_suite.generate_from_csv(__file__, CSV_PATH)
-    snapshot = stock_prices_ref.load_snapshot() or {}
-    quotes = snapshot.get("quotes", {})
-    fetched_at = snapshot.get("fetched_at")
-    return [_bake_reference(t, quotes, fetched_at) for t in tests]
+    if not tests:
+        # Suite not selected this run: emit nothing and never hit the network.
+        # promptfoo imports every generator on every config load, so an
+        # unrelated run must not depend on the price source being reachable.
+        return []
+    quotes, failures = stock_prices_ref.fetch_all(csv_path=CSV_PATH)
+    if failures:
+        detail = "; ".join(f"{sym}: {err}" for sym, err in sorted(failures.items()))
+        raise stock_prices_ref.QuoteUnavailable(
+            f"live stock-price fetch failed for {len(failures)} symbol(s): {detail}"
+        )
+    doc = stock_prices_ref.write_snapshot(quotes)
+    return [_bake_reference(t, quotes, doc["fetched_at"]) for t in tests]
 
 
 if __name__ == "__main__":

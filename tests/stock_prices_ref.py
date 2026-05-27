@@ -3,10 +3,10 @@
 This module is the single place that talks to the price source and the single
 definition of the on-disk reference snapshot. It is imported by the preflight
 CLI (``scripts_repo/fetch_stock_prices.py``) and by the suite generator
-(``tests/stock_prices_gen.py``) — but only the preflight ever hits the network.
-The generator and the assertion read the snapshot the preflight wrote, so a
-source outage can never break promptfoo's config load (which imports *every*
-generator on every run). See the design doc:
+(``tests/stock_prices_gen.py``); both reach the network via :func:`fetch_all`.
+The generator only fetches when the ``stock_prices`` suite is actually selected
+(off by default), so an unrelated promptfoo config load — which imports *every*
+generator — still never touches the source. See the design doc:
 ``docs/superpowers/specs/2026-05-25-stock-price-freshness-tests-design.md``.
 
 **Source: Stooq** (``stooq.com``). Free, no API key, returns a one-line CSV per

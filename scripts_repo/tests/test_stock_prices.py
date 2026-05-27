@@ -4,6 +4,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -117,22 +119,58 @@ def test_bake_reference_without_quote_still_disables_cache():
     assert out["options"]["cache"] is False
 
 
-def test_generate_tests_bakes_when_enabled(monkeypatch, tmp_path):
+def _enable_suite(monkeypatch, tmp_path):
     cfg = tmp_path / "cfg.json"
     cfg.write_text(json.dumps({"stock_prices": {"number_to_generate": None,
                                                 "randomize_selection": False,
                                                 "random_seed": 0,
                                                 "max_rubrics": None}}))
     monkeypatch.setenv("SUITE_GENERATION_CONFIG_FILE", str(cfg))
-    monkeypatch.setattr(gen.stock_prices_ref, "load_snapshot", lambda: {
-        "fetched_at": "2026-05-26T00:00:00+00:00",
-        "quotes": {"7203.jp": {"price": 2987.0, "currency": "JPY", "company": "Toyota"}},
-    })
+
+
+def test_generate_tests_fetches_writes_snapshot_and_bakes(monkeypatch, tmp_path):
+    _enable_suite(monkeypatch, tmp_path)
+    quotes = {"7203.jp": {"price": 2987.0, "currency": "JPY", "company": "Toyota"}}
+    monkeypatch.setattr(gen.stock_prices_ref, "fetch_all", lambda **kw: (quotes, {}))
+    written = {}
+    monkeypatch.setattr(
+        gen.stock_prices_ref, "write_snapshot",
+        lambda q, **kw: written.update(quotes=q) or
+        {"fetched_at": "2026-05-26T00:00:00+00:00", "quotes": q},
+    )
     tests = gen.generate_tests()
     assert len(tests) == 20
+    assert written["quotes"] == quotes  # snapshot refreshed during generation
     assert all(t["options"]["cache"] is False for t in tests)
     toyota = next(t for t in tests if t["metadata"]["stooq_symbol"] == "7203.jp")
     assert toyota["metadata"]["reference_price"] == 2987.0
+
+
+def test_generate_tests_skips_fetch_when_suite_disabled(monkeypatch, tmp_path):
+    # Empty config => suite not selected => no tests AND no network call.
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text("{}")
+    monkeypatch.setenv("SUITE_GENERATION_CONFIG_FILE", str(cfg))
+    monkeypatch.setattr(
+        gen.stock_prices_ref, "fetch_all",
+        lambda **kw: (_ for _ in ()).throw(
+            AssertionError("fetch_all must not be called when the suite is disabled")),
+    )
+    assert gen.generate_tests() == []
+
+
+def test_generate_tests_hard_fails_on_fetch_failure(monkeypatch, tmp_path):
+    _enable_suite(monkeypatch, tmp_path)
+    monkeypatch.setattr(gen.stock_prices_ref, "fetch_all",
+                        lambda **kw: ({}, {"7203.jp": "no data from Stooq"}))
+    monkeypatch.setattr(gen.stock_prices_ref, "write_snapshot",
+                        lambda *a, **kw: pytest.fail("must not write snapshot on failure"))
+    try:
+        gen.generate_tests()
+    except gen.stock_prices_ref.QuoteUnavailable as e:
+        assert "7203.jp" in str(e)
+    else:
+        raise AssertionError("expected QuoteUnavailable")
 
 
 # --- preflight CLI ---------------------------------------------------------

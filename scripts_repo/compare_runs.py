@@ -29,7 +29,6 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import quote
 
 DEFAULT_TOLERANCE = 0.05
 # Suite heading for tests that carry no metadata.suite.
@@ -562,7 +561,9 @@ def _fmt_delta(value) -> str:
 
 
 def _ui_href(eval_id, search, base_url) -> str:
-    return html.escape(f"{base_url}/eval/{eval_id}?search={quote(search)}", quote=True)
+    # The promptfoo UI prefills its search box from `?search=`, which filters the
+    # results table down and makes navigation worse. Link to the bare eval view.
+    return html.escape(f"{base_url}/eval/{eval_id}", quote=True)
 
 
 def _value_html(kind, value, eval_id, search, base_url, errored=False) -> str:

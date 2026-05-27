@@ -1,6 +1,6 @@
 {
-  "vllm-prod-url": "https://3a54d7192c2f9f68e2464d0c3faaccbd78415315-8000.dstack-pha-use1.phala.network/v1",
-  "vllm-dev-url": "https://ac072fe38afe8ba6bc925a56f7e0a18aedacade2-8000.dstack-pha-use1.phala.network/v1",
+  "vllm-prod-url": "https://3bae0d639fdab82b8ea3bff4d8ff1515d38455e5-8000.dstack-pha-use1.phala.network/v1",
+  "vllm-dev-url": "https://3bae0d639fdab82b8ea3bff4d8ff1515d38455e5-8000.dstack-pha-use1.phala.network/v1",
   "system-prompt-file": "system_prompts/fidaro_prod.md",
   "phala-dev-instance-id": "fidaro-vllm-002",
   "vllm-options": {
@@ -25,18 +25,19 @@
     "temperature": 0.7,
     "max_tokens": 100000
   },
-  "promptfoo-filters": {
-    "filter-metadata": "suite=agentharm_refusal"
-  },
+  "promptfoo-filters": {},
   "suite-generation-config": {
-    "simple_facts": {
+    "defaults": {
       "number_to_generate": 0,
+    },
+    "simple_facts": {
+      "number_to_generate": 5,
       "randomize_selection": true,
       "random_seed": 0,
       "max_rubrics": null
     },
     "simple_facts_regressions": {
-      "number_to_generate": 0,
+      "number_to_generate": 5,
       "randomize_selection": true,
       "random_seed": 0,
       "max_rubrics": null
@@ -45,23 +46,64 @@
       "number_to_generate": 5,
       "randomize_selection": true,
       "random_seed": 0,
-      "max_rubrics": 3,
+      "max_rubrics": 5,
       "stratify": {
-        "by": "domain",
-        "per_group": 2
+        "by": "request_type",
+        "per_group": 20,
+        "groups": [
+          "factual_qa",
+          "research_synthesis",
+          "planning",
+          "data_analysis",
+          "creative_writing",
+          "advice_recommendation",
+          "text_transformation"
+        ]
       }
     },
     "research_rubrics": {
       "number_to_generate": 5,
       "randomize_selection": true,
       "random_seed": 0,
-      "max_rubrics": 3
+      "max_rubrics": 5,
+      "stratify": {
+        "by": "request_type",
+        "per_group": 20,
+        "groups": [
+          "factual_qa",
+          "research_synthesis",
+          "planning",
+          "data_analysis",
+          "creative_writing",
+          "advice_recommendation",
+          "text_transformation"
+        ]
+      }
     },
     "agentharm_refusal": {
       "number_to_generate": 5,
       "randomize_selection": true,
       "random_seed": 0,
-      "max_rubrics": 3
+      "max_rubrics": 5,
+      "stratify": {
+        "by": "request_type",
+        "per_group": 20,
+        "groups": [
+          "factual_qa",
+          "research_synthesis",
+          "planning",
+          "data_analysis",
+          "creative_writing",
+          "advice_recommendation",
+          "text_transformation"
+        ]
+      }
+    },
+    "stock_prices": {
+      "number_to_generate": 5,
+      "randomize_selection": false,
+      "random_seed": null,
+      "max_rubrics": null
     }
   }
 }
