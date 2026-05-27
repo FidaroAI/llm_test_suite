@@ -15,6 +15,7 @@ from scripts_repo.run_comparison import (
     DEV_PROVIDER,
     PROD_PROVIDER,
     SELECT_BEST_ENV_VAR,
+    WHITELISTED_CVM_IDS,
     ConfigError,
     both_providers_filter,
     build_filter_args,
@@ -135,7 +136,7 @@ def test_validate_rejects_dev_model_not_matching_vllm_options(tmp_path):
     compose.write_text("services: {}", encoding="utf-8")
     (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
     cfg = _minimal_config(
-        **{"vllm-options": {"model": "served-model"}, "phala-dev-instance-id": "cvm-1"}
+        **{"vllm-options": {"model": "served-model"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
     )
     # dev-provider-options.model is "x", which != the served "served-model".
     with pytest.raises(ConfigError) as exc:
@@ -171,7 +172,7 @@ def test_validate_accepts_existing_system_prompt_file(tmp_path):
 
 def test_validate_vllm_options_requires_compose_env(tmp_path):
     cfg = _minimal_config(
-        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": "cvm-1"}
+        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
     )
     (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
     with pytest.raises(ConfigError) as exc:
@@ -183,7 +184,7 @@ def test_validate_vllm_options_requires_env_phala_file(tmp_path):
     compose = tmp_path / "docker-compose.yaml"
     compose.write_text("services: {}", encoding="utf-8")
     cfg = _minimal_config(
-        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": "cvm-1"}
+        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
     )
     with pytest.raises(ConfigError) as exc:
         validate_config(
@@ -199,7 +200,7 @@ def test_validate_passes_full_vllm_options_config(tmp_path):
     compose.write_text("services: {}", encoding="utf-8")
     (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
     cfg = _minimal_config(
-        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": "cvm-1"}
+        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
     )
     validate_config(
         cfg, repo_root=tmp_path, env={"PHALA_DOCKER_COMPOSE_FILE": str(compose)}

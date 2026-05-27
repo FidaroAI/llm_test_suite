@@ -25,7 +25,7 @@ def test_load_uses_defaults_when_file_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("SUITE_GENERATION_CONFIG_FILE", str(tmp_path / "nope.json"))
     cfg = suite_config.load("/x/tests/multifaceted_gen.py")
     assert cfg.suite == "multifaceted"
-    assert cfg.number_to_generate is None
+    assert cfg.number_to_generate == 0  # off by default (see DEFAULTS)
     assert cfg.randomize_selection is False
     assert cfg.random_seed == 0
     assert cfg.max_rubrics is None
@@ -36,7 +36,7 @@ def test_load_uses_defaults_when_suite_key_absent(tmp_path, monkeypatch):
     path = _write_config(tmp_path, {"other": {"number_to_generate": 9}})
     monkeypatch.setenv("SUITE_GENERATION_CONFIG_FILE", str(path))
     cfg = suite_config.load("/x/tests/multifaceted_gen.py")
-    assert cfg.number_to_generate is None
+    assert cfg.number_to_generate == 0  # off by default (see DEFAULTS)
 
 
 def test_load_merges_suite_values_over_defaults(tmp_path, monkeypatch):

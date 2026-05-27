@@ -42,7 +42,10 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "suite_generation_config.json"
 
 DEFAULTS = {
-    "number_to_generate": 0,  # None => all rows
+    # Off by default: a suite absent from the config emits nothing, so a new
+    # generator never floods a run until it is explicitly opted in. (An explicit
+    # null in the config means "all rows"; this 0 default means "none".)
+    "number_to_generate": 0,
     "randomize_selection": False,
     "random_seed": 0,  # used when randomize_selection is on but unset
     "max_rubrics": None,  # None => all rubrics

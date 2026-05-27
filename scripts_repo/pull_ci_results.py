@@ -57,8 +57,7 @@ def select_run(runs: list[dict]) -> dict | None:
     successful = [
         r
         for r in runs
-        if r.get("status") == "completed"
-        # if r.get("status") == "completed" and r.get("conclusion") == "success"
+        if r.get("status") == "completed" and r.get("conclusion") == "success"
     ]
     if not successful:
         return None

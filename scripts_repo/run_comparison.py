@@ -43,7 +43,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts_repo.deploy_phala import deploy as phala_deploy_and_wait
-from scripts_repo.deploy_phala import wait_for_url
+from scripts_repo.deploy_phala import models_url, wait_for_url
 
 # promptfoo provider labels the orchestrator drives for each side of the run.
 # The dynamic providers template their model / temperature / max_tokens from the
@@ -147,8 +147,12 @@ def validate_config(
 
     has_options = bool(config.get("vllm-options"))
 
-    # For dev, the served model is whatever vllm-options deploys, so the dev
-    # provider's model must match it (when a redeploy is configured).
+    # A redeploy (vllm-options) is the only thing that touches a CVM, so the dev
+    # target is validated only when one is configured. Without a redeploy the
+    # instance id is never used, so it carries no constraints. When a redeploy IS
+    # configured: the dev provider's model must match the model it serves, an
+    # instance id must be given, and that id must be whitelisted — a hard guard
+    # against ever redeploying a non-dev (e.g. prod) CVM.
     if has_options:
         vllm_model = config["vllm-options"].get("model")
         dev_model = config["dev-provider-options"]["model"]
@@ -157,15 +161,16 @@ def validate_config(
                 f"dev-provider-options.model ({dev_model!r}) must match "
                 f"vllm-options.model ({vllm_model!r})"
             )
-    if has_options and not config.get("phala-dev-instance-id"):
-        raise ConfigError(
-            "vllm-options requires phala-dev-instance-id (a redeploy target)"
-        )
-
-    if config.get("phala-dev-instance-id") not in WHITELISTED_CVM_IDS:
-        raise ConfigError(
-            f"phala-dev-instance-id {config['phala-dev-instance-id']} is not in the whitelist of allowed CVM IDs"
-        )
+        instance_id = config.get("phala-dev-instance-id")
+        if not instance_id:
+            raise ConfigError(
+                "vllm-options requires phala-dev-instance-id (a redeploy target)"
+            )
+        if instance_id not in WHITELISTED_CVM_IDS:
+            raise ConfigError(
+                f"phala-dev-instance-id {instance_id} is not in the whitelist "
+                "of allowed CVM IDs"
+            )
 
     prompt_file = config.get("system-prompt-file")
     if prompt_file and not Path(prompt_file).is_file():
@@ -528,14 +533,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Wait for vLLM in the server to be available. This will help spot problems before we start the eval runs
     print("Waiting for vLLM phala endpoints to be ready ...")
-    wait_for_url(
-        config.get("vllm-prod-url").rstrip("/") + "/models",
-        timeout_s=args.gateway_timeout,
-    )
-    wait_for_url(
-        config.get("vllm-dev-url").rstrip("/") + "/models",
-        timeout_s=args.gateway_timeout,
-    )
+    wait_for_url(models_url(config["vllm-prod-url"]), timeout_s=args.gateway_timeout)
+    wait_for_url(models_url(config["vllm-dev-url"]), timeout_s=args.gateway_timeout)
 
     # Also check for the gateways to be running. Defence in depth for bugs
     print("Waiting for local plaintext gateways to be ready ...")

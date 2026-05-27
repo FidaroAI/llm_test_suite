@@ -94,6 +94,15 @@ def render_compose(template_path: Path, out_path: Path, options: dict) -> Path:
     return out_path
 
 
+def models_url(base_url: str) -> str:
+    """The vLLM ``/models`` endpoint for an OpenAI-style base URL.
+
+    Tolerates a trailing slash: ``.../v1`` and ``.../v1/`` both yield
+    ``.../v1/models``. Used as a readiness probe (a 200 means vLLM is serving).
+    """
+    return base_url.rstrip("/") + "/models"
+
+
 def wait_for_url(
     url: str,
     timeout_s: float,
