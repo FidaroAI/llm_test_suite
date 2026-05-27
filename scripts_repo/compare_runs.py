@@ -123,19 +123,23 @@ def _model_from_id(provider_id: str) -> str:
     return ":".join(parts[2:]) if len(parts) >= 3 else provider_id
 
 
-def extract_request_info(eval_json: dict) -> dict:
+def extract_request_info(eval_json: dict, provider_label: str | None = None) -> dict:
     """Map test description -> {model, messages_raw, provider_label}.
 
     Covers every result (including errored ones), so a curl can be offered for
-    cells that have no score.
+    cells that have no score. When `provider_label` is given, only that
+    provider's results are considered — needed when one unified eval file holds
+    both providers and each side wants its own provider's curl.
     """
     info: dict = {}
     for result in eval_json.get("results", {}).get("results", []):
+        provider = result.get("provider") or {}
+        if provider_label is not None and provider.get("label") != provider_label:
+            continue
         test_case = result.get("testCase") or {}
         desc = test_case.get("description") or "<no-description>"
         if desc in info:
             continue
-        provider = result.get("provider") or {}
         info[desc] = {
             "model": _model_from_id(provider.get("id") or ""),
             "messages_raw": (result.get("prompt") or {}).get("raw") or "",
@@ -220,9 +224,13 @@ def build_curl(endpoint: dict, model: str, messages_raw: str) -> str:
     )
 
 
-def build_curls(eval_json: dict, base_dir, override_url: str | None = None) -> dict:
-    """Map test description -> curl command, for tests we can build one for."""
-    request_info = extract_request_info(eval_json)
+def build_curls(eval_json: dict, base_dir, override_url: str | None = None,
+                provider_label: str | None = None) -> dict:
+    """Map test description -> curl command, for tests we can build one for.
+
+    `provider_label` scopes the curls to one provider (see extract_request_info).
+    """
+    request_info = extract_request_info(eval_json, provider_label)
     endpoints = resolve_endpoints(eval_json, base_dir, override_url)
     curls: dict = {}
     for desc, info in request_info.items():
@@ -235,15 +243,18 @@ def build_curls(eval_json: dict, base_dir, override_url: str | None = None) -> d
     return curls
 
 
-def errored_tests(eval_json: dict, suites=None) -> set:
+def errored_tests(eval_json: dict, suites=None, provider_label: str | None = None) -> set:
     """Descriptions of tests whose grading errored.
 
     When `suites` is given, scope is restricted to those suites; otherwise all
-    suites are considered.
+    suites are considered. `provider_label`, when given, restricts to one
+    provider's results (for unified single-file runs).
     """
     suites = set(suites) if suites is not None else None
     out: set = set()
     for result in eval_json.get("results", {}).get("results", []):
+        if provider_label is not None and (result.get("provider") or {}).get("label") != provider_label:
+            continue
         test_case = result.get("testCase") or {}
         meta = test_case.get("metadata") or {}
         if suites is not None and (meta.get("suite") or NO_SUITE) not in suites:
@@ -297,17 +308,25 @@ def _search_term(meta: dict, description: str) -> str:
     return str(meta.get("sample_id") or meta.get("id") or meta.get("name") or description)
 
 
-def extract_cells(eval_json: dict, suites=None) -> dict:
+def extract_cells(eval_json: dict, suites=None, provider_label: str | None = None) -> dict:
     """Map CellKey -> Cell for every gradable assertion.
 
     Rubric (llm-rubric) and deterministic (icontains, python, …) assertions are
     both captured. When `suites` is given, scope is restricted to those suites;
     otherwise every suite is included. Tests with no metadata.suite are grouped
     under "(no suite)".
+
+    `provider_label` restricts to one provider's results. This matters for a
+    unified run where prod and dev are evaluated in a single eval file: the
+    CellKey (test, prompt, assertion) carries no provider, so without this
+    filter the two providers' identical cells collide. Pass the prod label for
+    the baseline side and the dev label for the candidate side.
     """
     suites = set(suites) if suites is not None else None
     cells: dict = {}
     for result in eval_json.get("results", {}).get("results", []):
+        if provider_label is not None and (result.get("provider") or {}).get("label") != provider_label:
+            continue
         test_case = result.get("testCase") or {}
         meta = test_case.get("metadata") or {}
         suite = meta.get("suite") or NO_SUITE
@@ -776,6 +795,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the candidate provider endpoint base URL for copy-as-curl.",
     )
+    parser.add_argument(
+        "--baseline-provider",
+        default=None,
+        help="When both sides live in one unified eval file, the provider label "
+        "to treat as the baseline. Pass the same file as both positional args.",
+    )
+    parser.add_argument(
+        "--candidate-provider",
+        default=None,
+        help="The provider label to treat as the candidate in a unified eval file.",
+    )
     return parser
 
 
@@ -785,8 +815,12 @@ def main(argv: list[str] | None = None) -> int:
 
     baseline_json = read_eval_json(args.baseline_json)
     candidate_json = read_eval_json(args.candidate_json)
-    baseline_cells = extract_cells(baseline_json, suites)
-    candidate_cells = extract_cells(candidate_json, suites)
+    # Provider labels are only needed for a unified run (one file, both
+    # providers); for the classic two-file mode they stay None (all results).
+    base_provider = args.baseline_provider
+    cand_provider = args.candidate_provider
+    baseline_cells = extract_cells(baseline_json, suites, base_provider)
+    candidate_cells = extract_cells(candidate_json, suites, cand_provider)
 
     diffs = diff_cells(baseline_cells, candidate_cells, args.tolerance)
     counts = summarize(diffs)
@@ -799,10 +833,10 @@ def main(argv: list[str] | None = None) -> int:
                     baseline_eval_id=read_eval_id(baseline_json),
                     candidate_eval_id=read_eval_id(candidate_json),
                     ui_base_url=args.ui_base_url,
-                    baseline_errored=errored_tests(baseline_json, suites),
-                    candidate_errored=errored_tests(candidate_json, suites),
-                    baseline_curls=build_curls(baseline_json, base_dir, args.baseline_url),
-                    candidate_curls=build_curls(candidate_json, base_dir, args.candidate_url)),
+                    baseline_errored=errored_tests(baseline_json, suites, base_provider),
+                    candidate_errored=errored_tests(candidate_json, suites, cand_provider),
+                    baseline_curls=build_curls(baseline_json, base_dir, args.baseline_url, base_provider),
+                    candidate_curls=build_curls(candidate_json, base_dir, args.candidate_url, cand_provider)),
         encoding="utf-8",
     )
     msg = (

@@ -15,6 +15,7 @@ from scripts_repo.compare_runs import (
     extract_request_info,
     resolve_endpoints,
     build_curl,
+    build_curls,
     render_html,
     main,
 )
@@ -181,6 +182,89 @@ def test_extract_cells_falls_back_to_prompt_when_no_description():
         "Latest price of Arm Holdings (ARM)?",
         "Latest price of HSBC (HSBA)?",
     }
+
+
+# --- provider filtering (unified single-file runs) -----------------------
+
+
+def test_extract_cells_filters_by_provider_label():
+    # A single unified eval file holds both providers' results for the same
+    # test. Without a filter their identical CellKeys collide; the provider
+    # filter splits them into the two sides.
+    ev = make_eval_json([
+        rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.8]),
+        rubric_result("dev", "t1", "research_rubrics", [("a", "X", 1)], [0.3]),
+    ])
+    prod = extract_cells(ev, provider_label="prod")
+    dev = extract_cells(ev, provider_label="dev")
+    assert prod[CellKey("t1", "user_only", "a")].score == 0.8
+    assert dev[CellKey("t1", "user_only", "a")].score == 0.3
+
+
+def test_extract_cells_no_provider_label_includes_all():
+    # Back-compat: without a label, every result counts (single-provider files).
+    ev = make_eval_json([
+        rubric_result("prod", "t1", "research_rubrics", [("a", "X", 1)], [0.8]),
+    ])
+    assert len(extract_cells(ev)) == 1
+
+
+def test_errored_tests_filters_by_provider_label():
+    ev = make_eval_json([
+        _provider_error_entry("t_err", "s0", label="dev"),
+        rubric_result("prod", "t_err", "research_rubrics", [("a", "A", 1)], [0.9]),
+    ])
+    assert errored_tests(ev, provider_label="dev") == {"t_err"}
+    assert errored_tests(ev, provider_label="prod") == set()
+
+
+def test_extract_request_info_filters_by_provider_label():
+    ev = {"results": {"results": [
+        {"provider": {"id": "openai:chat:Prod/M", "label": "prod"},
+         "prompt": {"raw": '[{"role":"user","content":"hi"}]'},
+         "testCase": {"description": "t1", "metadata": {"suite": "s"}}},
+        {"provider": {"id": "openai:chat:Dev/M", "label": "dev"},
+         "prompt": {"raw": '[{"role":"user","content":"hi"}]'},
+         "testCase": {"description": "t1", "metadata": {"suite": "s"}}},
+    ]}}
+    info = extract_request_info(ev, provider_label="dev")
+    assert info["t1"]["model"] == "Dev/M"
+    assert info["t1"]["provider_label"] == "dev"
+
+
+def test_build_curls_filters_by_provider_label(tmp_path):
+    (tmp_path / "providers").mkdir()
+    (tmp_path / "providers" / "p.yaml").write_text(_PROVIDER_YAML, encoding="utf-8")
+    # _PROVIDER_YAML's label is gw_prod; a second provider shares the test desc.
+    ev = {
+        "config": {"providers": ["file://providers/p.yaml"]},
+        "results": {"results": [
+            {"provider": {"id": "openai:chat:Q", "label": "gw_prod"},
+             "prompt": {"raw": '[{"role":"user","content":"hi"}]'},
+             "testCase": {"description": "t1", "metadata": {"suite": "s"}}},
+            {"provider": {"id": "openai:chat:Q", "label": "other"},
+             "prompt": {"raw": "[]"},
+             "testCase": {"description": "t1", "metadata": {"suite": "s"}}},
+        ]},
+    }
+    curls = build_curls(ev, tmp_path, provider_label="gw_prod")
+    assert "t1" in curls
+    assert "127.0.0.1:8082" in curls["t1"]
+
+
+def test_main_splits_single_file_by_provider(tmp_path):
+    # One unified file with both providers; --{baseline,candidate}-provider pick
+    # the two sides. prod=0.5 vs dev=0.9 on the same assertion => improved.
+    ev = make_eval_json([
+        rubric_result("prod_label", "t1", "research_rubrics", [("a", "X", 1)], [0.5]),
+        rubric_result("dev_label", "t1", "research_rubrics", [("a", "X", 1)], [0.9]),
+    ])
+    f = _write(tmp_path, "unified.json", ev)
+    out = tmp_path / "report.html"
+    rc = main([str(f), str(f), "--baseline-provider", "prod_label",
+               "--candidate-provider", "dev_label", "--out", str(out)])
+    assert rc == 0
+    assert "1 improved" in out.read_text(encoding="utf-8")
 
 
 # --- diff / classify / summary / drift -----------------------------------

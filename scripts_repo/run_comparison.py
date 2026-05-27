@@ -11,10 +11,10 @@ Given a config JSON (see docs/superpowers/specs/
      (decided via a cache file), after an explicit confirmation.
   4. Starts the prod and dev plaintext gateways in Docker (mounting a dev
      system prompt if given).
-  5. Runs the promptfoo suite against prod and against dev, into timestamped
-     result files under that per-config output directory.
-  6. Builds the comparison report and opens it, then ensures the promptfoo
-     viewer container is up.
+  5. Runs the promptfoo suite once against both providers, into a single
+     timestamped result file under that per-config output directory.
+  6. Builds the comparison report (splitting that file into prod/dev sides) and
+     opens it, then ensures the promptfoo viewer container is up.
 
 It does NOT freeze a baseline.
 
@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -50,6 +51,18 @@ from scripts_repo.deploy_phala import wait_for_url
 # reflect a reconfigured gateway (the static YAML providers can't).
 PROD_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_prod"
 DEV_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_dev"
+
+
+def both_providers_filter() -> str:
+    """A --filter-providers regex selecting BOTH dynamic providers in one pass.
+
+    promptfoo's --filter-providers is a regex matched against each provider's
+    id/label. Anchoring on the exact dynamic labels keeps the static
+    (non-dynamic) `..._prod` / `..._dev` providers and the vLLM provider out of
+    the run. Used by the single unified eval (prod and dev graded together) that
+    replaced the old two separate single-provider passes.
+    """
+    return f"^({re.escape(PROD_PROVIDER)}|{re.escape(DEV_PROVIDER)})$"
 
 # Host ports the prod/dev plaintext gateways are published on (matches
 # run_plaintext_gateway.sh). The gateway listens on 8080 inside the container.
@@ -289,7 +302,11 @@ def eval_command(
     description: str,
     config_path: str = "promptfooconfig.yaml",
 ) -> list[str]:
-    """Build the `pnpm exec promptfoo eval` argv for one side of the run."""
+    """Build the `pnpm exec promptfoo eval` argv.
+
+    `provider` is passed verbatim to --filter-providers; it may be a single
+    provider label or a regex selecting several (see both_providers_filter).
+    """
     cmd = [
         "pnpm",
         "exec",
@@ -383,20 +400,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes",
         action="store_true",
         help="Skip the confirmation prompt before a Phala redeploy.",
-    )
-    parser.add_argument(
-        "--cache-prod",
-        type=bool,
-        action="store",
-        default=True,
-        help="Allow promptfoo result caching for prod results. Defaults to true as prod should be stable across runs.",
-    )
-    parser.add_argument(
-        "--cache-dev",
-        type=bool,
-        action="store",
-        default=False,
-        help="Allow promptfoo result caching for dev results. Defaults to false as dev can change. TODO: we should make sure promptfoo understands the provider so we don't have to micromanage this",
     )
     parser.add_argument(
         "--docker-image",
@@ -529,41 +532,45 @@ def main(argv: list[str] | None = None) -> int:
     wait_for_url(gateway_health_url(PROD_GATEWAY_PORT), timeout_s=args.gateway_timeout)
     wait_for_url(gateway_health_url(DEV_GATEWAY_PORT), timeout_s=args.gateway_timeout)
 
-    # Run both passes (no baseline freeze). Eval exits non-zero on test
-    # failures, which is expected here, so we do not abort on it.
+    # One eval graded against BOTH providers (no baseline freeze). Eval exits
+    # non-zero on test failures, which is expected here, so we do not abort on
+    # it. Running prod and dev in a single pass (rather than two) lets a
+    # head-to-head assertion (e.g. select-best) see both responses together, and
+    # halves the orchestration.
+    #
+    # Always --no-cache: a single eval has one global cache setting, and dev may
+    # have just been redeployed with a server-side change (system prompt / vLLM
+    # options) that promptfoo's request cache key cannot see, so a cached dev hit
+    # could be stale. Correctness over speed — prod loses its former cache reuse.
     filter_args = build_filter_args(config.get("promptfoo-filters"))
-    prod_out = run_dir / f"prod_results_{ts}.json"
-    dev_out = run_dir / f"dev_results_{ts}.json"
+    results_out = run_dir / f"results_{ts}.json"
 
-    print("Running prod pass ...")
+    print("Running unified prod+dev eval ...")
     _run(
         eval_command(
-            PROD_PROVIDER,
-            str(prod_out),
+            both_providers_filter(),
+            str(results_out),
             filter_args,
-            not args.cache_prod,
-            f"{name} prod",
-        ),
-        cwd=repo_root,
-        check=False,
-    )
-    print("Running dev pass ...")
-    _run(
-        eval_command(
-            DEV_PROVIDER, str(dev_out), filter_args, not args.cache_dev, f"{name} dev"
+            True,  # no_cache
+            f"{name} prod+dev",
         ),
         cwd=repo_root,
         check=False,
     )
 
-    # Compare and open the report (prod is the baseline side, dev the candidate).
+    # Build the report from the one file, splitting it by provider label:
+    # prod is the baseline side, dev the candidate.
     report = run_dir / f"report__{ts}.html"
     _run(
         [
             sys.executable,
             str(repo_root / "scripts_repo" / "compare_runs.py"),
-            str(prod_out),
-            str(dev_out),
+            str(results_out),
+            str(results_out),
+            "--baseline-provider",
+            PROD_PROVIDER,
+            "--candidate-provider",
+            DEV_PROVIDER,
             "--out",
             str(report),
         ],
