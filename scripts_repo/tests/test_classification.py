@@ -52,6 +52,35 @@ def test_augment_creates_metadata_when_absent(tmp_path, monkeypatch):
     assert test["metadata"]["domain"] == "unclassified"
 
 
+def test_augment_attaches_grading_transform_to_every_assertion(tmp_path, monkeypatch):
+    _point_at(tmp_path, monkeypatch)
+    test = {
+        "vars": {"user": "x"},
+        "assert": [{"type": "icontains", "value": "a"}, {"type": "llm-rubric", "value": "b"}],
+    }
+    classification.augment(test, "demo", "x")
+    assert all(
+        a["transform"] == classification.GRADING_TRANSFORM for a in test["assert"]
+    )
+
+
+def test_augment_does_not_clobber_an_assertions_own_transform(tmp_path, monkeypatch):
+    _point_at(tmp_path, monkeypatch)
+    test = {
+        "vars": {"user": "x"},
+        "assert": [{"type": "python", "value": "v", "transform": "file://custom.py"}],
+    }
+    classification.augment(test, "demo", "x")
+    assert test["assert"][0]["transform"] == "file://custom.py"
+
+
+def test_augment_handles_tests_without_assertions(tmp_path, monkeypatch):
+    _point_at(tmp_path, monkeypatch)
+    test = {"vars": {"user": "x"}}  # no "assert" key
+    classification.augment(test, "demo", "x")  # must not raise
+    assert "assert" not in test
+
+
 def test_vocabularies_are_nonempty_and_documented():
     assert classification.REQUEST_TYPES and classification.DOMAINS
     assert all(isinstance(v, str) and v for v in classification.REQUEST_TYPES.values())

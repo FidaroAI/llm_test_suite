@@ -59,6 +59,16 @@ DOMAINS = {
 # Stamped when a prompt has no entry in the classification file yet.
 UNCLASSIFIED = "unclassified"
 
+# Output transform attached to every generated assertion. Promptfoo applies an
+# assertion's ``transform`` only to that assertion's view of the output, so
+# graders see the model's final answer with the reasoning prefix stripped (see
+# hooks/strip_before_triple_newline.py) while the stored ``response.output``
+# keeps the full, pre-strip response. Doing this per-assertion is deliberate: the
+# alternative, a global ``defaultTest.options.transform`` in promptfooconfig.yaml,
+# overwrites the canonical output and discards the original. ``augment`` is the
+# one funnel every suite's tests pass through, so it is where we attach this.
+GRADING_TRANSFORM = "file://hooks/strip_before_triple_newline.py"
+
 CLASSIFICATIONS_DIR = Path(__file__).resolve().parent.parent / "data" / "classifications"
 
 
@@ -95,7 +105,23 @@ def labels_for(suite: str, prompt: str) -> dict:
     }
 
 
+def _attach_grading_transform(test: dict) -> None:
+    """Default every assertion to the reasoning-strip transform (in place).
+
+    Uses ``setdefault`` so an assertion that declares its own ``transform`` keeps
+    it. See :data:`GRADING_TRANSFORM` for why this lives here.
+    """
+    for assertion in test.get("assert") or []:
+        if isinstance(assertion, dict):
+            assertion.setdefault("transform", GRADING_TRANSFORM)
+
+
 def augment(test: dict, suite: str, prompt: str) -> dict:
-    """Stamp ``request_type``/``domain`` into ``test['metadata']`` (in place)."""
+    """Stamp ``request_type``/``domain`` into ``test['metadata']`` (in place).
+
+    Also gives each assertion the shared reasoning-strip transform so graders
+    see the stripped answer while the stored response keeps its full text.
+    """
     test.setdefault("metadata", {}).update(labels_for(suite, prompt))
+    _attach_grading_transform(test)
     return test

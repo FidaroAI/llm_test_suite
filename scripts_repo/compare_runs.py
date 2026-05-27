@@ -253,6 +253,40 @@ def errored_tests(eval_json: dict, suites=None) -> set:
     return out
 
 
+def _prompt_text(raw: str) -> str:
+    """Human-readable prompt text from a promptfoo ``prompt.raw``.
+
+    ``prompt.raw`` is usually a JSON chat-messages array; return the last user
+    message's content. Falls back to the raw string for non-JSON prompts.
+    """
+    try:
+        messages = json.loads(raw)
+    except (ValueError, TypeError):
+        return raw.strip()
+    if isinstance(messages, list):
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                return str(msg.get("content", "")).strip()
+    return raw.strip()
+
+
+def _test_identity(result: dict, test_case: dict) -> str:
+    """A stable, human-readable identifier for a test case.
+
+    Prefer the explicit ``description``. When a suite sets none (e.g.
+    ``stock_prices``, whose rows share one ``file://`` assertion and the same
+    prompt label), fall back to the rendered prompt so distinct tests don't
+    collapse onto a single CellKey and overwrite each other. Both eval JSONs
+    derive the same identity for the same input, so the baseline/candidate join
+    still holds.
+    """
+    desc = test_case.get("description")
+    if desc:
+        return desc
+    text = _prompt_text((result.get("prompt") or {}).get("raw") or "")
+    return text or "<no-description>"
+
+
 def _search_term(meta: dict, description: str) -> str:
     """A clean token that isolates one test in the promptfoo UI search box.
 
@@ -279,7 +313,7 @@ def extract_cells(eval_json: dict, suites=None) -> dict:
         suite = meta.get("suite") or NO_SUITE
         if suites is not None and suite not in suites:
             continue
-        test_desc = test_case.get("description") or "<no-description>"
+        test_desc = _test_identity(result, test_case)
         search = _search_term(meta, test_desc)
         prompt_label = (result.get("prompt") or {}).get("label") or "<no-prompt>"
         asserts = test_case.get("assert") or []

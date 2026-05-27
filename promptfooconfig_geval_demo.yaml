@@ -1,0 +1,54 @@
+description: "g-eval demo: one prompt graded by chain-of-thought criteria"
+
+# Only the two dynamic providers. They template model/temperature/max_tokens from
+# COMPARISON_{PROD,DEV}_* env vars, so this is meaningful only when those are set
+# (i.e. driven by run_comparison.py, or exported by hand before running). The
+# gateways on :8082 (prod) and :8084 (dev) must already be up.
+providers:
+  - file://providers/fidaro_plaintext_gateway_phala_dynamic_prod.yaml
+  - file://providers/fidaro_plaintext_gateway_phala_dynamic_dev.yaml
+
+prompts:
+  - id: file://prompt_templates/user_only.json
+    label: user_only
+
+defaultTest:
+  options:
+    cache: true
+    # Same pinned, deterministic judge the real suite uses. g-eval runs on this
+    # grading provider exactly as llm-rubric does.
+    provider:
+      id: bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0
+      config:
+        region: "{{ env.AWS_REGION }}"
+        temperature: 0
+
+tests:
+  - description: "geval_demo: compound vs simple interest"
+    vars:
+      user: "Explain the difference between compound interest and simple interest, and give a worked numeric example of each."
+    # Label used purely for filtering: --filter-metadata suite=geval_demo
+    metadata:
+      suite: geval_demo
+    # Test passes on the weighted average of the g-eval scores.
+    threshold: 0.7
+    assert:
+      - type: g-eval
+        # A single criterion string: g-eval derives its own eval steps from it.
+        value: "The response correctly distinguishes compound from simple interest and its explanation is accurate."
+        weight: 2
+        metric: correctness
+        # Mirror the suite's reasoning-strip transform so the judge sees the
+        # final answer, not the model's <thinking> prefix. In the Python
+        # generators classification.augment() attaches this automatically; here
+        # we add it by hand since this config bypasses that funnel.
+        transform: file://hooks/strip_before_triple_newline.py
+      - type: g-eval
+        # A list of explicit steps: skips step-generation for a more deterministic score.
+        value:
+          - "Check that a worked numeric example is given for simple interest."
+          - "Check that a worked numeric example is given for compound interest."
+          - "Check that the two examples use the same principal and rate so they are comparable."
+        weight: 1
+        metric: worked_examples
+        transform: file://hooks/strip_before_triple_newline.py

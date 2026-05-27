@@ -1,0 +1,43 @@
+description: "A-vs-B demo: one prompt, two providers, judge picks the better response"
+
+# The two responses being compared come from these two providers. select-best
+# runs the prompt against BOTH, then the judge sees both outputs side by side.
+# (As with the g-eval demo, the dynamic providers need COMPARISON_{PROD,DEV}_*
+# env vars set and the gateways on :8082 / :8084 up.)
+providers:
+  - file://providers/fidaro_plaintext_gateway_phala_dynamic_prod.yaml
+  - file://providers/fidaro_plaintext_gateway_phala_dynamic_dev.yaml
+
+prompts:
+  - id: file://prompt_templates/user_only.json
+    label: user_only
+
+defaultTest:
+  options:
+    cache: true
+    # The judge that does the pairwise comparison. Same pinned, deterministic
+    # Bedrock model the rest of the suite grades with.
+    provider:
+      id: bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0
+      config:
+        region: "{{ env.AWS_REGION }}"
+        temperature: 0
+
+tests:
+  - description: "select_best_demo: which provider explains diversification better"
+    vars:
+      user: "Explain portfolio diversification to a beginner investor, and give one concrete example."
+    metadata:
+      suite: select_best_demo          # filter handle: --filter-metadata suite=select_best_demo
+    assert:
+      # Unlike g-eval/llm-rubric (which grade each provider's output in
+      # isolation), select-best compares ALL providers' outputs for THIS test
+      # and passes only the best one. With two providers that's a head-to-head:
+      # the winner's cell is PASS, the loser's is FAIL, and the report shows
+      # which provider won.
+      - type: select-best
+        value: "Pick the response that most clearly and accurately explains diversification to a beginner, with a concrete, correct example."
+        # Same reasoning-strip transform the suite attaches via
+        # classification.augment(), so the judge compares final answers, not
+        # the models' <thinking> prefixes.
+        transform: file://hooks/strip_before_triple_newline.py
