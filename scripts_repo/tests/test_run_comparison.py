@@ -6,9 +6,14 @@ import json
 
 import pytest
 
+import re
+
 from scripts_repo.run_comparison import (
     CORE_SYSTEM_PROMPT_PATH,
+    DEV_PROVIDER,
+    PROD_PROVIDER,
     ConfigError,
+    both_providers_filter,
     build_filter_args,
     comparison_dir,
     comparison_name,
@@ -267,6 +272,22 @@ def test_build_filter_args_repeats_list_values():
         "--filter-metadata",
         "suite=b",
     ]
+
+
+# --- both-providers filter (single unified pass) ---------------------------
+
+
+def test_both_providers_filter_matches_both_dynamic_providers():
+    pat = both_providers_filter()
+    assert re.search(pat, PROD_PROVIDER)
+    assert re.search(pat, DEV_PROVIDER)
+
+
+def test_both_providers_filter_excludes_static_providers():
+    # The static (non-dynamic) providers must not be swept into the unified pass.
+    pat = both_providers_filter()
+    assert not re.search(pat, "fidaro_plaintext_gateway_phala_prod")
+    assert not re.search(pat, "fidaro_plaintext_gateway_phala_dev")
 
 
 # --- gateway docker args ---------------------------------------------------

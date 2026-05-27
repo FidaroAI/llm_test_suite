@@ -117,8 +117,9 @@ The vLLM-options cache that drives the redeploy decision lives one level up at
 gitignored; only the config JSONs are tracked. The script validates the config,
 optionally redeploys the Phala dev CVM when `vllm-options` change (after
 confirmation — see [deploy_phala.py](../scripts_repo/deploy_phala.py)), starts
-both plaintext gateways (mounting a dev system prompt if given), runs both
-passes, and opens the report. It does **not** freeze a baseline. `BRAVE_API_KEY`
+both plaintext gateways (mounting a dev system prompt if given), runs **one**
+eval against both providers (always `--no-cache`; see below), and opens the
+report. It does **not** freeze a baseline. `BRAVE_API_KEY`
 must be in the environment; a Phala redeploy also needs `PHALA_DOCKER_COMPOSE_FILE`
 set and `.env.phala` in the repo root. Full design:
 [the spec](superpowers/specs/2026-05-22-comparison-orchestrator-design.md).
@@ -137,6 +138,17 @@ result can't leak across models. For dev the `model` must equal `vllm-options.mo
 (the model the redeploy serves); prod's `model` is whatever prod Phala runs. The
 static providers are kept for ad-hoc runs. See
 [example.json](../comparisons/example.json).
+
+Both providers run in a **single** promptfoo eval (filtered to the two dynamic
+providers), not two separate passes. `compare_runs.py` then splits that one
+result file into the prod (baseline) and dev (candidate) sides via
+`--baseline-provider` / `--candidate-provider` (the classic two-file invocation
+still works for frozen baselines). Running both in one eval means a head-to-head
+assertion such as `select-best` can compare prod and dev directly. The trade-off:
+a single eval has one global cache setting, and a dev redeploy can change the
+gateway server-side (system prompt / vLLM options) in ways promptfoo's cache key
+can't see, so the unified run is always `--no-cache` — correctness over the prod
+cache reuse the old two-pass design allowed.
 
 ## Project Structure
 
