@@ -354,13 +354,23 @@ def extract_cells(eval_json: dict, suites=None, provider_label: str | None = Non
                 assertion_value=value,
                 search=search,
             )
-            if assertion.get("type") == "llm-rubric":
+            atype = assertion.get("type")
+            if atype == "llm-rubric":
                 score = comps[i].get("score")
                 cells[key] = Cell(
                     kind="rubric",
                     score=float(score) if score is not None else 0.0,
                     **common,
                 )
+            elif atype == "select-best":
+                # Head-to-head: the winning provider's component passes, the
+                # loser's fails. Captured as its own kind so it stays out of the
+                # rubric/deterministic tallies and feeds the "best" column.
+                comp = comps[i]
+                passed = comp.get("pass")
+                if passed is None:
+                    passed = float(comp.get("score") or 0.0) >= 0.5
+                cells[key] = Cell(kind="best", passed=bool(passed), **common)
             else:
                 comp = comps[i]
                 passed = comp.get("pass")
@@ -421,6 +431,12 @@ def diff_cells(baseline_cells: dict, candidate_cells: dict, tolerance: float) ->
                 diffs.append(CellDiff(key, src.suite, kind, src.metric,
                                       src.assertion_value, b.score, c.score, delta,
                                       classify(delta, tolerance), src.search))
+            elif kind == "best":
+                # No pass/fail transition to classify — the winner is read off
+                # the passing side (see best_winner); status is a fixed marker.
+                diffs.append(CellDiff(key, src.suite, kind, src.metric,
+                                      src.assertion_value, b.passed, c.passed, None,
+                                      "best", src.search))
             else:
                 status = _classify_deterministic(b.passed, c.passed)
                 diffs.append(CellDiff(key, src.suite, kind, src.metric,
@@ -468,6 +484,34 @@ def summarize_deterministic(diffs: list) -> dict:
     return out
 
 
+def best_winner(diff: "CellDiff") -> str | None:
+    """Which side won a ``select-best`` head-to-head, or None if undetermined.
+
+    Exactly one side's component passes when both ran. ``"prod"`` means the
+    baseline side won, ``"candidate"`` the candidate side (run_comparison always
+    passes prod as the baseline). None when a side is missing/errored or neither
+    is a clean winner.
+    """
+    if diff.kind != "best":
+        return None
+    # Both sides must have run (a missing/errored side is None, not False).
+    if diff.baseline is True and diff.candidate is False:
+        return "prod"
+    if diff.candidate is True and diff.baseline is False:
+        return "candidate"
+    return None
+
+
+def summarize_best(diffs: list) -> dict:
+    """Tally select-best winners across the run (best diffs only)."""
+    out = {"prod": 0, "candidate": 0, "undecided": 0}
+    for d in diffs:
+        if d.kind != "best":
+            continue
+        out[best_winner(d) or "undecided"] += 1
+    return out
+
+
 def diff_test_keys(baseline_cells: dict, candidate_cells: dict):
     """Sorted (baseline-only, candidate-only) test descriptions."""
     b_tests = {k.test for k in baseline_cells}
@@ -497,6 +541,7 @@ h2 { margin-top: 1.5rem; }
 .status-new td, .status-removed td { color: #555; font-style: italic; }
 .verdict.pass { color: #0a7d28; font-weight: 600; }
 .verdict.fail { color: #c0341d; font-weight: 600; }
+.best-winner { font-weight: 600; color: #1a4fa0; }
 /* Neutral alternating banding: all rows of one test share a shade. */
 tr.test-a td { background: #f4f4f4; }
 tr.test-b td { background: #ffffff; }
@@ -638,8 +683,16 @@ def _deterministic_summary_line(counts: dict) -> str:
     )
 
 
+def _best_summary_line(counts: dict) -> str:
+    return (
+        '<div class="sum-line"><span class="sum-label">Best (head-to-head):</span> '
+        f"prod won {counts['prod']} &middot; candidate won {counts['candidate']} "
+        f"&middot; {counts['undecided']} undecided</div>"
+    )
+
+
 def _summary_block(diffs: list, tolerance: float, css_class: str) -> str:
-    """Rubric and/or deterministic summary lines for a set of diffs.
+    """Rubric, deterministic and/or best summary lines for a set of diffs.
 
     A kind's line is shown only when that kind has at least one diff.
     """
@@ -648,6 +701,8 @@ def _summary_block(diffs: list, tolerance: float, css_class: str) -> str:
         lines.append(_rubric_summary_line(summarize(diffs), tolerance))
     if any(d.kind == "deterministic" for d in diffs):
         lines.append(_deterministic_summary_line(summarize_deterministic(diffs)))
+    if any(d.kind == "best" for d in diffs):
+        lines.append(_best_summary_line(summarize_best(diffs)))
     return f'<div class="{css_class}">{"".join(lines)}</div>'
 
 
@@ -717,6 +772,23 @@ def render_html(diffs: list, drift, tolerance: float,
             parity = "a" if parity_counter % 2 == 0 else "b"
             parity_counter += 1
             for d in sorted(test_groups[gkey], key=_sort_key):
+                if d.kind == "best":
+                    # The head-to-head verdict is a single per-test row: show the
+                    # winner in the best column, dashes in the score columns.
+                    winner = best_winner(d) or "—"
+                    rows.append(
+                        f'<tr class="status-best test-{parity}">'
+                        f"<td>{html.escape(d.key.test)}</td>"
+                        "<td>select-best</td>"
+                        "<td></td>"
+                        '<td class="num">—</td>'
+                        '<td class="num">—</td>'
+                        '<td class="num delta">—</td>'
+                        "<td></td>"
+                        f'<td class="best-winner">{winner}</td>'
+                        "</tr>"
+                    )
+                    continue
                 rows.append(
                     f'<tr class="status-{d.status} test-{parity}">'
                     f"<td>{html.escape(d.key.test)}</td>"
@@ -726,6 +798,7 @@ def render_html(diffs: list, drift, tolerance: float,
                     f'{_cell_td(d.kind, d.candidate, candidate_eval_id, d.search, ui_base_url, d.key.test in candidate_errored, candidate_curls.get(d.key.test, ""))}'
                     f'<td class="num delta">{_fmt_delta(d.delta)}</td>'
                     f"<td>{d.status}</td>"
+                    "<td>—</td>"
                     "</tr>"
                 )
         sections.append(
@@ -734,6 +807,7 @@ def render_html(diffs: list, drift, tolerance: float,
             + "<table><thead><tr>"
             "<th>test</th><th>assertion</th><th>metric</th>"
             "<th>baseline</th><th>candidate</th><th>&Delta;</th><th>status</th>"
+            "<th>best</th>"
             "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
         )
 

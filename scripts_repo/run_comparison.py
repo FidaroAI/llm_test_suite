@@ -11,17 +11,10 @@ Given a config JSON (see docs/superpowers/specs/
      (decided via a cache file), after an explicit confirmation.
   4. Starts the prod and dev plaintext gateways in Docker (mounting a dev
      system prompt if given).
-<<<<<<< HEAD
-  5. Runs the promptfoo suite against prod and against dev, into timestamped
-     result files under that per-config output directory.
-  6. Builds the comparison report and opens it, then ensures the promptfoo
-     viewer container is up.
-=======
   5. Runs the promptfoo suite once against both providers, into a single
      timestamped result file under that per-config output directory.
   6. Builds the comparison report (splitting that file into prod/dev sides) and
      opens it, then ensures the promptfoo viewer container is up.
->>>>>>> @{-1}
 
 It does NOT freeze a baseline.
 
@@ -58,6 +51,12 @@ from scripts_repo.deploy_phala import wait_for_url
 # reflect a reconfigured gateway (the static YAML providers can't).
 PROD_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_prod"
 DEV_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_dev"
+
+# Set in the eval's environment so tests/classification.py:augment appends a
+# head-to-head `select-best` assertion. Only meaningful here, where prod and dev
+# are graded in one eval; single-provider runs leave it unset. Keep in sync with
+# tests/classification.py (SELECT_BEST_ENV_VAR).
+SELECT_BEST_ENV_VAR = "COMPARISON_SELECT_BEST"
 
 
 def both_providers_filter() -> str:
@@ -468,6 +467,10 @@ def main(argv: list[str] | None = None) -> int:
     # The dynamic providers template their model/temperature/max_tokens from these
     # COMPARISON_{PROD,DEV}_* env vars (see providers/*_dynamic_*.yaml).
     os.environ.update(provider_options_env(config))
+    # Grade prod vs dev head-to-head: augment() (tests/classification.py) reads
+    # this and appends a select-best assertion to every test. Only valid because
+    # both providers run in this one eval.
+    os.environ[SELECT_BEST_ENV_VAR] = "1"
 
     # Redeploy the dev CVM only when vLLM options changed.
     options = config.get("vllm-options")

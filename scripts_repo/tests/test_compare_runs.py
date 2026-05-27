@@ -8,6 +8,8 @@ from scripts_repo.compare_runs import (
     diff_cells,
     summarize,
     summarize_deterministic,
+    summarize_best,
+    best_winner,
     diff_test_keys,
     read_eval_id,
     errored_tests,
@@ -1368,3 +1370,75 @@ def test_render_html_eval_header_handles_missing_id():
     out = render_html([], ([], []), 0.05)
     assert "Baseline" in out and "Candidate" in out
     assert "(unknown)" in out
+
+
+# --- select-best head-to-head -------------------------------------------
+
+
+def _select_best(provider, desc, suite, won):
+    """One result with a single select-best assertion (won => component passes)."""
+    return deterministic_result(provider, desc, suite, [("select-best", "crit")], [won])
+
+
+def test_extract_cells_tags_select_best_as_best_kind():
+    ev = make_eval_json([_select_best("prod", "t1", "ab", True)])
+    cell = extract_cells(ev)[CellKey("t1", "user_only", "crit")]
+    assert cell.kind == "best"
+    assert cell.passed is True
+
+
+def test_best_winner_is_the_passing_side():
+    base = _cells(make_eval_json([_select_best("prod", "t1", "ab", True)]))
+    cand = _cells(make_eval_json([_select_best("cand", "t1", "ab", False)]))
+    (diff,) = diff_cells(base, cand, 0.05)
+    assert diff.kind == "best"
+    assert best_winner(diff) == "prod"
+
+    base = _cells(make_eval_json([_select_best("prod", "t1", "ab", False)]))
+    cand = _cells(make_eval_json([_select_best("cand", "t1", "ab", True)]))
+    (diff,) = diff_cells(base, cand, 0.05)
+    assert best_winner(diff) == "candidate"
+
+
+def test_best_winner_undecided_when_a_side_missing():
+    base = _cells(make_eval_json([_select_best("prod", "t1", "ab", True)]))
+    (diff,) = diff_cells(base, {}, 0.05)  # candidate side absent
+    assert best_winner(diff) is None
+
+
+def test_select_best_excluded_from_deterministic_summary():
+    base = _cells(make_eval_json([_select_best("prod", "t1", "ab", True)]))
+    cand = _cells(make_eval_json([_select_best("cand", "t1", "ab", False)]))
+    diffs = diff_cells(base, cand, 0.05)
+    det = summarize_deterministic(diffs)
+    assert det == {"new_passes": 0, "new_fails": 0, "total_passes": 0, "total_fails": 0}
+
+
+def test_summarize_best_counts_winners():
+    base = _cells(
+        make_eval_json(
+            [
+                _select_best("prod", "t1", "ab", True),
+                _select_best("prod", "t2", "ab", False),
+            ]
+        )
+    )
+    cand = _cells(
+        make_eval_json(
+            [
+                _select_best("cand", "t1", "ab", False),
+                _select_best("cand", "t2", "ab", True),
+            ]
+        )
+    )
+    counts = summarize_best(diff_cells(base, cand, 0.05))
+    assert counts == {"prod": 1, "candidate": 1, "undecided": 0}
+
+
+def test_render_html_best_column_shows_winner():
+    base = _cells(make_eval_json([_select_best("prod", "t1", "ab", False)]))
+    cand = _cells(make_eval_json([_select_best("cand", "t1", "ab", True)]))
+    out = render_html(diff_cells(base, cand, 0.05), ([], []), 0.05)
+    assert "<th>best</th>" in out
+    assert "Best (head-to-head):" in out
+    assert "candidate" in out

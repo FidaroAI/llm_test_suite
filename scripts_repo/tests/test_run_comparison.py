@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +14,7 @@ from scripts_repo.run_comparison import (
     CORE_SYSTEM_PROMPT_PATH,
     DEV_PROVIDER,
     PROD_PROVIDER,
+    SELECT_BEST_ENV_VAR,
     ConfigError,
     both_providers_filter,
     build_filter_args,
@@ -26,6 +29,20 @@ from scripts_repo.run_comparison import (
     vllm_options_changed,
     write_options_cache,
 )
+
+
+def _load_classification():
+    path = Path(__file__).resolve().parents[2] / "tests" / "classification.py"
+    spec = importlib.util.spec_from_file_location("classification", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_select_best_env_var_matches_classification():
+    # run_comparison sets this var; classification.augment reads it. They must
+    # name the same var or the head-to-head silently never fires.
+    assert SELECT_BEST_ENV_VAR == _load_classification().SELECT_BEST_ENV_VAR
 
 
 def _minimal_config(**overrides):

@@ -150,6 +150,18 @@ gateway server-side (system prompt / vLLM options) in ways promptfoo's cache key
 can't see, so the unified run is always `--no-cache` — correctness over the prod
 cache reuse the old two-pass design allowed.
 
+Because both sides share one eval, `run_comparison.py` automatically grades a
+**`select-best` head-to-head** on every test: it sets `COMPARISON_SELECT_BEST=1`,
+which makes `tests/classification.py:augment` append a `select-best` assertion
+(graded by the same Bedrock judge, one extra grader call per test — no extra
+generation eval). promptfoo's built-in select-best template never sees the
+prompt, so the assertion ships a custom `rubricPrompt` that injects the user's
+question via `{{ user }}`. The report's new **best** column names the winner
+(`prod`/`candidate`) per test; the verdict is kept out of the rubric/deterministic
+tallies. Single-provider runs (`fidaro.sh`/CI) leave the env var unset and are
+unaffected. Design notes:
+[the spec](superpowers/specs/2026-05-27-select-best-comparison-design.md).
+
 ## Project Structure
 
 Note: There's a lot of experimentation cruft in the repo that will eventually be
