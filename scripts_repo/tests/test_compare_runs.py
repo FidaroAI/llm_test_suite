@@ -1442,3 +1442,102 @@ def test_render_html_best_column_shows_winner():
     assert "<th>best</th>" in out
     assert "Best (head-to-head):" in out
     assert "candidate" in out
+
+
+# --- g-eval handling + assertion-type column -----------------------------
+
+
+def test_extract_cells_geval_is_rubric_kind_with_score():
+    # g-eval produces a 0-1 score just like llm-rubric, so it must land in the
+    # rubric kind (not pass/fail) and carry its numeric score through unchanged.
+    ev = make_eval_json(
+        [
+            rubric_result(
+                "prod",
+                "t1",
+                "research_rubrics",
+                [("cover period", "Explicit", 5)],
+                [0.8],
+                assertion_type="g-eval",
+            ),
+        ]
+    )
+    cell = next(iter(extract_cells(ev).values()))
+    assert cell.kind == "rubric"
+    assert cell.score == 0.8
+    assert cell.passed is None  # not a deterministic verdict
+    assert cell.assertion_type == "g-eval"
+
+
+def test_extract_cells_assertion_type_captured_for_each_kind():
+    ev = make_eval_json(
+        [
+            rubric_result("prod", "tr", "s", [("a", "X", 1)], [0.9]),
+            rubric_result("prod", "tg", "s", [("b", "X", 1)], [0.7],
+                          assertion_type="g-eval"),
+            deterministic_result("prod", "td", "s", [("icontains", "x")], [True]),
+        ]
+    )
+    by_type = {c.key.assertion: c.assertion_type for c in extract_cells(ev).values()}
+    assert by_type["a"] == "llm-rubric"
+    assert by_type["b"] == "g-eval"
+    assert by_type["x"] == "icontains"
+
+
+def test_diff_cells_propagates_assertion_type_through_to_diff():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t1", "s", [("a", "X", 1)], [0.6],
+                      assertion_type="g-eval"),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t1", "s", [("a", "X", 1)], [0.8],
+                      assertion_type="g-eval"),
+    ]))
+    (diff,) = diff_cells(base, cand, 0.05)
+    assert diff.assertion_type == "g-eval"
+    # And the bug fix: a g-eval diff is rubric-shaped (has a delta), not det.
+    assert diff.kind == "rubric"
+    assert diff.delta == 0.20000000000000007 or abs(diff.delta - 0.2) < 1e-9
+
+
+def test_render_html_has_assertion_type_column_before_assertion():
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t1", "s", [("a", "X", 1)], [0.6]),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t1", "s", [("a", "X", 1)], [0.8]),
+    ]))
+    out = render_html(diff_cells(base, cand, 0.05), ([], []), 0.05)
+    assert "<th>assertion type</th>" in out
+    # The new column must precede the existing "assertion" column.
+    header = re.search(r"<thead>.*?</thead>", out, re.DOTALL).group(0)
+    assert header.index("<th>assertion type</th>") < header.index("<th>assertion</th>")
+
+
+def test_render_html_row_shows_each_assertion_type():
+    # Mixed assertion types must each show up in the new column.
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t1", "s", [("a", "X", 1)], [0.6]),
+        rubric_result("prod", "t2", "s", [("b", "X", 1)], [0.7],
+                      assertion_type="g-eval"),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t1", "s", [("a", "X", 1)], [0.7]),
+        rubric_result("cand", "t2", "s", [("b", "X", 1)], [0.8],
+                      assertion_type="g-eval"),
+    ]))
+    out = render_html(diff_cells(base, cand, 0.05), ([], []), 0.05)
+    # The type lives in its own td so a substring match is unambiguous.
+    assert "<td>g-eval</td>" in out
+    assert "<td>llm-rubric</td>" in out
+
+
+def test_render_html_best_row_keeps_select_best_label_in_type_column():
+    # The label that used to sit in the assertion column for best rows now
+    # lives in the new assertion-type column; the assertion column is blank.
+    base = _cells(make_eval_json([_select_best("prod", "t1", "ab", True)]))
+    cand = _cells(make_eval_json([_select_best("cand", "t1", "ab", False)]))
+    out = render_html(diff_cells(base, cand, 0.05), ([], []), 0.05)
+    # status-best row carries the type-column td.
+    best_row = re.search(r'<tr class="status-best[^"]*">.*?</tr>', out, re.DOTALL).group(0)
+    assert "<td>select-best</td>" in best_row

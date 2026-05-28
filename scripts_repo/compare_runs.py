@@ -5,10 +5,15 @@ Extracts one "cell" per assertion per test from each eval JSON, joins them on
 (test description, prompt label, assertion text), and writes a self-contained
 HTML report grouped by suite. Two kinds of cell are handled:
 
-  * rubric        — an llm-rubric assertion with a 0-1 score; the delta is
-                    classified against an absolute tolerance band.
+  * rubric        — a graded 0-1 assertion (llm-rubric or g-eval); the delta
+                    is classified against an absolute tolerance band.
   * deterministic — any other assertion (icontains, python, …) with a pass/fail
                     verdict; no delta, classified as a pass/fail transition.
+
+The assertion's promptfoo ``type`` (e.g. ``llm-rubric``, ``g-eval``) is also
+captured on every cell and surfaced as its own column in the HTML, so two
+variants of the same prompt graded by different judges can be told apart at a
+glance.
 
 Every suite present in either run is compared (no allowlist); `--suite` can
 still restrict the scope. Tests with no metadata.suite are grouped under
@@ -39,6 +44,11 @@ DEFAULT_UI_BASE_URL = "http://localhost:3000"
 # promptfoo ResultFailureReason.ERROR (provider / response level error).
 _FAILURE_REASON_ERROR = 2
 
+# Assertion types that produce a graded 0-1 score (the "rubric" Cell kind).
+# Anything not in this set is treated as deterministic pass/fail. ``select-best``
+# is its own kind, handled separately, so it is not listed here.
+_RUBRIC_ASSERTION_TYPES = frozenset({"llm-rubric", "g-eval"})
+
 # Infra-error signatures in an assertion's grading reason — the judge could not
 # run (e.g. a missing AWS/Bedrock token), as opposed to a real low-score verdict.
 _GRADER_ERROR_RE = re.compile(
@@ -60,13 +70,16 @@ class CellKey:
 class Cell:
     key: "CellKey"
     suite: str
-    kind: str  # "rubric" | "deterministic"
+    kind: str  # "rubric" | "deterministic" | "best"
     metric: str | None
     weight: float
     assertion_value: str
     score: float | None = None    # rubric: the 0-1 grade
     passed: bool | None = None    # deterministic: the pass/fail verdict
     search: str = ""  # term that isolates this test in the promptfoo UI search
+    # The assertion's promptfoo ``type`` (``llm-rubric``, ``g-eval``, ``python``…),
+    # preserved verbatim so the HTML can show it as its own column.
+    assertion_type: str = ""
 
 
 def read_eval_json(path) -> dict:
@@ -345,6 +358,7 @@ def extract_cells(eval_json: dict, suites=None, provider_label: str | None = Non
             seen[value] = n + 1
             assertion_key = value if n == 0 else f"{value}#{n}"
             key = CellKey(test=test_desc, prompt=prompt_label, assertion=assertion_key)
+            atype = assertion.get("type") or ""
             common = dict(
                 key=key,
                 suite=suite,
@@ -352,9 +366,9 @@ def extract_cells(eval_json: dict, suites=None, provider_label: str | None = Non
                 weight=float(assertion.get("weight", 1) or 1),
                 assertion_value=value,
                 search=search,
+                assertion_type=atype,
             )
-            atype = assertion.get("type")
-            if atype == "llm-rubric":
+            if atype in _RUBRIC_ASSERTION_TYPES:
                 score = comps[i].get("score")
                 cells[key] = Cell(
                     kind="rubric",
@@ -383,7 +397,7 @@ def extract_cells(eval_json: dict, suites=None, provider_label: str | None = Non
 class CellDiff:
     key: "CellKey"
     suite: str
-    kind: str  # "rubric" | "deterministic"
+    kind: str  # "rubric" | "deterministic" | "best"
     metric: str | None
     assertion_value: str
     # rubric: 0-1 score; deterministic: pass/fail bool; absent side: None
@@ -392,6 +406,8 @@ class CellDiff:
     delta: float | None  # rubric only; None for deterministic / missing side
     status: str  # rubric: improved|regressed|within ; det: improved|regressed|same ; new|removed
     search: str = ""  # promptfoo UI search term for this test
+    # Carried through from Cell so the HTML can show it as its own column.
+    assertion_type: str = ""
 
 
 def classify(delta: float, tolerance: float) -> str:
@@ -429,26 +445,29 @@ def diff_cells(baseline_cells: dict, candidate_cells: dict, tolerance: float) ->
                 delta = c.score - b.score
                 diffs.append(CellDiff(key, src.suite, kind, src.metric,
                                       src.assertion_value, b.score, c.score, delta,
-                                      classify(delta, tolerance), src.search))
+                                      classify(delta, tolerance), src.search,
+                                      src.assertion_type))
             elif kind == "best":
                 # No pass/fail transition to classify — the winner is read off
                 # the passing side (see best_winner); status is a fixed marker.
                 diffs.append(CellDiff(key, src.suite, kind, src.metric,
                                       src.assertion_value, b.passed, c.passed, None,
-                                      "best", src.search))
+                                      "best", src.search, src.assertion_type))
             else:
                 status = _classify_deterministic(b.passed, c.passed)
                 diffs.append(CellDiff(key, src.suite, kind, src.metric,
                                       src.assertion_value, b.passed, c.passed, None,
-                                      status, src.search))
+                                      status, src.search, src.assertion_type))
         elif c is not None:
             value = c.score if kind == "rubric" else c.passed
             diffs.append(CellDiff(key, c.suite, kind, c.metric, c.assertion_value,
-                                  None, value, None, "new", c.search))
+                                  None, value, None, "new", c.search,
+                                  c.assertion_type))
         else:
             value = b.score if kind == "rubric" else b.passed
             diffs.append(CellDiff(key, b.suite, kind, b.metric, b.assertion_value,
-                                  value, None, None, "removed", b.search))
+                                  value, None, None, "removed", b.search,
+                                  b.assertion_type))
     return diffs
 
 
@@ -774,13 +793,15 @@ def render_html(diffs: list, drift, tolerance: float,
             parity_counter += 1
             for d in sorted(test_groups[gkey], key=_sort_key):
                 if d.kind == "best":
-                    # The head-to-head verdict is a single per-test row: show the
-                    # winner in the best column, dashes in the score columns.
+                    # The head-to-head verdict is a single per-test row: the
+                    # type column carries "select-best" (so the assertion column
+                    # stays clean) and the score columns are dashes.
                     winner = best_winner(d) or "—"
                     rows.append(
                         f'<tr class="status-best test-{parity}">'
                         f"<td>{html.escape(d.key.test)}</td>"
-                        "<td>select-best</td>"
+                        f"<td>{html.escape(d.assertion_type or 'select-best')}</td>"
+                        "<td></td>"
                         "<td></td>"
                         '<td class="num">—</td>'
                         '<td class="num">—</td>'
@@ -793,6 +814,7 @@ def render_html(diffs: list, drift, tolerance: float,
                 rows.append(
                     f'<tr class="status-{d.status} test-{parity}">'
                     f"<td>{html.escape(d.key.test)}</td>"
+                    f"<td>{html.escape(d.assertion_type or '')}</td>"
                     f"<td>{html.escape(d.assertion_value)}</td>"
                     f"<td>{html.escape(d.metric or '')}</td>"
                     f'{_cell_td(d.kind, d.baseline, baseline_eval_id, d.search, ui_base_url, d.key.test in baseline_errored, baseline_curls.get(d.key.test, ""))}'
@@ -806,7 +828,7 @@ def render_html(diffs: list, drift, tolerance: float,
             f"<h2>{html.escape(suite)}</h2>"
             + _summary_block(grouped[suite], tolerance, "suite-summary")
             + "<table><thead><tr>"
-            "<th>test</th><th>assertion</th><th>metric</th>"
+            "<th>test</th><th>assertion type</th><th>assertion</th><th>metric</th>"
             "<th>baseline</th><th>candidate</th><th>&Delta;</th><th>status</th>"
             "<th>best</th>"
             "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"

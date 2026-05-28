@@ -12,17 +12,20 @@ def rubric_result(
     scores,
     prompt_label="user_only",
     metadata_extra=None,
+    assertion_type="llm-rubric",
 ):
-    """Build one eval_json["results"]["results"][i] entry of llm-rubric asserts.
+    """Build one eval_json["results"]["results"][i] entry of graded asserts.
 
     asserts: list of (value, metric, weight) tuples.
     scores:  list of component scores, index-aligned with asserts.
+    assertion_type: the promptfoo assertion ``type`` to stamp on each assert.
+        Defaults to ``llm-rubric``; pass ``"g-eval"`` to build a g-eval row.
     """
     metadata = {"suite": suite}
     if metadata_extra:
         metadata.update(metadata_extra)
     assert_objs = [
-        {"type": "llm-rubric", "value": v, "metric": m, "weight": w}
+        {"type": assertion_type, "value": v, "metric": m, "weight": w}
         for (v, m, w) in asserts
     ]
     comps = [{"score": s, "pass": s >= 0.5} for s in scores]
