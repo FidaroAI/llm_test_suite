@@ -1541,3 +1541,82 @@ def test_render_html_best_row_keeps_select_best_label_in_type_column():
     # status-best row carries the type-column td.
     best_row = re.search(r'<tr class="status-best[^"]*">.*?</tr>', out, re.DOTALL).group(0)
     assert "<td>select-best</td>" in best_row
+
+
+# --- config + system-prompt links in the header -------------------------
+
+
+def _one_diff_html(**header_kwargs):
+    """Render a tiny one-row report with the given header kwargs."""
+    base = _cells(make_eval_json([
+        rubric_result("prod", "t1", "s", [("a", "X", 1)], [0.6]),
+    ]))
+    cand = _cells(make_eval_json([
+        rubric_result("cand", "t1", "s", [("a", "X", 1)], [0.8]),
+    ]))
+    return render_html(diff_cells(base, cand, 0.05), ([], []), 0.05, **header_kwargs)
+
+
+def test_render_html_config_path_rendered_as_file_link(tmp_path):
+    cfg = tmp_path / "my_run.json"
+    cfg.write_text("{}", encoding="utf-8")
+    out = _one_diff_html(config_path=str(cfg))
+    assert "Config" in out
+    # Absolute path appears as both link href and text.
+    assert f'href="file://{cfg.resolve()}"' in out
+    assert str(cfg.resolve()) in out
+
+
+def test_render_html_system_prompt_path_rendered_as_file_link(tmp_path):
+    prompt = tmp_path / "prompt_42.md"
+    prompt.write_text("you are helpful", encoding="utf-8")
+    out = _one_diff_html(system_prompt_path=str(prompt))
+    assert "System prompt" in out
+    assert f'href="file://{prompt.resolve()}"' in out
+
+
+def test_render_html_relative_paths_are_resolved_to_absolute(tmp_path, monkeypatch):
+    # A relative path on the CLI must still produce a working absolute file://
+    # link in the report.
+    monkeypatch.chdir(tmp_path)
+    cfg = tmp_path / "rel.json"
+    cfg.write_text("{}", encoding="utf-8")
+    out = _one_diff_html(config_path="rel.json")
+    assert f'href="file://{cfg.resolve()}"' in out
+
+
+def test_render_html_omits_rows_when_paths_not_given():
+    # Backward-compat for the bare CLI path (used by hand-run compare_runs.py).
+    out = _one_diff_html()
+    assert "Config" not in out
+    assert "System prompt" not in out
+    # Existing Baseline/Candidate rows still present.
+    assert "Baseline" in out
+    assert "Candidate" in out
+
+
+def test_main_forwards_config_and_system_prompt_paths(tmp_path):
+    # End-to-end through the CLI: the new flags must reach the header.
+    cfg = tmp_path / "cmp.json"
+    cfg.write_text("{}", encoding="utf-8")
+    prompt = tmp_path / "sys.md"
+    prompt.write_text("hi", encoding="utf-8")
+    base_json = tmp_path / "base.json"
+    base_json.write_text(json.dumps(make_eval_json([
+        rubric_result("prod", "t1", "s", [("a", "X", 1)], [0.5]),
+    ])), encoding="utf-8")
+    cand_json = tmp_path / "cand.json"
+    cand_json.write_text(json.dumps(make_eval_json([
+        rubric_result("cand", "t1", "s", [("a", "X", 1)], [0.7]),
+    ])), encoding="utf-8")
+    out_path = tmp_path / "report.html"
+    rc = main([
+        str(base_json), str(cand_json),
+        "--out", str(out_path),
+        "--config-path", str(cfg),
+        "--system-prompt-path", str(prompt),
+    ])
+    assert rc == 0
+    html_text = out_path.read_text(encoding="utf-8")
+    assert f'href="file://{cfg.resolve()}"' in html_text
+    assert f'href="file://{prompt.resolve()}"' in html_text

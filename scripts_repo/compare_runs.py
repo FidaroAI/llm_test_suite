@@ -638,10 +638,20 @@ def _copy_button(curl: str) -> str:
             f'data-curl="{html.escape(curl, quote=True)}">{_CLIPBOARD_SVG}</button>')
 
 
-def _eval_header(baseline_eval_id, candidate_eval_id, base_url) -> str:
-    """Header line naming the two evals, each linked to its promptfoo UI view."""
+def _eval_header(baseline_eval_id, candidate_eval_id, base_url,
+                 config_path: str | None = None,
+                 system_prompt_path: str | None = None) -> str:
+    """Header naming the two evals (and optionally the run's config/system prompt).
 
-    def row(label, eval_id):
+    Eval IDs link to the promptfoo UI view; ``config_path`` and
+    ``system_prompt_path``, when given, are rendered as ``file://`` links to the
+    local files so a report opened in the browser can jump straight to the
+    config / prompt that produced it. Each is shown as its own labelled row,
+    skipped entirely when not supplied (the bare ``compare_runs.py`` CLI path
+    therefore stays unchanged).
+    """
+
+    def eval_row(label, eval_id):
         if eval_id:
             href = html.escape(f"{base_url}/eval/{eval_id}", quote=True)
             value = (f'<a href="{href}" target="_blank" rel="noopener">'
@@ -650,10 +660,22 @@ def _eval_header(baseline_eval_id, candidate_eval_id, base_url) -> str:
             value = '<span class="muted">(unknown)</span>'
         return f'<div><span class="evlabel">{label}</span> {value}</div>'
 
-    return ('<div class="evals">'
-            + row("Baseline", baseline_eval_id)
-            + row("Candidate", candidate_eval_id)
-            + "</div>")
+    def file_row(label, path):
+        # Resolve so a relative path typed on the CLI still produces a working
+        # file:// link; the report may be opened from anywhere.
+        absolute = str(Path(path).resolve())
+        href = html.escape(f"file://{absolute}", quote=True)
+        return (f'<div><span class="evlabel">{label}</span> '
+                f'<a href="{href}" target="_blank" rel="noopener">'
+                f'{html.escape(absolute)}</a></div>')
+
+    parts = [eval_row("Baseline", baseline_eval_id),
+             eval_row("Candidate", candidate_eval_id)]
+    if config_path:
+        parts.append(file_row("Config", config_path))
+    if system_prompt_path:
+        parts.append(file_row("System prompt", system_prompt_path))
+    return f'<div class="evals">{"".join(parts)}</div>'
 
 
 def _cell_td(kind, value, eval_id, search, base_url, errored, curl) -> str:
@@ -733,7 +755,9 @@ def render_html(diffs: list, drift, tolerance: float,
                 baseline_errored: set | None = None,
                 candidate_errored: set | None = None,
                 baseline_curls: dict | None = None,
-                candidate_curls: dict | None = None) -> str:
+                candidate_curls: dict | None = None,
+                config_path: str | None = None,
+                system_prompt_path: str | None = None) -> str:
     """Render a self-contained HTML report. `drift` is (only_base, only_cand).
 
     An aggregate summary (rubric and/or deterministic) is shown at the top, and
@@ -839,7 +863,9 @@ def render_html(diffs: list, drift, tolerance: float,
         "<title>Provider comparison</title>"
         f"<style>{_CSS}</style></head><body>"
         "<h1>Provider comparison</h1>"
-        + _eval_header(baseline_eval_id, candidate_eval_id, ui_base_url)
+        + _eval_header(baseline_eval_id, candidate_eval_id, ui_base_url,
+                       config_path=config_path,
+                       system_prompt_path=system_prompt_path)
         + aggregate
         + f"{drift_html}"
         + "".join(sections)
@@ -903,6 +929,20 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="The provider label to treat as the candidate in a unified eval file.",
     )
+    parser.add_argument(
+        "--config-path",
+        default=None,
+        help="Path to the comparison config that produced this run. When given, "
+        "the report header shows it as a file:// link so the reader can jump "
+        "straight to the config (useful when batch_comparison.py is iterating "
+        "over many).",
+    )
+    parser.add_argument(
+        "--system-prompt-path",
+        default=None,
+        help="Path to the system prompt used by the dev (candidate) side. "
+        "Rendered as a file:// link in the report header alongside --config-path.",
+    )
     return parser
 
 
@@ -933,7 +973,9 @@ def main(argv: list[str] | None = None) -> int:
                     baseline_errored=errored_tests(baseline_json, suites, base_provider),
                     candidate_errored=errored_tests(candidate_json, suites, cand_provider),
                     baseline_curls=build_curls(baseline_json, base_dir, args.baseline_url, base_provider),
-                    candidate_curls=build_curls(candidate_json, base_dir, args.candidate_url, cand_provider)),
+                    candidate_curls=build_curls(candidate_json, base_dir, args.candidate_url, cand_provider),
+                    config_path=args.config_path,
+                    system_prompt_path=args.system_prompt_path),
         encoding="utf-8",
     )
     msg = (

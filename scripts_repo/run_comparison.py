@@ -568,23 +568,29 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Build the report from the one file, splitting it by provider label:
-    # prod is the baseline side, dev the candidate.
+    # prod is the baseline side, dev the candidate. Plumb the config path (and
+    # the dev system prompt, when set) through to the report so the header can
+    # show which inputs produced this run — critical when batch_comparison.py
+    # is generating many reports back-to-back from different prompts.
     report = run_dir / f"report__{ts}.html"
-    _run(
-        [
-            sys.executable,
-            str(repo_root / "scripts_repo" / "compare_runs.py"),
-            str(results_out),
-            str(results_out),
-            "--baseline-provider",
-            PROD_PROVIDER,
-            "--candidate-provider",
-            DEV_PROVIDER,
-            "--out",
-            str(report),
-        ],
-        cwd=repo_root,
-    )
+    report_cmd = [
+        sys.executable,
+        str(repo_root / "scripts_repo" / "compare_runs.py"),
+        str(results_out),
+        str(results_out),
+        "--baseline-provider",
+        PROD_PROVIDER,
+        "--candidate-provider",
+        DEV_PROVIDER,
+        "--out",
+        str(report),
+        "--config-path",
+        str(config_path.resolve()),
+    ]
+    system_prompt_file = config.get("system-prompt-file")
+    if system_prompt_file:
+        report_cmd += ["--system-prompt-path", str(Path(system_prompt_file).resolve())]
+    _run(report_cmd, cwd=repo_root)
 
     # Bring the promptfoo viewer container up (it does not hot-reload its DB).
     _run(
