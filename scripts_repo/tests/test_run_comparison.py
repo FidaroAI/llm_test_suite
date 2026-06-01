@@ -170,10 +170,17 @@ def test_validate_requires_options_for_each_enabled(tmp_path):
         validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
 
 
-def test_validate_rejects_options_for_non_enabled_provider(tmp_path):
+def test_validate_allows_options_for_known_but_disabled_provider(tmp_path):
+    # A ready-to-go options block for a toggled-off provider is fine.
     cfg = _minimal_config()
-    cfg["provider-options"]["fidaro-dev"] = {"model": "y"}  # not enabled
-    with pytest.raises(ConfigError, match="non-enabled"):
+    cfg["provider-options"]["fidaro-dev"] = {"model": "y"}  # known, just disabled
+    validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_rejects_options_for_unknown_provider(tmp_path):
+    cfg = _minimal_config()
+    cfg["provider-options"]["vence"] = {"model": "y"}  # typo, not in registry
+    with pytest.raises(ConfigError, match="unknown providers"):
         validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
 
 
@@ -254,6 +261,15 @@ def test_validate_accepts_existing_system_prompt_file(tmp_path):
         repo_root=tmp_path,
         env=_VENICE_ENV,
     )
+
+
+def test_example_config_validates(monkeypatch):
+    # The shipped example must always be valid under the current schema. Run from
+    # the repo root so its relative system-prompt-file resolves.
+    repo_root = Path(__file__).resolve().parents[2]
+    monkeypatch.chdir(repo_root)
+    cfg = json.loads((repo_root / "comparisons" / "example.json").read_text())
+    validate_config(cfg, repo_root=repo_root, env={"VENICE_INFERENCE_KEY": "k"})
 
 
 # --- vllm options cache ----------------------------------------------------

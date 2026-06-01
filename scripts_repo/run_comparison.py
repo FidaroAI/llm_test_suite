@@ -198,10 +198,13 @@ def validate_config(
         )
 
     options = config.get("provider-options") or {}
-    extra = set(options) - set(enabled)
-    if extra:
+    # Reject only keys the registry doesn't know (typo guard). Options for a
+    # known-but-disabled provider are allowed, so a ready-to-go block can sit in
+    # the config while its provider is toggled off in providers-under-test.
+    unknown_opts = set(options) - all_keys()
+    if unknown_opts:
         raise ConfigError(
-            f"provider-options has entries for non-enabled providers: {sorted(extra)}"
+            f"provider-options has unknown providers: {sorted(unknown_opts)}"
         )
     for key in enabled:
         if key not in options:
