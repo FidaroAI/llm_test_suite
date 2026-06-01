@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  promptfoo@0.121.9:
+    hash: 7facac319826eb0e25e4a9c30bba4f1006ed85f8bab4531efda42b0dd384b84e
+    path: patches/promptfoo@0.121.9.patch
+
 importers:
 
   .:
@@ -13,7 +18,7 @@ importers:
         version: 3.1044.0
       promptfoo:
         specifier: ^0.121.9
-        version: 0.121.9(@cfworker/json-schema@4.1.1)(@langchain/core@1.1.45(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.1))(openai@6.36.0(ws@8.20.0)(zod@4.4.3))(ws@8.20.0))(@libsql/client-wasm@0.17.3)(@types/json-schema@7.0.15)(@types/node@18.19.130)(@types/react@19.2.14)(babel-plugin-macros@3.1.0)(pg@8.20.0)(playwright-core@1.59.1)(socks@2.8.8)(typescript@6.0.3)
+        version: 0.121.9(patch_hash=7facac319826eb0e25e4a9c30bba4f1006ed85f8bab4531efda42b0dd384b84e)(@cfworker/json-schema@4.1.1)(@langchain/core@1.1.45(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.1))(openai@6.36.0(ws@8.20.0)(zod@4.4.3))(ws@8.20.0))(@libsql/client-wasm@0.17.3)(@types/json-schema@7.0.15)(@types/node@18.19.130)(@types/react@19.2.14)(babel-plugin-macros@3.1.0)(pg@8.20.0)(playwright-core@1.59.1)(socks@2.8.8)(typescript@6.0.3)
 
 packages:
 
@@ -8042,7 +8047,7 @@ snapshots:
   process-nextick-args@2.0.1:
     optional: true
 
-  promptfoo@0.121.9(@cfworker/json-schema@4.1.1)(@langchain/core@1.1.45(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.1))(openai@6.36.0(ws@8.20.0)(zod@4.4.3))(ws@8.20.0))(@libsql/client-wasm@0.17.3)(@types/json-schema@7.0.15)(@types/node@18.19.130)(@types/react@19.2.14)(babel-plugin-macros@3.1.0)(pg@8.20.0)(playwright-core@1.59.1)(socks@2.8.8)(typescript@6.0.3):
+  promptfoo@0.121.9(patch_hash=7facac319826eb0e25e4a9c30bba4f1006ed85f8bab4531efda42b0dd384b84e)(@cfworker/json-schema@4.1.1)(@langchain/core@1.1.45(@opentelemetry/api@1.9.1)(@opentelemetry/sdk-trace-base@2.7.1(@opentelemetry/api@1.9.1))(openai@6.36.0(ws@8.20.0)(zod@4.4.3))(ws@8.20.0))(@libsql/client-wasm@0.17.3)(@types/json-schema@7.0.15)(@types/node@18.19.130)(@types/react@19.2.14)(babel-plugin-macros@3.1.0)(pg@8.20.0)(playwright-core@1.59.1)(socks@2.8.8)(typescript@6.0.3):
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.4.3)
       '@apidevtools/json-schema-ref-parser': 15.3.5(@types/json-schema@7.0.15)
