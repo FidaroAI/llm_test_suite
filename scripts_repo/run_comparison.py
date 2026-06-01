@@ -46,12 +46,11 @@ from scripts_repo.deploy_phala import deploy as phala_deploy_and_wait
 from scripts_repo.deploy_phala import models_url, wait_for_url
 from scripts_repo.providers_registry import REGISTRY, all_keys, resolve
 
-# promptfoo provider labels the orchestrator drives for each side of the run.
-# The dynamic providers template their model / temperature / max_tokens from the
-# COMPARISON_{PROD,DEV}_* env vars set below (see provider_options_env), so they
-# reflect a reconfigured gateway (the static YAML providers can't).
-PROD_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_prod"
-DEV_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_dev"
+# Provider labels, gateway ports, env prefixes, and kinds now live in the
+# registry (scripts_repo/providers_registry.py). The dynamic providers template
+# their model / temperature / max_tokens from per-provider COMPARISON_<PREFIX>_*
+# env vars (see provider_options_env), so they reflect a reconfigured gateway
+# (the static YAML providers can't).
 
 # Set in the eval's environment so tests/classification.py:augment appends a
 # head-to-head `select-best` assertion. Only meaningful here, where prod and dev
@@ -60,22 +59,37 @@ DEV_PROVIDER = "fidaro_plaintext_gateway_phala_dynamic_dev"
 SELECT_BEST_ENV_VAR = "COMPARISON_SELECT_BEST"
 
 
-def both_providers_filter() -> str:
-    """A --filter-providers regex selecting BOTH dynamic providers in one pass.
+def providers_filter(config: dict) -> str:
+    """A --filter-providers regex selecting exactly the enabled providers' labels.
 
     promptfoo's --filter-providers is a regex matched against each provider's
-    id/label. Anchoring on the exact dynamic labels keeps the static
-    (non-dynamic) `..._prod` / `..._dev` providers and the vLLM provider out of
-    the run. Used by the single unified eval (prod and dev graded together) that
-    replaced the old two separate single-provider passes.
+    id/label. Anchoring on the enabled dynamic labels keeps the static
+    (non-dynamic) providers and the vLLM provider out of the unified pass. This
+    generalizes the old two-provider both_providers_filter to the registry's
+    enabled set, so prod/dev/venice (any subset) are graded together in one eval.
     """
-    return f"^({re.escape(PROD_PROVIDER)}|{re.escape(DEV_PROVIDER)})$"
+    labels = [re.escape(s.label) for s in resolve(enabled_keys(config))]
+    return f"^({'|'.join(labels)})$"
 
 
-# Host ports the prod/dev plaintext gateways are published on (matches
-# run_plaintext_gateway.sh). The gateway listens on 8080 inside the container.
-PROD_GATEWAY_PORT = 8082
-DEV_GATEWAY_PORT = 8084
+def report_provider_args(config: dict) -> list[str]:
+    """compare_runs.py CLI args naming the baseline and other provider columns.
+
+    Each arg is ``key=label`` so the report shows config keys (the column names)
+    while still splitting the unified result file by promptfoo provider label.
+    The baseline is emitted first (flagged); other providers follow in config order.
+    """
+    baseline = config["baseline-provider"]
+    others = [k for k in enabled_keys(config) if k != baseline]
+    args = ["--baseline-provider-col", f"{baseline}={REGISTRY[baseline].label}"]
+    for key in others:
+        args += ["--provider-col", f"{key}={REGISTRY[key].label}"]
+    return args
+
+
+# The published host ports for the prod/dev gateways live in the registry
+# (ProviderSpec.gateway_port: 8082/8084, matching run_plaintext_gateway.sh). The
+# gateway listens on 8080 inside the container.
 GATEWAY_CONTAINER_PORT = 8080
 
 # Where the gateway image expects its system prompt; mounting over this path
@@ -277,20 +291,28 @@ def write_options_cache(cache_path: Path, options: dict) -> None:
 
 
 def provider_options_env(config: dict) -> dict[str, str]:
-    """Map the per-side provider options to the env vars the dynamic providers read.
+    """Map each enabled provider's options to its COMPARISON_<PREFIX>_* env vars.
 
-    The dynamic YAML providers template their model/temperature/max_tokens from
-    COMPARISON_{PROD,DEV}_{MODEL,TEMPERATURE,MAX_TOKENS} (see
-    providers/fidaro_plaintext_gateway_phala_dynamic_{prod,dev}.yaml). Keep these
-    names in sync with those files. Values are stringified because env vars (and
-    promptfoo's {{ env.* }} rendering) are strings; the backend coerces the numbers.
+    The dynamic provider YAMLs template their model (and, for the Fidaro gateways,
+    temperature / max_tokens) from these vars; promptfoo renders {{ env.* }} at
+    load time. Optional fields are set only when present, because a competitor API
+    may send none of them. Venice additionally gets COMPARISON_VENICE_WEB_SEARCH
+    (defaulting to "off"). Values are stringified (env vars are strings; the
+    backend coerces numbers). Keep prefixes in sync with providers_registry / the
+    provider YAMLs.
     """
+    options = config.get("provider-options") or {}
     env: dict[str, str] = {}
-    for side, prefix in (("prod", "COMPARISON_PROD"), ("dev", "COMPARISON_DEV")):
-        opts = config[f"{side}-provider-options"]
-        env[f"{prefix}_MODEL"] = str(opts["model"])
-        env[f"{prefix}_TEMPERATURE"] = str(opts["temperature"])
-        env[f"{prefix}_MAX_TOKENS"] = str(opts["max_tokens"])
+    for spec in resolve(enabled_keys(config)):
+        opts = options.get(spec.key) or {}
+        if opts.get("model") is not None:
+            env[f"{spec.env_prefix}_MODEL"] = str(opts["model"])
+        if opts.get("temperature") is not None:
+            env[f"{spec.env_prefix}_TEMPERATURE"] = str(opts["temperature"])
+        if opts.get("max_tokens") is not None:
+            env[f"{spec.env_prefix}_MAX_TOKENS"] = str(opts["max_tokens"])
+        if spec.key == "venice":
+            env["COMPARISON_VENICE_WEB_SEARCH"] = str(opts.get("web_search", "off"))
     return env
 
 
@@ -645,10 +667,9 @@ def main(argv: list[str] | None = None) -> int:
 
     validate_config(config, repo_root=repo_root)
 
-    brave_api_key = os.environ.get("BRAVE_API_KEY")
-    if not brave_api_key:
-        print("ERROR: BRAVE_API_KEY must be set in the environment", file=sys.stderr)
-        return 1
+    enabled = enabled_keys(config)
+    specs = resolve(enabled)
+    gateway_specs = [s for s in specs if s.kind == "gateway"]
 
     # Suite-generation config: write it out and point promptfoo at the file.
     # These are set on os.environ (not a throwaway copy) so the promptfoo eval
@@ -658,17 +679,27 @@ def main(argv: list[str] | None = None) -> int:
         json.dumps(config["suite-generation-config"], indent=2), encoding="utf-8"
     )
     os.environ["SUITE_GENERATION_CONFIG_FILE"] = str(suite_cfg_path)
-    # The dynamic providers template their model/temperature/max_tokens from these
-    # COMPARISON_{PROD,DEV}_* env vars (see providers/*_dynamic_*.yaml).
+    # The dynamic providers template their model/temperature/max_tokens (and
+    # venice's web-search flag) from these COMPARISON_<PREFIX>_* env vars (see
+    # providers/*_dynamic_*.yaml and providers/venice_dynamic.yaml).
     os.environ.update(provider_options_env(config))
-    # Grade prod vs dev head-to-head: augment() (tests/classification.py) reads
-    # this and appends a select-best assertion to every test. Only valid because
-    # both providers run in this one eval.
-    os.environ[SELECT_BEST_ENV_VAR] = "1"
+    # Grade providers head-to-head: augment() (tests/classification.py) reads this
+    # and appends a select-best assertion to every test. Only meaningful with two
+    # or more providers in the one eval.
+    if len(enabled) >= 2:
+        os.environ[SELECT_BEST_ENV_VAR] = "1"
 
-    # Redeploy the dev CVM only when vLLM options changed.
+    # A Brave key is only needed by the plaintext gateways; an api-only run (every
+    # enabled provider is a direct API, e.g. venice) does not use it.
+    brave_api_key = os.environ.get("BRAVE_API_KEY")
+    if gateway_specs and not brave_api_key:
+        print("ERROR: BRAVE_API_KEY must be set in the environment", file=sys.stderr)
+        return 1
+
+    # Redeploy the dev CVM only when fidaro-dev is enabled and its vLLM options
+    # changed.
     options = config.get("vllm-options")
-    if options:
+    if options and "fidaro-dev" in enabled:
         # The cache is global (repo root) because there is only one dev Phala
         # instance: any run's vLLM options describe the same shared CVM, so the
         # redeploy decision must persist across comparisons, not per comparison.
@@ -695,106 +726,101 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("vLLM options unchanged since last run; skipping Phala redeploy.")
 
-    # Ensure the shared bridge network exists, then start the web-fetch sidecar
-    # both gateways will relay through. The sidecar must be healthy before the
-    # gateways accept traffic that hits a fetch tool; healthy-before-gateway
-    # also turns "sidecar image missing" into an early, obvious failure.
-    print(f"Ensuring docker network {COMPARISON_NETWORK} exists ...")
-    ensure_docker_network(COMPARISON_NETWORK)
+    # Start the shared web-fetch sidecar + the enabled gateways. A run whose
+    # enabled providers are all direct APIs (no gateway) skips all of this — there
+    # is nothing local to stand up. The sidecar must be healthy before the gateways
+    # accept fetch-tool traffic; healthy-before-gateway also turns "sidecar image
+    # missing" into an early, obvious failure.
+    if gateway_specs:
+        print(f"Ensuring docker network {COMPARISON_NETWORK} exists ...")
+        ensure_docker_network(COMPARISON_NETWORK)
 
-    print("Starting web-fetch sidecar ...")
-    start_gateway(  # reused: same "rm -f then docker run" lifecycle
-        repo_root,
-        web_fetch_docker_args(
+        print("Starting web-fetch sidecar ...")
+        start_gateway(  # reused: same "rm -f then docker run" lifecycle
+            repo_root,
+            web_fetch_docker_args(
+                name=WEB_FETCH_CONTAINER_NAME,
+                image=args.web_fetch_image,
+                network=COMPARISON_NETWORK,
+            ),
             name=WEB_FETCH_CONTAINER_NAME,
-            image=args.web_fetch_image,
-            network=COMPARISON_NETWORK,
-        ),
-        name=WEB_FETCH_CONTAINER_NAME,
-    )
-    print("Waiting for web-fetch sidecar to be healthy ...")
-    wait_for_container_healthy(WEB_FETCH_CONTAINER_NAME, timeout_s=args.sidecar_timeout)
+        )
+        print("Waiting for web-fetch sidecar to be healthy ...")
+        wait_for_container_healthy(
+            WEB_FETCH_CONTAINER_NAME, timeout_s=args.sidecar_timeout
+        )
 
-    # Start both gateways and wait for them to answer.
-    print("Starting plaintext gateways ...")
-    start_gateway(
-        repo_root,
-        gateway_docker_args(
-            name="fidaro-gateway-prod",
-            port=PROD_GATEWAY_PORT,
-            vllm_url=config["vllm-prod-url"],
-            brave_api_key=brave_api_key,
-            image=args.docker_image,
-            network=COMPARISON_NETWORK,
-            web_fetch_url=WEB_FETCH_SIDECAR_URL,
-        ),
-        name="fidaro-gateway-prod",
-    )
-    start_gateway(
-        repo_root,
-        gateway_docker_args(
-            name="fidaro-gateway-dev",
-            port=DEV_GATEWAY_PORT,
-            vllm_url=config["vllm-dev-url"],
-            brave_api_key=brave_api_key,
-            image=args.docker_image,
-            network=COMPARISON_NETWORK,
-            web_fetch_url=WEB_FETCH_SIDECAR_URL,
-            system_prompt_file=config.get("system-prompt-file"),
-        ),
-        name="fidaro-gateway-dev",
-    )
-    # Wait for vLLM in the server to be available. This will help spot problems before we start the eval runs
-    print("Waiting for vLLM phala endpoints to be ready ...")
-    wait_for_url(models_url(config["vllm-prod-url"]), timeout_s=args.gateway_timeout)
-    wait_for_url(models_url(config["vllm-dev-url"]), timeout_s=args.gateway_timeout)
+        print("Starting plaintext gateways ...")
+        for spec in gateway_specs:
+            container = f"fidaro-gateway-{spec.key.split('-')[-1]}"
+            start_gateway(
+                repo_root,
+                gateway_docker_args(
+                    name=container,
+                    port=spec.gateway_port,
+                    vllm_url=config[spec.vllm_url_key],
+                    brave_api_key=brave_api_key,
+                    image=args.docker_image,
+                    network=COMPARISON_NETWORK,
+                    web_fetch_url=WEB_FETCH_SIDECAR_URL,
+                    system_prompt_file=(
+                        config.get("system-prompt-file")
+                        if spec.supports_system_prompt
+                        else None
+                    ),
+                ),
+                name=container,
+            )
 
-    # Also check for the gateways to be running. Defence in depth for bugs
-    print("Waiting for local plaintext gateways to be ready ...")
-    wait_for_url(gateway_health_url(PROD_GATEWAY_PORT), timeout_s=args.gateway_timeout)
-    wait_for_url(gateway_health_url(DEV_GATEWAY_PORT), timeout_s=args.gateway_timeout)
+        # Wait for the vLLM endpoints, then the local gateways, before the eval.
+        # Catches problems early.
+        print("Waiting for vLLM phala endpoints to be ready ...")
+        for spec in gateway_specs:
+            wait_for_url(
+                models_url(config[spec.vllm_url_key]), timeout_s=args.gateway_timeout
+            )
+        print("Waiting for local plaintext gateways to be ready ...")
+        for spec in gateway_specs:
+            wait_for_url(
+                gateway_health_url(spec.gateway_port), timeout_s=args.gateway_timeout
+            )
 
-    # One eval graded against BOTH providers (no baseline freeze). Eval exits
-    # non-zero on test failures, which is expected here, so we do not abort on
-    # it. Running prod and dev in a single pass (rather than two) lets a
-    # head-to-head assertion (e.g. select-best) see both responses together, and
-    # halves the orchestration.
+    # One eval graded against ALL enabled providers (no baseline freeze). Eval
+    # exits non-zero on test failures, which is expected here, so we do not abort
+    # on it. Running every provider in a single pass lets a head-to-head assertion
+    # (e.g. select-best) see all responses together.
     #
     # Always --no-cache: a single eval has one global cache setting, and dev may
     # have just been redeployed with a server-side change (system prompt / vLLM
-    # options) that promptfoo's request cache key cannot see, so a cached dev hit
-    # could be stale. Correctness over speed — prod loses its former cache reuse.
+    # options) that promptfoo's request cache key cannot see, so a cached hit could
+    # be stale. Correctness over speed.
     filter_args = build_filter_args(config.get("promptfoo-filters"))
     results_out = run_dir / f"results_{ts}.json"
 
-    print("Running unified prod+dev eval ...")
+    print("Running unified eval over enabled providers ...")
     _run(
         eval_command(
-            both_providers_filter(),
+            providers_filter(config),
             str(results_out),
             filter_args,
             True,  # no_cache
-            f"{name} prod+dev",
+            f"{name} comparison",
         ),
         cwd=repo_root,
         check=False,
     )
 
-    # Build the report from the one file, splitting it by provider label:
-    # prod is the baseline side, dev the candidate. Plumb the config path (and
-    # the dev system prompt, when set) through to the report so the header can
-    # show which inputs produced this run — critical when batch_comparison.py
-    # is generating many reports back-to-back from different prompts.
+    # Build the report from the one file, splitting it by provider label. The
+    # baseline + other provider columns (config keys -> labels) are passed via
+    # report_provider_args. Plumb the config path (and the dev system prompt, when
+    # set) through so the header can show which inputs produced this run.
     report = run_dir / f"report__{ts}.html"
     report_cmd = [
         sys.executable,
         str(repo_root / "scripts_repo" / "compare_runs.py"),
         str(results_out),
         str(results_out),
-        "--baseline-provider",
-        PROD_PROVIDER,
-        "--candidate-provider",
-        DEV_PROVIDER,
+        *report_provider_args(config),
         "--out",
         str(report),
         "--config-path",

@@ -13,15 +13,12 @@ import re
 from scripts_repo.run_comparison import (
     COMPARISON_NETWORK,
     CORE_SYSTEM_PROMPT_PATH,
-    DEV_PROVIDER,
-    PROD_PROVIDER,
     SELECT_BEST_ENV_VAR,
     WEB_FETCH_CONTAINER_PORT,
     WEB_FETCH_NETWORK_ALIAS,
     WEB_FETCH_SIDECAR_URL,
     WHITELISTED_CVM_IDS,
     ConfigError,
-    both_providers_filter,
     build_filter_args,
     comparison_dir,
     comparison_name,
@@ -29,12 +26,15 @@ from scripts_repo.run_comparison import (
     gateway_docker_args,
     parse_env_file,
     provider_options_env,
+    providers_filter,
+    report_provider_args,
     run_dir_name,
     validate_config,
     vllm_options_changed,
     web_fetch_docker_args,
     write_options_cache,
 )
+from scripts_repo.providers_registry import REGISTRY
 
 
 def _load_classification():
@@ -292,22 +292,29 @@ def test_write_options_cache_is_identical_copy(tmp_path):
 # --- provider options env --------------------------------------------------
 
 
-def test_provider_options_env_maps_both_sides():
-    cfg = _minimal_config()
-    env = provider_options_env(cfg)
-    assert env == {
-        "COMPARISON_PROD_MODEL": "prod-model",
-        "COMPARISON_PROD_TEMPERATURE": "0.7",
-        "COMPARISON_PROD_MAX_TOKENS": "1000",
-        "COMPARISON_DEV_MODEL": "x",
-        "COMPARISON_DEV_TEMPERATURE": "0.7",
-        "COMPARISON_DEV_MAX_TOKENS": "1000",
+def test_provider_options_env_maps_each_enabled_provider():
+    env = provider_options_env(_minimal_config())
+    # fidaro-prod (gateway): model/temp/max_tokens templated.
+    assert env["COMPARISON_PROD_MODEL"] == "prod-model"
+    assert env["COMPARISON_PROD_TEMPERATURE"] == "0.7"
+    assert env["COMPARISON_PROD_MAX_TOKENS"] == "1000"
+    # venice (api): model + web search; optional temp/max_tokens omitted.
+    assert env["COMPARISON_VENICE_MODEL"] == "kimi-k2-6"
+    assert env["COMPARISON_VENICE_WEB_SEARCH"] == "on"
+    assert "COMPARISON_VENICE_TEMPERATURE" not in env
+    assert "COMPARISON_VENICE_MAX_TOKENS" not in env
+
+
+def test_provider_options_env_web_search_defaults_off():
+    cfg = {
+        "providers-under-test": {"venice": True},
+        "provider-options": {"venice": {"model": "kimi-k2-6"}},
     }
+    assert provider_options_env(cfg)["COMPARISON_VENICE_WEB_SEARCH"] == "off"
 
 
 def test_provider_options_env_values_are_strings():
-    env = provider_options_env(_minimal_config())
-    assert all(isinstance(v, str) for v in env.values())
+    assert all(isinstance(v, str) for v in provider_options_env(_minimal_config()).values())
 
 
 # --- promptfoo filter args -------------------------------------------------
@@ -341,20 +348,36 @@ def test_build_filter_args_repeats_list_values():
     ]
 
 
-# --- both-providers filter (single unified pass) ---------------------------
+# --- providers filter (single unified pass over the enabled set) -----------
 
 
-def test_both_providers_filter_matches_both_dynamic_providers():
-    pat = both_providers_filter()
-    assert re.search(pat, PROD_PROVIDER)
-    assert re.search(pat, DEV_PROVIDER)
+def test_providers_filter_matches_only_enabled_labels():
+    cfg = {"providers-under-test": {"fidaro-prod": True, "venice": True}}
+    pat = providers_filter(cfg)
+    assert re.match(pat, REGISTRY["fidaro-prod"].label)
+    assert re.match(pat, REGISTRY["venice"].label)
+    # fidaro-dev is not enabled, so its dynamic label must be excluded.
+    assert not re.match(pat, REGISTRY["fidaro-dev"].label)
 
 
-def test_both_providers_filter_excludes_static_providers():
-    # The static (non-dynamic) providers must not be swept into the unified pass.
-    pat = both_providers_filter()
-    assert not re.search(pat, "fidaro_plaintext_gateway_phala_prod")
-    assert not re.search(pat, "fidaro_plaintext_gateway_phala_dev")
+def test_providers_filter_excludes_static_providers():
+    cfg = {"providers-under-test": {"fidaro-prod": True}}
+    pat = providers_filter(cfg)
+    assert not re.match(pat, "fidaro_plaintext_gateway_phala_prod")
+
+
+def test_report_provider_args_baseline_first_then_others():
+    cfg = {
+        "providers-under-test": {"fidaro-prod": True, "venice": True},
+        "baseline-provider": "fidaro-prod",
+    }
+    args = report_provider_args(cfg)
+    assert args[:2] == [
+        "--baseline-provider-col",
+        f"fidaro-prod={REGISTRY['fidaro-prod'].label}",
+    ]
+    assert "--provider-col" in args
+    assert f"venice={REGISTRY['venice'].label}" in args
 
 
 # --- gateway docker args ---------------------------------------------------
