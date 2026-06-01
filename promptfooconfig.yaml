@@ -17,6 +17,9 @@ providers:
   # run_comparison.py (which sets those env vars and starts the gateways).
   - file://providers/fidaro_plaintext_gateway_phala_dynamic_prod.yaml
   - file://providers/fidaro_plaintext_gateway_phala_dynamic_dev.yaml
+  # Venice competitor (direct API; no gateway). Driven by run_comparison.py, which sets
+  # COMPARISON_VENICE_* and requires VENICE_INFERENCE_KEY. See the YAML header for details.
+  - file://providers/venice_dynamic.yaml
   # Use this for testing against a local dstack and local vllm. The only real difference in the
   # provider config is the model name.
   # - file://providers/fidaro_plaintext_gateway_local.yaml
