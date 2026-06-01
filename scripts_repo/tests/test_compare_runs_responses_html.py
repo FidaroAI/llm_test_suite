@@ -6,7 +6,9 @@ import json
 from scripts_repo.compare_runs import (
     ProviderColumn,
     build_responses_html,
+    looks_like_markdown,
     main,
+    render_markdown,
     render_responses_html,
     write_responses_html,
 )
@@ -108,6 +110,90 @@ def test_build_responses_html_splits_unified_eval_by_column_label(tmp_path):
     text = out.read_text(encoding="utf-8")
     assert "fidaro-prod" in text and "venice" in text
     assert "Prod" in text and "Ven" in text
+
+
+# --- markdown detection ----------------------------------------------------
+
+
+def test_looks_like_markdown_true_for_strong_markers():
+    assert looks_like_markdown("This is **bold** text")
+    assert looks_like_markdown("## A heading")
+    assert looks_like_markdown("- a bullet\n- another")
+    assert looks_like_markdown("1. first\n2. second")
+    assert looks_like_markdown("See [the docs](https://example.com)")
+    assert looks_like_markdown("> a quote")
+
+
+def test_looks_like_markdown_false_for_plain_prose():
+    assert not looks_like_markdown("The world's largest retailer is Walmart.")
+    assert not looks_like_markdown("A times B is 2 * 3 = 6 in arithmetic.")
+    assert not looks_like_markdown("snake_case_name and another_one")
+    assert not looks_like_markdown("")
+
+
+# --- render_markdown -------------------------------------------------------
+
+
+def test_render_markdown_bold_and_italic():
+    out = render_markdown("a **bold** and *italic* word")
+    assert "<strong>bold</strong>" in out
+    assert "<em>italic</em>" in out
+
+
+def test_render_markdown_headings():
+    assert "<h2>Title</h2>" in render_markdown("## Title")
+
+
+def test_render_markdown_unordered_list():
+    out = render_markdown("- one\n- two")
+    assert "<ul>" in out and "<li>one</li>" in out and "<li>two</li>" in out
+
+
+def test_render_markdown_ordered_list():
+    out = render_markdown("1. one\n2. two")
+    assert "<ol>" in out and "<li>one</li>" in out
+
+
+def test_render_markdown_link():
+    out = render_markdown("see [docs](https://example.com/x)")
+    assert '<a href="https://example.com/x"' in out
+    assert ">docs</a>" in out
+
+
+def test_render_markdown_blockquote_and_hr():
+    assert "<blockquote>" in render_markdown("> quoted")
+    assert "<hr>" in render_markdown("text\n\n---\n\nmore")
+
+
+def test_render_markdown_escapes_embedded_html():
+    out = render_markdown("**bold** and <script>alert(1)</script>")
+    assert "<script>alert(1)</script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_render_markdown_preserves_intra_paragraph_line_breaks():
+    assert "<br>" in render_markdown("line one\nline two")
+
+
+# --- markdown inside the responses table -----------------------------------
+
+
+def test_render_responses_html_renders_markdown_cell():
+    per_provider = {
+        "prod": {"t1": {"prompt": "Q?", "output": "**Walmart** is #1\n- a\n- b", "suite": "s"}},
+    }
+    html = render_responses_html(per_provider, ["prod"])
+    assert "<strong>Walmart</strong>" in html
+    assert "<ul>" in html
+    assert 'class="md"' in html
+
+
+def test_render_responses_html_plain_cell_not_markdown_wrapped():
+    per_provider = {"prod": {"t1": {"prompt": "Q?", "output": "Just plain prose.", "suite": "s"}}}
+    html = render_responses_html(per_provider, ["prod"])
+    assert "Just plain prose." in html
+    # A plain cell is escaped text, not wrapped in a markdown container.
+    assert html.count('class="md"') == 0
 
 
 # --- CLI integration -------------------------------------------------------

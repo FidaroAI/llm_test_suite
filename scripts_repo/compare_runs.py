@@ -1445,6 +1445,24 @@ td:first-child { color: #333; font-weight: 500; }
   cursor: col-resize; user-select: none; z-index: 3; }
 .row-resize { position: absolute; left: 0; bottom: -3px; width: 100%; height: 7px;
   cursor: row-resize; user-select: none; z-index: 3; }
+/* Rendered-markdown cells: compact margins so a cell stays tight, headings sized
+   down to fit, code/quote/rule styled lightly. */
+td .md > :first-child { margin-top: 0; }
+td .md > :last-child { margin-bottom: 0; }
+td .md p { margin: .4em 0; }
+td .md h1, td .md h2, td .md h3, td .md h4, td .md h5, td .md h6 {
+  margin: .55em 0 .3em; font-size: 1em; font-weight: 700; }
+td .md ul, td .md ol { margin: .3em 0; padding-left: 1.3em; }
+td .md li { margin: .15em 0; }
+td .md a { color: #1a4fa0; }
+td .md code { background: #f0f0f0; padding: 0 .25em; border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+td .md pre { background: #f0f0f0; padding: .5em .6em; border-radius: 4px;
+  overflow: auto; white-space: pre-wrap; }
+td .md pre code { background: none; padding: 0; }
+td .md blockquote { margin: .4em 0; padding-left: .7em; color: #555;
+  border-left: 3px solid #ddd; }
+td .md hr { border: 0; border-top: 1px solid #ccc; margin: .6em 0; }
 """
 
 # Vanilla-JS drag handlers. Column handles resize the matching <col> (works under
@@ -1490,6 +1508,155 @@ _RESPONSES_SCRIPT = """
 """
 
 
+# --- minimal markdown rendering --------------------------------------------
+# Model answers are almost always markdown (bold, headings, bullet/numbered
+# lists, the occasional link/quote/rule). Rather than add a markdown dependency
+# (this repo deliberately avoids them — see parse_provider_yaml), a focused
+# renderer covers that subset. It is NOT a full CommonMark implementation:
+# nested lists, tables and reference links are out of scope and fall through as
+# text. All source text is HTML-escaped before any markup is added, so a model
+# response can never inject raw HTML.
+
+_MD_HR_RE = re.compile(r"^\s*([-*_])(?:\s*\1){2,}\s*$")
+_MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_MD_UL_RE = re.compile(r"^\s*[-*+]\s+(.*)$")
+_MD_OL_RE = re.compile(r"^\s*\d+[.)]\s+(.*)$")
+_MD_BQ_RE = re.compile(r"^\s*>\s?(.*)$")
+
+# Strong markdown signals used for detection. Lone ``*``/``_`` (italic) is
+# deliberately excluded so prose like "2 * 3" or "snake_case" is not mistaken
+# for markdown; a cell with real italics almost always also carries bold/lists.
+_MD_MARKERS = [
+    re.compile(r"\*\*[^*\n]+\*\*"),                  # **bold**
+    re.compile(r"__[^_\n]+__"),                      # __bold__
+    re.compile(r"(?m)^\s{0,3}#{1,6}\s+\S"),          # # heading
+    re.compile(r"(?m)^\s*[-*+]\s+\S"),               # - bullet
+    re.compile(r"(?m)^\s*\d+[.)]\s+\S"),             # 1. ordered
+    re.compile(r"(?m)^\s*>\s"),                      # > blockquote
+    re.compile(r"(?m)^\s*([-*_])(?:\s*\1){2,}\s*$"), # --- rule
+    re.compile(r"```"),                              # ``` fenced code
+    re.compile(r"`[^`\n]+`"),                        # `inline code`
+    re.compile(r"\[[^\]\n]+\]\([^)\n]+\)"),          # [text](url)
+]
+
+
+def looks_like_markdown(text) -> bool:
+    """True when ``text`` carries a strong markdown marker (see ``_MD_MARKERS``)."""
+    return isinstance(text, str) and any(p.search(text) for p in _MD_MARKERS)
+
+
+def _md_inline(text: str) -> str:
+    """Render inline markdown (already plain text) to safe inline HTML.
+
+    Escapes HTML first, then applies inline code, links, bold, italic and
+    strikethrough — in that order so code spans are not reformatted and ``**``
+    is consumed before single ``*``.
+    """
+    text = html.escape(text)  # neutralise any raw HTML in the source first
+
+    codes: list = []
+
+    def _stash(m):
+        codes.append(m.group(1))
+        return f"\x00{len(codes) - 1}\x00"
+
+    text = re.sub(r"`([^`]+)`", _stash, text)  # protect inline code spans
+    text = re.sub(
+        r"\[([^\]]+)\]\(([^)\s]+)\)",
+        lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1)}</a>',
+        text,
+    )
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"__(.+?)__", r"<strong>\1</strong>", text)
+    text = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"<em>\1</em>", text)
+    text = re.sub(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)", r"<em>\1</em>", text)
+    text = re.sub(r"~~(.+?)~~", r"<del>\1</del>", text)
+    text = re.sub(r"\x00(\d+)\x00", lambda m: f"<code>{codes[int(m.group(1))]}</code>", text)
+    return text
+
+
+def _md_starts_block(line: str) -> bool:
+    """True when ``line`` opens a non-paragraph block (stops paragraph gathering)."""
+    s = line.strip()
+    return bool(
+        s.startswith("```")
+        or _MD_HR_RE.match(line)
+        or _MD_HEADING_RE.match(s)
+        or _MD_UL_RE.match(line)
+        or _MD_OL_RE.match(line)
+        or _MD_BQ_RE.match(line)
+    )
+
+
+def _md_list(lines: list, i: int, regex, tag: str) -> tuple:
+    """Consume consecutive list items matching ``regex``; return (html, next_i)."""
+    items = []
+    while i < len(lines) and regex.match(lines[i]):
+        items.append(f"<li>{_md_inline(regex.match(lines[i]).group(1).strip())}</li>")
+        i += 1
+    return f"<{tag}>{''.join(items)}</{tag}>", i
+
+
+def render_markdown(text: str) -> str:
+    """Render a markdown subset to a safe HTML fragment (block + inline)."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: list = []
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        if line.strip().startswith("```"):
+            i += 1
+            buf = []
+            while i < n and not lines[i].strip().startswith("```"):
+                buf.append(lines[i])
+                i += 1
+            i += 1  # skip the closing fence (or run off the end)
+            out.append(f"<pre><code>{html.escape(chr(10).join(buf))}</code></pre>")
+            continue
+        if _MD_HR_RE.match(line):
+            out.append("<hr>")
+            i += 1
+            continue
+        heading = _MD_HEADING_RE.match(line.strip())
+        if heading:
+            level = len(heading.group(1))
+            out.append(f"<h{level}>{_md_inline(heading.group(2).strip())}</h{level}>")
+            i += 1
+            continue
+        if _MD_BQ_RE.match(line):
+            buf = []
+            while i < n and _MD_BQ_RE.match(lines[i]):
+                buf.append(_md_inline(_MD_BQ_RE.match(lines[i]).group(1)))
+                i += 1
+            out.append(f"<blockquote>{'<br>'.join(buf)}</blockquote>")
+            continue
+        if _MD_UL_RE.match(line):
+            block, i = _md_list(lines, i, _MD_UL_RE, "ul")
+            out.append(block)
+            continue
+        if _MD_OL_RE.match(line):
+            block, i = _md_list(lines, i, _MD_OL_RE, "ol")
+            out.append(block)
+            continue
+        buf = []
+        while i < n and lines[i].strip() and not _md_starts_block(lines[i]):
+            buf.append(_md_inline(lines[i].strip()))
+            i += 1
+        out.append(f"<p>{'<br>'.join(buf)}</p>")
+    return "".join(out)
+
+
+def _response_cell_inner(text) -> str:
+    """Cell contents: rendered markdown when detected, else escaped plain text."""
+    text = _csv_cell(text)
+    if text and looks_like_markdown(text):
+        return f'<div class="md">{render_markdown(text)}</div>'
+    return html.escape(text)
+
+
 def render_responses_html(per_provider: dict, ordered_keys: list) -> str:
     """Render the interactive raw-response table as a self-contained HTML string.
 
@@ -1525,12 +1692,12 @@ def render_responses_html(per_provider: dict, ordered_keys: list) -> str:
     for identity in order:
         _, prompt = meta[identity]
         cells = [
-            f'<td>{html.escape(_csv_cell(prompt))}'
+            f'<td>{_response_cell_inner(prompt)}'
             '<span class="row-resize"></span></td>'
         ]
         for key in ordered_keys:
             rec = per_provider.get(key, {}).get(identity)
-            cells.append(f"<td>{html.escape(_csv_cell(rec.get('output') if rec else ''))}</td>")
+            cells.append(f"<td>{_response_cell_inner(rec.get('output') if rec else '')}</td>")
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
 
     return (
