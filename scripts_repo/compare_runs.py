@@ -1545,6 +1545,16 @@ def looks_like_markdown(text) -> bool:
     return isinstance(text, str) and any(p.search(text) for p in _MD_MARKERS)
 
 
+# Link targets come from untrusted model output. Allow only schemes that can't
+# execute script when the anchor is clicked; everything else (javascript:,
+# data:, vbscript:, …) is replaced with "#". Relative/anchor/mailto links pass.
+_SAFE_HREF_RE = re.compile(r"^(?:https?:|mailto:|/|#|\.)", re.IGNORECASE)
+
+
+def _safe_href(url: str) -> str:
+    return url if _SAFE_HREF_RE.match(url) else "#"
+
+
 def _md_inline(text: str) -> str:
     """Render inline markdown (already plain text) to safe inline HTML.
 
@@ -1563,7 +1573,7 @@ def _md_inline(text: str) -> str:
     text = re.sub(r"`([^`]+)`", _stash, text)  # protect inline code spans
     text = re.sub(
         r"\[([^\]]+)\]\(([^)\s]+)\)",
-        lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1)}</a>',
+        lambda m: f'<a href="{_safe_href(m.group(2))}" target="_blank" rel="noopener">{m.group(1)}</a>',
         text,
     )
     text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)

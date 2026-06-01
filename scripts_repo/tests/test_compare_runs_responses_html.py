@@ -160,6 +160,19 @@ def test_render_markdown_link():
     assert ">docs</a>" in out
 
 
+def test_render_markdown_link_rejects_javascript_scheme():
+    out = render_markdown("[click](javascript:alert(1))")
+    assert "javascript:" not in out
+    assert 'href="#"' in out
+    assert ">click</a>" in out  # link text is preserved
+
+
+def test_render_markdown_link_allows_safe_schemes():
+    for url in ("https://example.com/x", "http://example.com",
+                "mailto:a@b.com", "/local/path", "#anchor"):
+        assert f'href="{url}"' in render_markdown(f"[t]({url})")
+
+
 def test_render_markdown_blockquote_and_hr():
     assert "<blockquote>" in render_markdown("> quoted")
     assert "<hr>" in render_markdown("text\n\n---\n\nmore")
