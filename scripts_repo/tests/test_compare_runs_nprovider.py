@@ -1,16 +1,22 @@
 """Tests for the N-provider model + report in compare_runs.py."""
 from __future__ import annotations
 
+import json
+
 from scripts_repo.compare_runs import (
     Cell,
     CellKey,
     ProviderColumn,
     best_winner_among,
     build_rows,
+    main,
+    parse_provider_col_args,
+    render_html_n,
     summarize_best_table,
     summarize_deterministic_table,
     summarize_rubric_table,
 )
+from scripts_repo.tests._fixtures import make_eval_json, rubric_result
 
 
 def _rubric(key, score):
@@ -169,3 +175,110 @@ def test_summarize_best_table_tallies_wins():
     assert table["base"] == 1
     assert table["ven"] == 1
     assert table["undecided"] == 0
+
+
+# --- parse_provider_col_args -----------------------------------------------
+
+
+def test_parse_provider_col_args_orders_baseline_first():
+    cols = parse_provider_col_args(
+        baseline="fidaro-prod=L_prod",
+        others=["venice=L_ven", "fidaro-dev=L_dev"],
+    )
+    assert [c.key for c in cols] == ["fidaro-prod", "venice", "fidaro-dev"]
+    assert cols[0].is_baseline and not cols[1].is_baseline
+    assert cols[0].label == "L_prod"
+    assert cols[1].label == "L_ven"
+
+
+# --- render_html_n ---------------------------------------------------------
+
+
+def test_render_html_n_columns_deltas_and_no_status():
+    k = CellKey("t", "p", "a")
+    cols = [ProviderColumn("fidaro-prod", "L1", True),
+            ProviderColumn("venice", "L2", False)]
+    cells = {"fidaro-prod": {k: _rubric(k, 0.8)}, "venice": {k: _rubric(k, 0.6)}}
+    out = render_html_n(build_rows(cells, cols), cols, drift=([], []), tolerance=0.05)
+    assert "fidaro-prod (baseline)" in out
+    assert ">venice<" in out
+    assert "&Delta; venice" in out
+    assert "<th>status</th>" not in out
+    # the delta cell is rendered with its band class and signed value
+    assert "delta-regressed" in out
+    assert "-0.20" in out
+
+
+def test_render_html_n_three_providers_two_delta_columns():
+    k = CellKey("t", "p", "a")
+    cols = [ProviderColumn("base", "Lb", True),
+            ProviderColumn("dev", "Ld", False),
+            ProviderColumn("ven", "Lv", False)]
+    cells = {"base": {k: _rubric(k, 0.5)},
+             "dev": {k: _rubric(k, 0.9)},
+             "ven": {k: _rubric(k, 0.3)}}
+    out = render_html_n(build_rows(cells, cols), cols, drift=([], []), tolerance=0.05)
+    assert "&Delta; dev" in out and "&Delta; ven" in out
+
+
+def test_render_html_n_best_row_names_winner():
+    k = CellKey("t", "p", "best")
+    cols = [ProviderColumn("base", "Lb", True), ProviderColumn("ven", "Lv", False)]
+    cells = {"base": {k: _best(k, False)}, "ven": {k: _best(k, True)}}
+    out = render_html_n(build_rows(cells, cols), cols, drift=([], []), tolerance=0.05)
+    assert 'class="best-winner">ven<' in out
+
+
+# --- main (N-provider CLI path) --------------------------------------------
+
+
+def _unified_eval(tmp_path):
+    """A unified eval file with prod + dev + venice on one rubric assertion."""
+    ev = make_eval_json([
+        rubric_result("L_prod", "t1", "research_rubrics", [("crit", "M", 1)], [0.8]),
+        rubric_result("L_dev", "t1", "research_rubrics", [("crit", "M", 1)], [0.9]),
+        rubric_result("L_ven", "t1", "research_rubrics", [("crit", "M", 1)], [0.4]),
+    ])
+    f = tmp_path / "u.json"
+    f.write_text(json.dumps(ev))
+    return f
+
+
+def test_main_n_writes_multiprovider_report(tmp_path):
+    f = _unified_eval(tmp_path)
+    out = tmp_path / "r.html"
+    rc = main([
+        str(f), str(f),
+        "--baseline-provider-col", "fidaro-prod=L_prod",
+        "--provider-col", "fidaro-dev=L_dev",
+        "--provider-col", "venice=L_ven",
+        "--out", str(out),
+    ])
+    assert rc == 0
+    text = out.read_text()
+    assert "fidaro-prod (baseline)" in text
+    assert "&Delta; fidaro-dev" in text and "&Delta; venice" in text
+    assert "<th>status</th>" not in text
+
+
+def test_prod_dev_invariant(tmp_path):
+    # {fidaro-prod, fidaro-dev} with baseline prod reproduces prod-vs-dev semantics:
+    # two value columns, one delta column, dev improved over prod (0.9 vs 0.8).
+    ev = make_eval_json([
+        rubric_result("L_prod", "t1", "research_rubrics", [("crit", "M", 1)], [0.8]),
+        rubric_result("L_dev", "t1", "research_rubrics", [("crit", "M", 1)], [0.9]),
+    ])
+    f = tmp_path / "u.json"
+    f.write_text(json.dumps(ev))
+    out = tmp_path / "r.html"
+    main([
+        str(f), str(f),
+        "--baseline-provider-col", "fidaro-prod=L_prod",
+        "--provider-col", "fidaro-dev=L_dev",
+        "--out", str(out),
+    ])
+    text = out.read_text()
+    assert "fidaro-prod (baseline)" in text
+    assert "&Delta; fidaro-dev" in text
+    assert "+0.10" in text  # dev improved over prod
+    assert "delta-improved" in text

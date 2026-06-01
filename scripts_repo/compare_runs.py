@@ -732,6 +732,16 @@ tr.test-b td { background: #ffffff; }
             cursor: pointer; color: #aaa; vertical-align: middle; line-height: 1; }
 .copy-btn:hover { color: #1a1a1a; }
 .copy-btn.copied { color: #0a7d28; }
+/* N-provider report: deltas are coloured by their own band (there is no status
+   column), and the summary tables size to content rather than full width. */
+td.delta-improved { color: #0a7d28; font-weight: 600; }
+td.delta-regressed { color: #c0341d; font-weight: 600; }
+td.delta-within { color: #888; }
+.summary table, .suite-summary table { width: auto; margin: .25rem 1rem .75rem 0;
+            display: inline-table; vertical-align: top; }
+.summary h4, .suite-summary h4 { margin: .6rem 0 .15rem; font-size: .9rem;
+            color: #555; }
+.col-baseline { font-weight: 600; }
 """
 
 
@@ -1038,6 +1048,273 @@ def render_html(diffs: list, drift, tolerance: float,
     )
 
 
+# --- N-provider report -----------------------------------------------------
+
+
+def parse_provider_col_args(baseline: str, others: list) -> list:
+    """Turn ``key=label`` CLI args into ordered ProviderColumns (baseline first)."""
+
+    def split(s):
+        key, _, label = s.partition("=")
+        return key, label
+
+    bkey, blabel = split(baseline)
+    cols = [ProviderColumn(bkey, blabel, is_baseline=True)]
+    for o in others:
+        k, lbl = split(o)
+        cols.append(ProviderColumn(k, lbl, is_baseline=False))
+    return cols
+
+
+def _drift_n(cells_by_provider: dict, columns: list):
+    """Drift between the baseline and the union of the other providers.
+
+    Returns ``(missing_from_others, only_in_others)``: baseline tests no other
+    provider ran, and tests some other provider ran but the baseline did not.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    base_tests = {k.test for k in cells_by_provider.get(baseline, {})}
+    other_tests: set = set()
+    for o in others:
+        other_tests |= {k.test for k in cells_by_provider.get(o, {})}
+    return sorted(base_tests - other_tests), sorted(other_tests - base_tests)
+
+
+def _eval_header_n(columns, eval_ids, base_url, config_path=None,
+                   system_prompt_path=None) -> str:
+    """Header naming each provider column's eval (and the run's config/prompt)."""
+
+    def prov_row(col):
+        eval_id = (eval_ids or {}).get(col.key)
+        label = col.key + (" (baseline)" if col.is_baseline else "")
+        if eval_id:
+            href = html.escape(f"{base_url}/eval/{eval_id}", quote=True)
+            value = (f'<a href="{href}" target="_blank" rel="noopener">'
+                     f"{html.escape(eval_id)}</a>")
+        else:
+            value = '<span class="muted">(unknown)</span>'
+        return f'<div><span class="evlabel">{html.escape(label)}</span> {value}</div>'
+
+    def file_row(label, path):
+        absolute = str(Path(path).resolve())
+        href = html.escape(f"file://{absolute}", quote=True)
+        return (f'<div><span class="evlabel">{label}</span> '
+                f'<a href="{href}" target="_blank" rel="noopener">'
+                f'{html.escape(absolute)}</a></div>')
+
+    parts = [prov_row(c) for c in columns]
+    if config_path:
+        parts.append(file_row("Config", config_path))
+    if system_prompt_path:
+        parts.append(file_row("System prompt", system_prompt_path))
+    return f'<div class="evals">{"".join(parts)}</div>'
+
+
+def _delta_td(delta, tolerance) -> str:
+    """A delta cell coloured by its band (improved/regressed/within)."""
+    if delta is None:
+        return '<td class="num delta">—</td>'
+    cls = classify(delta, tolerance)  # improved | regressed | within
+    return f'<td class="num delta delta-{cls}">{_fmt_delta(delta)}</td>'
+
+
+def _summary_table(title, header_cells, body_rows) -> str:
+    return (f"<h4>{title}</h4><table><thead><tr>{header_cells}</tr></thead>"
+            f"<tbody>{body_rows}</tbody></table>")
+
+
+def _summary_tables_html(rows, columns, tolerance, css_class) -> str:
+    """Per-non-baseline-provider rubric / deterministic / best summary tables.
+
+    A kind's table appears only when at least one row of that kind is present.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    blocks = []
+
+    if any(r.kind == "rubric" for r in rows):
+        t = summarize_rubric_table(rows, columns, tolerance)
+        head = (f"<th>vs {html.escape(baseline)}</th><th>improved</th>"
+                f"<th>regressed</th><th>within &plusmn;{tolerance:g}</th>"
+                "<th>new</th><th>removed</th>")
+        body = "".join(
+            f"<tr><td>{html.escape(o)}</td>"
+            f"<td class='num'>{t[o]['improved']}</td>"
+            f"<td class='num'>{t[o]['regressed']}</td>"
+            f"<td class='num'>{t[o]['within']}</td>"
+            f"<td class='num'>{t[o]['new']}</td>"
+            f"<td class='num'>{t[o]['removed']}</td></tr>"
+            for o in others)
+        blocks.append(_summary_table("Rubric", head, body))
+
+    if any(r.kind == "deterministic" for r in rows):
+        t = summarize_deterministic_table(rows, columns)
+        head = (f"<th>vs {html.escape(baseline)}</th><th>new passes</th>"
+                "<th>new fails</th><th>total passes</th><th>total fails</th>")
+        body = "".join(
+            f"<tr><td>{html.escape(o)}</td>"
+            f"<td class='num'>{t[o]['new_passes']}</td>"
+            f"<td class='num'>{t[o]['new_fails']}</td>"
+            f"<td class='num'>{t[o]['total_passes']}</td>"
+            f"<td class='num'>{t[o]['total_fails']}</td></tr>"
+            for o in others)
+        blocks.append(_summary_table("Deterministic", head, body))
+
+    if any(r.kind == "best" for r in rows):
+        t = summarize_best_table(rows, columns)
+        head = "".join(f"<th>{html.escape(c.key)}</th>" for c in columns) \
+            + "<th>undecided</th>"
+        body = ("<tr>"
+                + "".join(f"<td class='num'>{t[c.key]}</td>" for c in columns)
+                + f"<td class='num'>{t['undecided']}</td></tr>")
+        blocks.append(_summary_table("Best (head-to-head)", head, body))
+
+    return f'<div class="{css_class}">{"".join(blocks)}</div>'
+
+
+def _row_sort_key(row, others):
+    # Worst (most negative) delta across non-baseline providers first; rows with
+    # no numeric delta (deterministic/best) sort after.
+    ds = [row.deltas[o] for o in others if row.deltas.get(o) is not None]
+    return (0, min(ds)) if ds else (1, 0.0)
+
+
+def render_html_n(rows, columns, drift, tolerance,
+                  eval_ids=None, ui_base_url=DEFAULT_UI_BASE_URL,
+                  errored=None, curls=None, config_path=None,
+                  system_prompt_path=None) -> str:
+    """Render the N-provider HTML report.
+
+    Columns: test, assertion type, assertion, metric, one value column per
+    provider (baseline first, tagged), one delta column per non-baseline provider
+    (other - baseline; rubric only), and an N-way ``best`` winner. There is no
+    ``status`` column. ``eval_ids`` / ``errored`` / ``curls`` are keyed by provider
+    key; in a unified run every provider shares one eval id. ``drift`` is
+    ``(missing_from_others, only_in_others)`` from :func:`_drift_n`.
+    """
+    eval_ids = eval_ids or {}
+    errored = errored or {}
+    curls = curls or {}
+    others = [c for c in columns if not c.is_baseline]
+
+    aggregate = _summary_tables_html(rows, columns, tolerance, "summary")
+
+    missing, extra = drift
+    drift_html = ""
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append("only the baseline ran: "
+                         + ", ".join(html.escape(t) for t in missing))
+        if extra:
+            parts.append("baseline did not run: "
+                         + ", ".join(html.escape(t) for t in extra))
+        drift_html = f'<div class="drift">⚠ config drift — {"; ".join(parts)}</div>'
+
+    def value_cell(col, row):
+        return _cell_td(
+            row.kind, row.values.get(col.key), eval_ids.get(col.key), row.search,
+            ui_base_url, row.key.test in errored.get(col.key, set()),
+            curls.get(col.key, {}).get(row.key.test, ""),
+        )
+
+    # Dynamic column headers: a value column per provider, then a delta per other.
+    value_headers = "".join(
+        f'<th class="{"col-baseline" if c.is_baseline else ""}">'
+        f'{html.escape(c.key)}{" (baseline)" if c.is_baseline else ""}</th>'
+        for c in columns)
+    delta_headers = "".join(f"<th>&Delta; {html.escape(c.key)}</th>" for c in others)
+    thead = ("<th>test</th><th>assertion type</th><th>assertion</th><th>metric</th>"
+             + value_headers + delta_headers + "<th>best</th>")
+    n_value = len(columns)
+    n_delta = len(others)
+
+    # Group rows by suite (first-seen order), then by test.
+    suites: list = []
+    grouped: dict = {}
+    for r in rows:
+        if r.suite not in grouped:
+            grouped[r.suite] = []
+            suites.append(r.suite)
+        grouped[r.suite].append(r)
+
+    sections = []
+    parity_counter = 0
+    for suite in suites:
+        test_groups: dict = {}
+        group_order: list = []
+        for r in grouped[suite]:
+            gkey = (r.key.test, r.key.prompt)
+            if gkey not in test_groups:
+                test_groups[gkey] = []
+                group_order.append(gkey)
+            test_groups[gkey].append(r)
+        group_order.sort(
+            key=lambda gk: min(
+                (_row_sort_key(r, [c.key for c in others]) for r in test_groups[gk]),
+                default=(1, 0.0),
+            )
+        )
+
+        body_rows = []
+        for gkey in group_order:
+            parity = "a" if parity_counter % 2 == 0 else "b"
+            parity_counter += 1
+            for r in sorted(test_groups[gkey],
+                            key=lambda r: _row_sort_key(r, [c.key for c in others])):
+                if r.kind == "best":
+                    # Single per-test head-to-head row: type column carries the
+                    # assertion type, value/delta columns are dashes, best names
+                    # the winning provider.
+                    winner = r.best or "—"
+                    body_rows.append(
+                        f'<tr class="test-{parity}">'
+                        f"<td>{html.escape(r.key.test)}</td>"
+                        f"<td>{html.escape(r.assertion_type or 'select-best')}</td>"
+                        "<td></td><td></td>"
+                        + '<td class="num">—</td>' * n_value
+                        + '<td class="num delta">—</td>' * n_delta
+                        + f'<td class="best-winner">{html.escape(winner)}</td>'
+                        "</tr>"
+                    )
+                    continue
+                value_tds = "".join(value_cell(c, r) for c in columns)
+                delta_tds = "".join(
+                    _delta_td(r.deltas.get(c.key), tolerance) for c in others
+                )
+                body_rows.append(
+                    f'<tr class="test-{parity}">'
+                    f"<td>{html.escape(r.key.test)}</td>"
+                    f"<td>{html.escape(r.assertion_type or '')}</td>"
+                    f"<td>{html.escape(r.assertion_value)}</td>"
+                    f"<td>{html.escape(r.metric or '')}</td>"
+                    + value_tds + delta_tds
+                    + '<td class="best-winner">—</td>'
+                    "</tr>"
+                )
+        sections.append(
+            f"<h2>{html.escape(suite)}</h2>"
+            + _summary_tables_html(grouped[suite], columns, tolerance, "suite-summary")
+            + f"<table><thead><tr>{thead}</tr></thead><tbody>"
+            + "".join(body_rows) + "</tbody></table>"
+        )
+
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<title>Provider comparison</title>"
+        f"<style>{_CSS}</style></head><body>"
+        "<h1>Provider comparison</h1>"
+        + _eval_header_n(columns, eval_ids, ui_base_url, config_path=config_path,
+                         system_prompt_path=system_prompt_path)
+        + aggregate
+        + drift_html
+        + "".join(sections)
+        + _COPY_SCRIPT
+        + "</body></html>"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -1094,6 +1371,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="The provider label to treat as the candidate in a unified eval file.",
     )
     parser.add_argument(
+        "--baseline-provider-col",
+        default=None,
+        help="N-provider mode: the baseline column as 'key=label' (the config key "
+        "is shown as the column header; the promptfoo provider label splits the "
+        "unified eval file). When given, the report uses the multi-provider layout "
+        "and --baseline-provider/--candidate-provider are ignored.",
+    )
+    parser.add_argument(
+        "--provider-col",
+        action="append",
+        default=None,
+        help="N-provider mode: a non-baseline column as 'key=label' (repeatable).",
+    )
+    parser.add_argument(
         "--config-path",
         default=None,
         help="Path to the comparison config that produced this run. When given, "
@@ -1110,11 +1401,55 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _main_n(args, eval_json, suites) -> int:
+    """N-provider report path (driven by run_comparison via --*-provider-col).
+
+    All columns read from the one unified eval file, split by each provider's
+    promptfoo label; the columns are shown under their config keys.
+    """
+    columns = parse_provider_col_args(
+        args.baseline_provider_col, args.provider_col or []
+    )
+    base_dir = Path.cwd()
+    eval_id = read_eval_id(eval_json)
+    cells_by_provider = {
+        c.key: extract_cells(eval_json, suites, c.label) for c in columns
+    }
+    rows = build_rows(cells_by_provider, columns)
+    drift = _drift_n(cells_by_provider, columns)
+    eval_ids = {c.key: eval_id for c in columns}
+    errored = {c.key: errored_tests(eval_json, suites, c.label) for c in columns}
+    curls = {c.key: build_curls(eval_json, base_dir, None, c.label) for c in columns}
+    args.out.write_text(
+        render_html_n(
+            rows, columns, drift, args.tolerance,
+            eval_ids=eval_ids, ui_base_url=args.ui_base_url,
+            errored=errored, curls=curls,
+            config_path=args.config_path,
+            system_prompt_path=args.system_prompt_path,
+        ),
+        encoding="utf-8",
+    )
+    others = [c.key for c in columns if not c.is_baseline]
+    rtab = summarize_rubric_table(rows, columns, args.tolerance)
+    summary = " | ".join(
+        f"{o}: {rtab[o]['improved']} improved, {rtab[o]['regressed']} regressed"
+        for o in others
+    )
+    print(f"{len(columns)} providers, {len(rows)} rows | {summary} -> {args.out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     suites = args.suite  # None => every suite present in either run
 
     baseline_json = read_eval_json(args.baseline_json)
+    # N-provider mode: one unified file (passed as both positionals), split by
+    # the per-column provider labels.
+    if args.baseline_provider_col:
+        return _main_n(args, baseline_json, suites)
+
     candidate_json = read_eval_json(args.candidate_json)
     # Provider labels are only needed for a unified run (one file, both
     # providers); for the classic two-file mode they stay None (all results).
