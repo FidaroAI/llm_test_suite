@@ -44,6 +44,7 @@ if __package__ in (None, ""):
 
 from scripts_repo.deploy_phala import deploy as phala_deploy_and_wait
 from scripts_repo.deploy_phala import models_url, wait_for_url
+from scripts_repo.providers_registry import REGISTRY, all_keys, resolve
 
 # promptfoo provider labels the orchestrator drives for each side of the run.
 # The dynamic providers template their model / temperature / max_tokens from the
@@ -106,12 +107,10 @@ COMPARISON_NETWORK = "fidaro-comparison"
 # value supplied in the config's promptfoo-filters is ignored.
 RESERVED_FILTER_KEYS = {"filter-providers"}
 
-REQUIRED_KEYS = ("vllm-prod-url", "vllm-dev-url", "suite-generation-config")
-
-# Per-side provider config the dynamic providers read (via provider_options_env).
-# Each must carry these keys; see providers/*_dynamic_*.yaml.
-PROVIDER_OPTIONS_KEYS = ("prod-provider-options", "dev-provider-options")
-REQUIRED_PROVIDER_OPTION_FIELDS = ("model", "temperature", "max_tokens")
+# Suite config is always required; provider-specific keys (vLLM urls, api keys,
+# redeploy target) are validated per the registry based on which providers are
+# enabled — see validate_config.
+REQUIRED_KEYS = ("suite-generation-config",)
 
 # Being super cautious here. We really must be careful not to deploy to prod.
 # TODO: Separate prod and dev instances so that phala CLI can't touch prod.
@@ -141,13 +140,21 @@ def comparison_dir(config_path) -> Path:
     return config_path.parent / config_path.stem
 
 
+def enabled_keys(config: dict) -> list[str]:
+    """Provider keys switched on in ``providers-under-test`` (config order)."""
+    put = config.get("providers-under-test") or {}
+    return [k for k, on in put.items() if on]
+
+
 def validate_config(
     config: dict, repo_root: Path, env: Mapping[str, str] | None = None
 ) -> None:
     """Validate a comparison config, raising ConfigError on the first problem.
 
-    `repo_root` is where `.env.phala` is expected; `env` supplies
-    PHALA_DOCKER_COMPOSE_FILE (defaults to the process environment).
+    Validation is registry-driven: which keys are required depends on which
+    providers ``providers-under-test`` enables. `repo_root` is where `.env.phala`
+    is expected; `env` supplies api keys / PHALA_DOCKER_COMPOSE_FILE (defaults to
+    the process environment).
     """
     if env is None:
         env = os.environ
@@ -156,29 +163,66 @@ def validate_config(
         if key not in config or config[key] in (None, ""):
             raise ConfigError(f"config is missing required key {key!r}")
 
-    # The dynamic providers need a {model, temperature, max_tokens} block per side.
-    for key in PROVIDER_OPTIONS_KEYS:
-        opts = config.get(key)
-        if not opts:
-            raise ConfigError(f"config is missing required key {key!r}")
-        missing = [f for f in REQUIRED_PROVIDER_OPTION_FIELDS if f not in opts]
-        if missing:
-            raise ConfigError(f"{key!r} is missing fields: {missing}")
+    put = config.get("providers-under-test")
+    if not put:
+        raise ConfigError("config is missing required key 'providers-under-test'")
+    unknown = set(put) - all_keys()
+    if unknown:
+        raise ConfigError(
+            f"unknown provider(s) in providers-under-test: {sorted(unknown)}"
+        )
 
+    enabled = enabled_keys(config)
+    if not enabled:
+        raise ConfigError("providers-under-test must enable at least one provider")
+
+    baseline = config.get("baseline-provider")
+    if baseline not in enabled:
+        raise ConfigError(
+            f"baseline-provider {baseline!r} must be one of the enabled "
+            f"providers: {enabled}"
+        )
+
+    options = config.get("provider-options") or {}
+    extra = set(options) - set(enabled)
+    if extra:
+        raise ConfigError(
+            f"provider-options has entries for non-enabled providers: {sorted(extra)}"
+        )
+    for key in enabled:
+        if key not in options:
+            raise ConfigError(f"provider-options is missing an entry for {key!r}")
+
+    specs = resolve(enabled)
+    # Each enabled provider validates per its kind: a gateway needs its vLLM url;
+    # an api provider needs its credential env var present. Option fields
+    # (model/temperature/max_tokens/…) are all optional — they vary per provider.
+    for spec in specs:
+        if spec.kind == "gateway":
+            if not config.get(spec.vllm_url_key):
+                raise ConfigError(
+                    f"provider {spec.key!r} requires config key {spec.vllm_url_key!r}"
+                )
+        elif spec.kind == "api":
+            if spec.api_key_env and not env.get(spec.api_key_env):
+                raise ConfigError(
+                    f"provider {spec.key!r} requires the {spec.api_key_env} env var"
+                )
+
+    # A redeploy (vllm-options) is the only thing that touches a CVM, and only the
+    # dev gateway is ever redeployed. So the redeploy guards apply only when
+    # fidaro-dev is enabled AND vllm-options is set — without both, the instance
+    # id / whitelist / compose carry no constraints. When they DO apply: the dev
+    # provider's model must match the served model, an instance id must be given
+    # and whitelisted (a hard guard against redeploying a non-dev CVM), and the
+    # compose template + .env.phala must exist.
     has_options = bool(config.get("vllm-options"))
-
-    # A redeploy (vllm-options) is the only thing that touches a CVM, so the dev
-    # target is validated only when one is configured. Without a redeploy the
-    # instance id is never used, so it carries no constraints. When a redeploy IS
-    # configured: the dev provider's model must match the model it serves, an
-    # instance id must be given, and that id must be whitelisted — a hard guard
-    # against ever redeploying a non-dev (e.g. prod) CVM.
-    if has_options:
+    if has_options and "fidaro-dev" in enabled:
         vllm_model = config["vllm-options"].get("model")
-        dev_model = config["dev-provider-options"]["model"]
-        if vllm_model and dev_model != vllm_model:
+        dev_model = (options.get("fidaro-dev") or {}).get("model")
+        if vllm_model and dev_model and dev_model != vllm_model:
             raise ConfigError(
-                f"dev-provider-options.model ({dev_model!r}) must match "
+                f"provider-options['fidaro-dev'].model ({dev_model!r}) must match "
                 f"vllm-options.model ({vllm_model!r})"
             )
         instance_id = config.get("phala-dev-instance-id")
@@ -191,12 +235,6 @@ def validate_config(
                 f"phala-dev-instance-id {instance_id} is not in the whitelist "
                 "of allowed CVM IDs"
             )
-
-    prompt_file = config.get("system-prompt-file")
-    if prompt_file and not Path(prompt_file).is_file():
-        raise ConfigError(f"system-prompt-file does not exist: {prompt_file}")
-
-    if has_options:
         compose = env.get("PHALA_DOCKER_COMPOSE_FILE")
         if not compose:
             raise ConfigError(
@@ -207,8 +245,19 @@ def validate_config(
         env_phala = repo_root / ".env.phala"
         if not env_phala.exists():
             raise ConfigError(
-                f"vllm-options requires an env variable file at {env_phala}. Prefer to use 1Password environments for this."
+                f"vllm-options requires an env variable file at {env_phala}. "
+                "Prefer to use 1Password environments for this."
             )
+
+    prompt_file = config.get("system-prompt-file")
+    if prompt_file and not Path(prompt_file).is_file():
+        raise ConfigError(f"system-prompt-file does not exist: {prompt_file}")
+    if prompt_file and not any(s.supports_system_prompt for s in specs):
+        print(
+            "WARNING: system-prompt-file is set but no enabled provider mounts a "
+            "system prompt (only fidaro-dev does); it will be ignored.",
+            flush=True,
+        )
 
 
 def vllm_options_changed(cache_path: Path, options: dict) -> bool:
