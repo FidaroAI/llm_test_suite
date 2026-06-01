@@ -1415,6 +1415,158 @@ def build_response_csv(eval_json: dict, columns: list, out_path) -> int:
     return write_response_csv(per_provider, [c.key for c in columns], out_path)
 
 
+# --- raw-response HTML table -----------------------------------------------
+# The same per-test / per-provider response grid as the CSV, but as a
+# self-contained interactive HTML table: word-wrapped cells (row height
+# auto-adjusts to content), columns and rows the reader can drag-resize, and a
+# layout that fills and reflows with the browser window. Built for eyeballing
+# long answers side by side — spreadsheets mangle the embedded newlines/commas.
+
+_RESPONSES_CSS = """
+html, body { margin: 0; height: 100%; }
+body { font-family: -apple-system, system-ui, sans-serif; color: #1a1a1a; }
+.wrap { padding: 1rem; box-sizing: border-box; }
+h1 { font-size: 1.1rem; margin: 0 0 .5rem; }
+.hint { color: #666; font-size: .85rem; margin: 0 0 .75rem; }
+/* width:100% + fixed layout => the table fills and reflows with the window;
+   column widths come from the <col> elements. */
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+th, td {
+  border: 1px solid #d0d0d0; padding: .4rem .55rem; vertical-align: top;
+  /* word wrapping by default; row height grows to fit the content. */
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  overflow: hidden; position: relative;
+}
+th { background: #f4f4f4; text-align: left; position: sticky; top: 0; z-index: 1; }
+td { font-size: .9rem; }
+td:first-child { color: #333; font-weight: 500; }
+/* Drag handles: a thin strip on a cell's right edge (column) / bottom edge (row). */
+.col-resize { position: absolute; top: 0; right: -3px; width: 7px; height: 100%;
+  cursor: col-resize; user-select: none; z-index: 3; }
+.row-resize { position: absolute; left: 0; bottom: -3px; width: 100%; height: 7px;
+  cursor: row-resize; user-select: none; z-index: 3; }
+"""
+
+# Vanilla-JS drag handlers. Column handles resize the matching <col> (works under
+# table-layout:fixed); row handles set an explicit height on the <tr>. Both clamp
+# to a small minimum so a column/row can't be dragged away entirely.
+_RESPONSES_SCRIPT = """
+<script>
+(function () {
+  document.querySelectorAll('.col-resize').forEach(function (h) {
+    h.addEventListener('mousedown', function (e) {
+      var col = document.querySelector('col[data-c="' + h.dataset.c + '"]');
+      var startX = e.clientX, startW = col.getBoundingClientRect().width;
+      function move(ev) {
+        col.style.width = Math.max(40, startW + ev.clientX - startX) + 'px';
+      }
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+      e.preventDefault();
+    });
+  });
+  document.querySelectorAll('.row-resize').forEach(function (h) {
+    h.addEventListener('mousedown', function (e) {
+      var row = h.closest('tr');
+      var startY = e.clientY, startH = row.getBoundingClientRect().height;
+      function move(ev) {
+        row.style.height = Math.max(24, startH + ev.clientY - startY) + 'px';
+      }
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+      e.preventDefault();
+    });
+  });
+})();
+</script>
+"""
+
+
+def render_responses_html(per_provider: dict, ordered_keys: list) -> str:
+    """Render the interactive raw-response table as a self-contained HTML string.
+
+    ``per_provider`` maps provider key -> {identity: {prompt, output, suite}};
+    ``ordered_keys`` is the column order (baseline first). One row per test
+    identity (the union across providers), ordered by ``(suite, identity)``.
+    """
+    ordered_keys = list(ordered_keys)
+    headers = ["prompt"] + ordered_keys
+
+    # Initial widths as percentages so the untouched table fills/reflows with the
+    # window; the prompt gets a wider share, providers split the rest evenly. A
+    # manual drag overrides the column it touches with a pixel width.
+    prompt_pct = 28
+    provider_pct = (100 - prompt_pct) / len(ordered_keys) if ordered_keys else 100 - prompt_pct
+    widths = [prompt_pct] + [provider_pct] * len(ordered_keys)
+    colgroup = "".join(
+        f'<col data-c="{i}" style="width:{w:.4g}%">' for i, w in enumerate(widths)
+    )
+
+    head_cells = "".join(
+        f'<th>{html.escape(h)}<span class="col-resize" data-c="{i}"></span></th>'
+        for i, h in enumerate(headers)
+    )
+
+    meta: dict = {}  # identity -> (suite, prompt); first listed column wins
+    for key in ordered_keys:
+        for identity, rec in per_provider.get(key, {}).items():
+            meta.setdefault(identity, (rec.get("suite") or NO_SUITE, rec.get("prompt", "")))
+    order = sorted(meta, key=lambda i: (meta[i][0], i))
+
+    body_rows = []
+    for identity in order:
+        _, prompt = meta[identity]
+        cells = [
+            f'<td>{html.escape(_csv_cell(prompt))}'
+            '<span class="row-resize"></span></td>'
+        ]
+        for key in ordered_keys:
+            rec = per_provider.get(key, {}).get(identity)
+            cells.append(f"<td>{html.escape(_csv_cell(rec.get('output') if rec else ''))}</td>")
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Raw responses</title>"
+        f"<style>{_RESPONSES_CSS}</style></head><body><div class='wrap'>"
+        "<h1>Raw responses</h1>"
+        "<p class='hint'>Drag a column's right edge or a row's bottom edge to "
+        "resize. Cells word-wrap and the table reflows with the window.</p>"
+        "<table><colgroup>" + colgroup + "</colgroup>"
+        "<thead><tr>" + head_cells + "</tr></thead>"
+        "<tbody>" + "".join(body_rows) + "</tbody></table>"
+        "</div>" + _RESPONSES_SCRIPT + "</body></html>"
+    )
+
+
+def write_responses_html(per_provider: dict, ordered_keys: list, out_path) -> int:
+    """Render the response table and write it to ``out_path``; return row count."""
+    n = sum(1 for _ in {  # count distinct test identities across providers
+        identity
+        for key in ordered_keys
+        for identity in per_provider.get(key, {})
+    })
+    Path(out_path).write_text(
+        render_responses_html(per_provider, ordered_keys), encoding="utf-8"
+    )
+    return n
+
+
+def build_responses_html(eval_json: dict, columns: list, out_path) -> int:
+    """Write the response HTML table from one unified eval file split by ``columns``."""
+    per_provider = {c.key: extract_responses(eval_json, c.label) for c in columns}
+    return write_responses_html(per_provider, [c.key for c in columns], out_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -1449,6 +1601,16 @@ def build_parser() -> argparse.ArgumentParser:
         "row per test, column 1 the rendered prompt, then one column per "
         "provider (baseline first). No scores or verdicts — for eyeballing the "
         "answers side by side.",
+    )
+    parser.add_argument(
+        "--responses-html",
+        type=Path,
+        default=None,
+        help="Also write an interactive HTML table of the raw "
+        "(reasoning-stripped) responses: one row per test, column 1 the rendered "
+        "prompt, then one column per provider. Word-wrapped cells, drag-resizable "
+        "columns/rows, reflows with the window. For eyeballing answers side by "
+        "side when a spreadsheet mangles the newlines.",
     )
     parser.add_argument(
         "--ui-base-url",
@@ -1542,6 +1704,9 @@ def _main_n(args, eval_json, suites) -> int:
     if args.csv:
         n = build_response_csv(eval_json, columns, args.csv)
         print(f"  {n} response rows -> {args.csv}")
+    if args.responses_html:
+        n = build_responses_html(eval_json, columns, args.responses_html)
+        print(f"  {n} response rows -> {args.responses_html}")
     others = [c.key for c in columns if not c.is_baseline]
     rtab = summarize_rubric_table(rows, columns, args.tolerance)
     summary = " | ".join(
@@ -1596,6 +1761,13 @@ def main(argv: list[str] | None = None) -> int:
         }
         n = write_response_csv(per_provider, ["baseline", "candidate"], args.csv)
         print(f"  {n} response rows -> {args.csv}")
+    if args.responses_html:
+        per_provider = {
+            "baseline": extract_responses(baseline_json, base_provider),
+            "candidate": extract_responses(candidate_json, cand_provider),
+        }
+        n = write_responses_html(per_provider, ["baseline", "candidate"], args.responses_html)
+        print(f"  {n} response rows -> {args.responses_html}")
     msg = (
         f"rubric: {counts['improved']} improved, {counts['regressed']} regressed, "
         f"{counts['within']} within, {counts['new']} new, {counts['removed']} removed"
