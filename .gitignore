@@ -22,3 +22,6 @@ data/multifaceted.json
 
 # Live stock-price snapshot written by scripts_repo/fetch_stock_prices.py (transient)
 tests/stock_prices_reference.json
+
+# TODO: remove this. It's a junk dir
+output

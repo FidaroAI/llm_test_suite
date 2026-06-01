@@ -11,10 +11,14 @@ import pytest
 import re
 
 from scripts_repo.run_comparison import (
+    COMPARISON_NETWORK,
     CORE_SYSTEM_PROMPT_PATH,
     DEV_PROVIDER,
     PROD_PROVIDER,
     SELECT_BEST_ENV_VAR,
+    WEB_FETCH_CONTAINER_PORT,
+    WEB_FETCH_NETWORK_ALIAS,
+    WEB_FETCH_SIDECAR_URL,
     WHITELISTED_CVM_IDS,
     ConfigError,
     both_providers_filter,
@@ -28,6 +32,7 @@ from scripts_repo.run_comparison import (
     run_dir_name,
     validate_config,
     vllm_options_changed,
+    web_fetch_docker_args,
     write_options_cache,
 )
 
@@ -318,6 +323,8 @@ def test_gateway_docker_args_core_invocation():
         vllm_url="https://prod/v1",
         brave_api_key="brave-key",
         image="secure-enclave-gateway-plaintext",
+        network=COMPARISON_NETWORK,
+        web_fetch_url=WEB_FETCH_SIDECAR_URL,
     )
     assert args[0:2] == ["docker", "run"]
     assert "-p" in args and "127.0.0.1:8082:8080" in args
@@ -334,6 +341,8 @@ def test_gateway_docker_args_no_mount_without_prompt():
         vllm_url="https://prod/v1",
         brave_api_key="k",
         image="img",
+        network=COMPARISON_NETWORK,
+        web_fetch_url=WEB_FETCH_SIDECAR_URL,
     )
     assert "-v" not in args
 
@@ -347,11 +356,88 @@ def test_gateway_docker_args_mounts_system_prompt_absolutely(tmp_path):
         vllm_url="https://dev/v1",
         brave_api_key="k",
         image="img",
+        network=COMPARISON_NETWORK,
+        web_fetch_url=WEB_FETCH_SIDECAR_URL,
         system_prompt_file=str(prompt),
     )
     mount = f"{prompt.resolve()}:{CORE_SYSTEM_PROMPT_PATH}:ro"
     assert "-v" in args
     assert mount in args
+
+
+def test_gateway_docker_args_joins_shared_network():
+    # Gateways must attach to the shared user-defined bridge so Docker DNS
+    # resolves `web-fetch`; the default bridge has no DNS.
+    args = gateway_docker_args(
+        name="fidaro-gateway-prod",
+        port=8082,
+        vllm_url="https://prod/v1",
+        brave_api_key="k",
+        image="img",
+        network="fidaro-comparison",
+        web_fetch_url=WEB_FETCH_SIDECAR_URL,
+    )
+    idx = args.index("--network")
+    assert args[idx + 1] == "fidaro-comparison"
+
+
+def test_gateway_docker_args_passes_web_fetch_url():
+    args = gateway_docker_args(
+        name="fidaro-gateway-prod",
+        port=8082,
+        vllm_url="https://prod/v1",
+        brave_api_key="k",
+        image="img",
+        network=COMPARISON_NETWORK,
+        web_fetch_url="http://web-fetch:8000",
+    )
+    assert "HOST_WEB_FETCH_SIDECAR_URL=http://web-fetch:8000" in args
+
+
+# --- web-fetch sidecar docker args -----------------------------------------
+
+
+def test_web_fetch_docker_args_publishes_no_host_port():
+    # The sidecar is reachable only via the user-defined bridge; publishing a
+    # host port would defeat that isolation.
+    args = web_fetch_docker_args(
+        name="fidaro-web-fetch",
+        image="web-fetch-tool-web-fetch:latest",
+        network=COMPARISON_NETWORK,
+    )
+    assert "-p" not in args
+
+
+def test_web_fetch_docker_args_registers_network_alias():
+    args = web_fetch_docker_args(
+        name="fidaro-web-fetch",
+        image="web-fetch-tool-web-fetch:latest",
+        network=COMPARISON_NETWORK,
+    )
+    # The alias is what gateways resolve as `http://web-fetch:8000`; if this
+    # drifts from WEB_FETCH_SIDECAR_URL the gateways get DNS errors at fetch
+    # time, not at startup.
+    idx = args.index("--network-alias")
+    assert args[idx + 1] == WEB_FETCH_NETWORK_ALIAS
+
+
+def test_web_fetch_docker_args_baked_in_healthcheck():
+    # wait_for_container_healthy polls Docker's health status, so the run-time
+    # --health-cmd is required (the image's compose healthcheck doesn't apply).
+    args = web_fetch_docker_args(
+        name="fidaro-web-fetch",
+        image="img",
+        network=COMPARISON_NETWORK,
+    )
+    assert "--health-cmd" in args
+    cmd_idx = args.index("--health-cmd")
+    assert str(WEB_FETCH_CONTAINER_PORT) in args[cmd_idx + 1]
+
+
+def test_web_fetch_sidecar_url_uses_network_alias_and_port():
+    # The constants compose into a single URL the gateways see; keep that
+    # composition asserted so a rename of the alias or port can't desync.
+    assert WEB_FETCH_SIDECAR_URL == f"http://{WEB_FETCH_NETWORK_ALIAS}:{WEB_FETCH_CONTAINER_PORT}"
 
 
 # --- promptfoo eval command ------------------------------------------------

@@ -70,6 +70,7 @@ def both_providers_filter() -> str:
     """
     return f"^({re.escape(PROD_PROVIDER)}|{re.escape(DEV_PROVIDER)})$"
 
+
 # Host ports the prod/dev plaintext gateways are published on (matches
 # run_plaintext_gateway.sh). The gateway listens on 8080 inside the container.
 PROD_GATEWAY_PORT = 8082
@@ -81,6 +82,25 @@ GATEWAY_CONTAINER_PORT = 8080
 CORE_SYSTEM_PROMPT_PATH = "/app/src/llm_gateway/prompts/core_system_prompt.md"
 
 DEFAULT_GATEWAY_IMAGE = "secure-enclave-gateway-plaintext"
+
+# Web-fetch sidecar: a single shared instance both gateways relay URL fetches
+# through, mirroring the gateway-tdx + web-fetch pair in the secure-enclave
+# docker-compose stack. Networking is simpler here than in compose (single
+# user-defined bridge instead of the fetch-internal/fetch-egress split): a
+# docker run container can only join one network at start, and the sidecar
+# needs internet egress to actually fetch pages anyway. The sidecar's
+# in-process SSRF validator is the real isolation boundary.
+DEFAULT_WEB_FETCH_IMAGE = "secure-enclave-web-fetch:latest"
+WEB_FETCH_CONTAINER_NAME = "fidaro-web-fetch"
+# Network alias the gateways resolve via Docker's embedded DNS. Matches the
+# compose service name `web-fetch` so HOST_WEB_FETCH_SIDECAR_URL is the same
+# string production sees.
+WEB_FETCH_NETWORK_ALIAS = "web-fetch"
+WEB_FETCH_CONTAINER_PORT = 8000
+WEB_FETCH_SIDECAR_URL = f"http://{WEB_FETCH_NETWORK_ALIAS}:{WEB_FETCH_CONTAINER_PORT}"
+# User-defined bridge attaching the sidecar + both gateways so Docker's DNS
+# resolves `web-fetch` between them (the default bridge has no DNS).
+COMPARISON_NETWORK = "fidaro-comparison"
 
 # filter-providers is owned by the orchestrator (it picks prod vs dev), so a
 # value supplied in the config's promptfoo-filters is ignored.
@@ -256,8 +276,11 @@ def gateway_docker_args(
     vllm_url: str,
     brave_api_key: str,
     image: str,
+    *,
+    network: str,
+    web_fetch_url: str,
     system_prompt_file: str | None = None,
-    log_level: str = "info",
+    log_level: str = "debug",
     max_tool_calls: int = 10,
 ) -> list[str]:
     """Build the `docker run` argv for one plaintext gateway.
@@ -265,6 +288,13 @@ def gateway_docker_args(
     Mirrors scripts_repo/run_plaintext_gateway.sh (which is left untouched).
     A dev system prompt, if given, is bind-mounted read-only over the image's
     core_system_prompt.md using an absolute host path.
+
+    `network` joins the gateway to the shared user-defined bridge so it can
+    resolve the web-fetch sidecar by DNS (the default bridge has no DNS).
+    `host.docker.internal` keeps working: --add-host is a /etc/hosts entry,
+    not network topology. `web_fetch_url` is plumbed in as
+    HOST_WEB_FETCH_SIDECAR_URL so the gateway relays URL fetches through the
+    sidecar rather than reaching out directly.
     """
     args = [
         "docker",
@@ -275,6 +305,8 @@ def gateway_docker_args(
         f"127.0.0.1:{port}:{GATEWAY_CONTAINER_PORT}",
         "--name",
         name,
+        "--network",
+        network,
         "--add-host",
         "host.docker.internal:host-gateway",
         "-e",
@@ -287,6 +319,8 @@ def gateway_docker_args(
         f"BRAVE_API_KEY={brave_api_key}",
         "-e",
         f"HOST_MAX_TOOL_CALLS_PER_REQUEST={max_tool_calls}",
+        "-e",
+        f"HOST_WEB_FETCH_SIDECAR_URL={web_fetch_url}",
     ]
     if system_prompt_file:
         host_path = Path(system_prompt_file).resolve()
@@ -303,6 +337,50 @@ def gateway_docker_args(
         str(GATEWAY_CONTAINER_PORT),
     ]
     return args
+
+
+def web_fetch_docker_args(
+    name: str,
+    image: str,
+    *,
+    network: str,
+    network_alias: str = WEB_FETCH_NETWORK_ALIAS,
+    fetch_timeout_seconds: int = 20,
+) -> list[str]:
+    """Build the `docker run` argv for the shared web-fetch sidecar.
+
+    The sidecar is reachable only through the user-defined bridge (no host
+    port published) and registers `network_alias` so the gateways resolve it
+    at the same hostname compose uses (`web-fetch`). The baked-in healthcheck
+    matches the compose definition so wait_for_container_healthy can poll
+    Docker's health status instead of probing the unexposed port from the host.
+    """
+    return [
+        "docker",
+        "run",
+        "--rm",
+        "-d",
+        "--name",
+        name,
+        "--network",
+        network,
+        "--network-alias",
+        network_alias,
+        "-e",
+        f"WEBFETCH_FETCH_TIMEOUT_SECONDS={fetch_timeout_seconds}",
+        "-e",
+        "LOG_LEVEL=debug",
+        # Mirror docker-compose.yml healthcheck so `docker inspect` health
+        # status reflects sidecar readiness. The image already ships curl
+        # (compose uses the same probe).
+        "--health-cmd",
+        f"curl -f http://localhost:{WEB_FETCH_CONTAINER_PORT}/health || exit 1",
+        "--health-interval=5s",
+        "--health-timeout=3s",
+        "--health-retries=6",
+        "--health-start-period=20s",
+        image,
+    ]
 
 
 def eval_command(
@@ -401,6 +479,57 @@ def gateway_health_url(port: int) -> str:
     return f"http://127.0.0.1:{port}/v1/health"
 
 
+def ensure_docker_network(name: str) -> None:
+    """Create the bridge network if it doesn't exist (idempotent).
+
+    Uses `docker network inspect` as the existence check rather than catching
+    `network create` errors, so a real failure (daemon down, no permission)
+    still surfaces clearly instead of being misread as 'already exists'.
+    """
+    exists = subprocess.run(
+        ["docker", "network", "inspect", name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if exists.returncode == 0:
+        return
+    print(f"  $ docker network create {name}", flush=True)
+    subprocess.run(
+        ["docker", "network", "create", "--driver", "bridge", name],
+        check=True,
+    )
+
+
+def wait_for_container_healthy(name: str, timeout_s: float) -> None:
+    """Poll `docker inspect` until the container's health status is healthy.
+
+    Uses Docker's own healthcheck (defined via --health-cmd at run time) rather
+    than probing a port from the host: the sidecar deliberately publishes no
+    host port, so this is the only way to wait on its readiness from outside.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout_s
+    last_status = ""
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Health.Status}}", name],
+            capture_output=True,
+            text=True,
+        )
+        status = result.stdout.strip() if result.returncode == 0 else "missing"
+        if status == "healthy":
+            return
+        if status != last_status:
+            print(f"  {name} health: {status}", flush=True)
+            last_status = status
+        time.sleep(1.0)
+    raise RuntimeError(
+        f"{name} did not become healthy within {timeout_s:.0f}s "
+        f"(last status: {last_status or 'unknown'})"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -418,6 +547,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Gateway docker image (default: {DEFAULT_GATEWAY_IMAGE}).",
     )
     parser.add_argument(
+        "--web-fetch-image",
+        default=DEFAULT_WEB_FETCH_IMAGE,
+        help=f"Web-fetch sidecar docker image (default: {DEFAULT_WEB_FETCH_IMAGE}).",
+    )
+    parser.add_argument(
         "--deploy-timeout",
         type=float,
         default=1800.0,
@@ -428,6 +562,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=120.0,
         help="Seconds to wait for each local gateway to come up.",
+    )
+    parser.add_argument(
+        "--sidecar-timeout",
+        type=float,
+        default=120.0,
+        help="Seconds to wait for the web-fetch sidecar to become healthy.",
     )
     parser.add_argument(
         "--skip-phala-deploy",
@@ -506,6 +646,26 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("vLLM options unchanged since last run; skipping Phala redeploy.")
 
+    # Ensure the shared bridge network exists, then start the web-fetch sidecar
+    # both gateways will relay through. The sidecar must be healthy before the
+    # gateways accept traffic that hits a fetch tool; healthy-before-gateway
+    # also turns "sidecar image missing" into an early, obvious failure.
+    print(f"Ensuring docker network {COMPARISON_NETWORK} exists ...")
+    ensure_docker_network(COMPARISON_NETWORK)
+
+    print("Starting web-fetch sidecar ...")
+    start_gateway(  # reused: same "rm -f then docker run" lifecycle
+        repo_root,
+        web_fetch_docker_args(
+            name=WEB_FETCH_CONTAINER_NAME,
+            image=args.web_fetch_image,
+            network=COMPARISON_NETWORK,
+        ),
+        name=WEB_FETCH_CONTAINER_NAME,
+    )
+    print("Waiting for web-fetch sidecar to be healthy ...")
+    wait_for_container_healthy(WEB_FETCH_CONTAINER_NAME, timeout_s=args.sidecar_timeout)
+
     # Start both gateways and wait for them to answer.
     print("Starting plaintext gateways ...")
     start_gateway(
@@ -516,6 +676,8 @@ def main(argv: list[str] | None = None) -> int:
             vllm_url=config["vllm-prod-url"],
             brave_api_key=brave_api_key,
             image=args.docker_image,
+            network=COMPARISON_NETWORK,
+            web_fetch_url=WEB_FETCH_SIDECAR_URL,
         ),
         name="fidaro-gateway-prod",
     )
@@ -527,6 +689,8 @@ def main(argv: list[str] | None = None) -> int:
             vllm_url=config["vllm-dev-url"],
             brave_api_key=brave_api_key,
             image=args.docker_image,
+            network=COMPARISON_NETWORK,
+            web_fetch_url=WEB_FETCH_SIDECAR_URL,
             system_prompt_file=config.get("system-prompt-file"),
         ),
         name="fidaro-gateway-dev",

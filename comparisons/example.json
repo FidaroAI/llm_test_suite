@@ -1,6 +1,6 @@
 {
   "vllm-prod-url": "https://3bae0d639fdab82b8ea3bff4d8ff1515d38455e5-8000.dstack-pha-use1.phala.network/v1",
-  "vllm-dev-url": "https://3bae0d639fdab82b8ea3bff4d8ff1515d38455e5-8000.dstack-pha-use1.phala.network/v1",
+  "vllm-dev-url": "https://099098730db24cb5c3d6d7e24bf97c769f1be1c4-8000.dstack-pha-use1.phala.network/v1",
   "system-prompt-file": "system_prompts/fidaro_prod.md",
   "phala-dev-instance-id": "fidaro-vllm-002",
   "vllm-options": {
@@ -28,28 +28,28 @@
   "promptfoo-filters": {},
   "suite-generation-config": {
     "defaults": {
-      "number_to_generate": 0,
+      "number_to_generate": 0
     },
     "simple_facts": {
-      "number_to_generate": 5,
+      "number_to_generate": null,
       "randomize_selection": true,
       "random_seed": 0,
       "max_rubrics": null
     },
     "simple_facts_regressions": {
-      "number_to_generate": 5,
+      "number_to_generate": null,
       "randomize_selection": true,
       "random_seed": 0,
       "max_rubrics": null
     },
     "multifaceted": {
-      "number_to_generate": 5,
+      "number_to_generate": 100,
       "randomize_selection": true,
       "random_seed": 0,
       "max_rubrics": 5,
       "stratify": {
         "by": "request_type",
-        "per_group": 20,
+        "per_group": 5,
         "groups": [
           "factual_qa",
           "research_synthesis",
@@ -62,13 +62,13 @@
       }
     },
     "research_rubrics": {
-      "number_to_generate": 5,
+      "number_to_generate": 100,
       "randomize_selection": true,
       "random_seed": 0,
       "max_rubrics": 5,
       "stratify": {
         "by": "request_type",
-        "per_group": 20,
+        "per_group": 5,
         "groups": [
           "factual_qa",
           "research_synthesis",
@@ -81,13 +81,13 @@
       }
     },
     "agentharm_refusal": {
-      "number_to_generate": 5,
+      "number_to_generate": 20,
       "randomize_selection": true,
       "random_seed": 0,
       "max_rubrics": 5,
       "stratify": {
         "by": "request_type",
-        "per_group": 20,
+        "per_group": 5,
         "groups": [
           "factual_qa",
           "research_synthesis",
@@ -100,7 +100,7 @@
       }
     },
     "stock_prices": {
-      "number_to_generate": 5,
+      "number_to_generate": null,
       "randomize_selection": false,
       "random_seed": null,
       "max_rubrics": null

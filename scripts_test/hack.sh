@@ -19,8 +19,7 @@ fi
 
 mkdir -p results/local
 exec pnpm exec promptfoo eval \
-  --config promptfooconfig.yaml \
-  --filter-providers fidaro_vllm_phala \
-  --filter-pattern "Basic test" \
+  --config promptfooconfig_geval_demo.yaml \
+  --filter-pattern "compound vs simple interest" \
   --no-cache \
   --output results/local/latest.json
