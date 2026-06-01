@@ -428,6 +428,170 @@ def _classify_deterministic(baseline_passed: bool, candidate_passed: bool) -> st
     return "improved" if candidate_passed else "regressed"
 
 
+# --- N-provider model ------------------------------------------------------
+# The pairwise CellDiff above compares exactly two sides. The model below
+# generalizes that to an arbitrary set of providers with one designated
+# baseline: one Row per CellKey holding every provider's value, plus a delta of
+# each non-baseline provider against the baseline. This is what the multi-column
+# report (compare against prod or dev, plus competitors like Venice) is built on.
+
+
+@dataclass(frozen=True)
+class ProviderColumn:
+    key: str        # config key; shown as the column header
+    label: str      # promptfoo provider label; used to split the unified eval file
+    is_baseline: bool
+
+
+@dataclass
+class Row:
+    key: "CellKey"
+    suite: str
+    kind: str                      # "rubric" | "deterministic" | "best"
+    metric: str | None
+    assertion_value: str
+    assertion_type: str
+    values: dict                   # provider key -> score (rubric) / pass (det) / None
+    deltas: dict                   # non-baseline key -> (other - baseline) | None
+    best: str | None               # winning provider key, for kind == "best"
+    search: str = ""
+
+
+def best_winner_among(per_provider: dict) -> str | None:
+    """Provider key whose select-best component passed, or None if not exactly one.
+
+    ``per_provider`` maps provider key -> Cell (or None). In an N-way select-best
+    exactly one provider's component passes; ambiguity (none or several) is
+    reported as undecided (None).
+    """
+    winners = [k for k, c in per_provider.items() if c is not None and c.passed is True]
+    return winners[0] if len(winners) == 1 else None
+
+
+def build_rows(cells_by_provider: dict, columns: list) -> list:
+    """Join per-provider cell maps into one Row per CellKey.
+
+    ``cells_by_provider`` maps provider key -> {CellKey: Cell}; ``columns`` is the
+    ordered ProviderColumn list (baseline first). Rubric deltas are computed as
+    ``other - baseline`` when both sides have a rubric score; deterministic/best
+    rows carry no deltas. A row is emitted for any CellKey present for at least one
+    provider (so a test only one provider ran still appears).
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    all_keys: set = set()
+    for m in cells_by_provider.values():
+        all_keys |= set(m)
+    rows: list = []
+    for key in sorted(all_keys, key=lambda k: (k.test, k.prompt, k.assertion)):
+        per_provider = {c.key: cells_by_provider.get(c.key, {}).get(key) for c in columns}
+        present = next((c for c in per_provider.values() if c is not None), None)
+        if present is None:
+            continue
+        kind = present.kind
+        values: dict = {}
+        for ckey, cell in per_provider.items():
+            if cell is None:
+                values[ckey] = None
+            elif kind == "rubric":
+                values[ckey] = cell.score
+            else:  # deterministic or best
+                values[ckey] = cell.passed
+        deltas: dict = {}
+        if kind == "rubric":
+            base_cell = per_provider.get(baseline)
+            for o in others:
+                oc = per_provider.get(o)
+                deltas[o] = (
+                    oc.score - base_cell.score
+                    if (oc is not None and base_cell is not None)
+                    else None
+                )
+        best = best_winner_among(per_provider) if kind == "best" else None
+        rows.append(
+            Row(
+                key=key,
+                suite=present.suite,
+                kind=kind,
+                metric=present.metric,
+                assertion_value=present.assertion_value,
+                assertion_type=present.assertion_type,
+                values=values,
+                deltas=deltas,
+                best=best,
+                search=present.search,
+            )
+        )
+    return rows
+
+
+def summarize_rubric_table(rows: list, columns: list, tolerance: float) -> dict:
+    """Per-non-baseline-provider rubric tally vs baseline.
+
+    Returns ``{provider_key: {improved, regressed, within, new, removed}}``. A cell
+    present for the other provider but not the baseline counts as ``new`` (and the
+    reverse as ``removed``); both present are classified by the delta band.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    out = {
+        o: {"improved": 0, "regressed": 0, "within": 0, "new": 0, "removed": 0}
+        for o in others
+    }
+    for row in rows:
+        if row.kind != "rubric":
+            continue
+        b = row.values.get(baseline)
+        for o in others:
+            v = row.values.get(o)
+            if b is None and v is not None:
+                out[o]["new"] += 1
+            elif b is not None and v is None:
+                out[o]["removed"] += 1
+            elif b is not None and v is not None:
+                out[o][classify(v - b, tolerance)] += 1
+    return out
+
+
+def summarize_deterministic_table(rows: list, columns: list) -> dict:
+    """Per-non-baseline-provider deterministic tally vs baseline.
+
+    ``new_passes`` / ``new_fails`` count pass/fail transitions relative to the
+    baseline among tests both ran; ``total_passes`` / ``total_fails`` count the
+    other provider's own verdicts.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    out = {
+        o: {"new_passes": 0, "new_fails": 0, "total_passes": 0, "total_fails": 0}
+        for o in others
+    }
+    for row in rows:
+        if row.kind != "deterministic":
+            continue
+        b = row.values.get(baseline)
+        for o in others:
+            v = row.values.get(o)
+            if v is True:
+                out[o]["total_passes"] += 1
+            elif v is False:
+                out[o]["total_fails"] += 1
+            if b is not None and v is not None and b != v:
+                out[o]["new_passes" if v else "new_fails"] += 1
+    return out
+
+
+def summarize_best_table(rows: list, columns: list) -> dict:
+    """Wins per provider key across best rows (+ ``undecided``)."""
+    out = {c.key: 0 for c in columns}
+    out["undecided"] = 0
+    for row in rows:
+        if row.kind != "best":
+            continue
+        out[row.best if row.best in out else "undecided"] += 1
+    return out
+
+
 def diff_cells(baseline_cells: dict, candidate_cells: dict, tolerance: float) -> list:
     """Join baseline and candidate cells by key; classify every cell."""
     diffs: list = []
