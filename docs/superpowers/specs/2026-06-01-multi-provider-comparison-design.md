@@ -148,7 +148,11 @@ label: venice_dynamic
 config:
   apiBaseUrl: https://api.venice.ai/api/v1
   apiKey: "{{ env.VENICE_INFERENCE_KEY }}"
-  body:
+  # promptfoo's openai:chat provider only forwards vendor-specific body params
+  # placed under config.passthrough — it is spread verbatim into the request
+  # body. (config.body does NOT exist for this provider.) Verified against
+  # promptfoo 0.121.12 dist (chat getOpenAiBody: `...config.passthrough || {}`).
+  passthrough:
     venice_parameters:
       enable_web_search: "{{ env.COMPARISON_VENICE_WEB_SEARCH }}"
 ```
@@ -156,14 +160,14 @@ config:
 Mirrors the existing dynamic Fidaro YAMLs: model in the id (keeps promptfoo's
 request cache key model-aware), values templated from `COMPARISON_VENICE_*` env
 vars set per run. Registered in `promptfooconfig.yaml` `providers:` alongside the
-others.
+others. `apiBaseUrl` is the Venice base (`.../api/v1`); the provider appends
+`/chat/completions`.
 
-**Implementation risk — verify first.** That promptfoo's `openai:chat` provider
-forwards `config.body.venice_parameters` into the request body verbatim. Confirm
-with a single throwaway eval (or reading promptfoo's openai provider source)
-*before* building on it. Fallback if it doesn't pass through: a tiny custom JS
-provider (like `providers/bedrock_converse_structured.js`) that posts the Venice
-body directly. The rest of the design is unaffected by which mechanism wins.
+**Passthrough resolved (was the top risk).** promptfoo's `openai:chat` provider
+forwards arbitrary vendor params only via `config.passthrough` (spread verbatim
+into the body); there is no `config.body` for this provider, and unknown
+top-level config keys are silently dropped. Confirmed by reading the promptfoo
+0.121.12 dist source. No custom JS provider is needed.
 
 ### 4. `run_comparison.py` — orchestrate N providers
 
@@ -240,10 +244,10 @@ Replace the two-sided `CellDiff` with a per-`CellKey` **row** holding
 
 ## Risks
 
-- **Venice body passthrough** (see §3) — verify before building. Highest-leverage
-  unknown.
+- ~~**Venice body passthrough**~~ — RESOLVED (see §3): use `config.passthrough`.
 - **promptfoo result split for an api provider** — `extract_cells` already keys
   off `provider.label`; `venice_dynamic` must surface that label in the result
-  JSON. Confirm during the §3 verification eval.
+  JSON. The only remaining live unknown; confirm with a smoke eval against Venice
+  once `VENICE_INFERENCE_KEY` is available.
 - **Report width** with 3+ providers — acceptable; deltas are baseline-relative
   only, not all-pairs.
