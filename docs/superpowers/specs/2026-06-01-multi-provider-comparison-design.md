@@ -140,34 +140,43 @@ report. What it depends on: nothing (pure data + dataclass).
 - `system-prompt-file`, if given, must exist; warn (don't fail) if no enabled
   provider `supports_system_prompt`.
 
-### 3. Provider YAML — `providers/venice_dynamic.yaml` (new)
+### 3. Provider — `providers/venice_provider.py` (custom Python provider)
 
-```yaml
-id: "openai:chat:{{ env.COMPARISON_VENICE_MODEL }}"
-label: venice_dynamic
-config:
-  apiBaseUrl: https://api.venice.ai/api/v1
-  apiKey: "{{ env.VENICE_INFERENCE_KEY }}"
-  # promptfoo's openai:chat provider only forwards vendor-specific body params
-  # placed under config.passthrough — it is spread verbatim into the request
-  # body. (config.body does NOT exist for this provider.) Verified against
-  # promptfoo 0.121.12 dist (chat getOpenAiBody: `...config.passthrough || {}`).
-  passthrough:
-    venice_parameters:
-      enable_web_search: "{{ env.COMPARISON_VENICE_WEB_SEARCH }}"
-```
+> **Superseded (2026-06-01):** the first cut used a generic `openai:chat` provider
+> YAML with `config.passthrough.venice_parameters` for web search. A live run
+> revealed Venice returns its chain-of-thought in a **separate**
+> `message.reasoning_content` field, and promptfoo's `openai:chat` provider merges
+> it into the graded output as `"Thinking: " + reasoning + "\n\n" + answer`. That
+> leaks reasoning into every assertion and **cannot** be stripped afterwards: the
+> reasoning is multi-paragraph (internal `\n\n`), answers are multi-paragraph too,
+> there is no `\n\n\n` marker, and promptfoo discards the raw `reasoning_content`
+> once merged (so a transform can't subtract a known prefix either). Verified by
+> analysing the run output. We therefore replaced the YAML with a **custom Python
+> provider**.
 
-Mirrors the existing dynamic Fidaro YAMLs: model in the id (keeps promptfoo's
-request cache key model-aware), values templated from `COMPARISON_VENICE_*` env
-vars set per run. Registered in `promptfooconfig.yaml` `providers:` alongside the
-others. `apiBaseUrl` is the Venice base (`.../api/v1`); the provider appends
-`/chat/completions`.
+`providers/venice_provider.py` implements promptfoo's `call_api(prompt, options,
+context)`. It POSTs to Venice's `/chat/completions` (model / api key / base url /
+web search from its `config` block, templated from `COMPARISON_VENICE_*` /
+`VENICE_INFERENCE_KEY`), and from the full JSON it:
 
-**Passthrough resolved (was the top risk).** promptfoo's `openai:chat` provider
-forwards arbitrary vendor params only via `config.passthrough` (spread verbatim
-into the body); there is no `config.body` for this provider, and unknown
-top-level config keys are silently dropped. Confirmed by reading the promptfoo
-0.121.12 dist source. No custom JS provider is needed.
+* keeps the full `reasoning_content` and `web_search_citations` under result
+  `metadata` for human analysis, and
+* formats the graded `output` as `reasoning + "\n\n\n" + answer` — the **same
+  shape the Fidaro gateway emits** — so the shared per-assertion transform
+  (`hooks/strip_before_triple_newline.py`) isolates the answer for graders while
+  the stored output keeps the reasoning. Any stray `\n\n\n` inside the reasoning is
+  collapsed to `\n\n` so the delimiter is unambiguous.
+
+Registered in `promptfooconfig.yaml` as `{id: file://providers/venice_provider.py,
+label: venice_dynamic, config: {...}}`. The label stays `venice_dynamic`, so the
+registry, `providers_filter`, and the report's result-split are unchanged. The
+provider returns `{"error": ...}` on HTTP/network failure (e.g. a 429), so genuine
+failures show as errored cells rather than silently-empty passes.
+
+**Web-search passthrough note (historical):** promptfoo's `openai:chat` provider
+forwards vendor params only via `config.passthrough`; there is no `config.body`.
+Moot now that Venice uses a custom provider, but recorded for the next competitor
+that might reuse the generic provider.
 
 ### 4. `run_comparison.py` — orchestrate N providers
 

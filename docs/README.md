@@ -151,20 +151,27 @@ is one registry row + one provider YAML. There are two **kinds**:
   happens only when `fidaro-dev` is enabled **and** `vllm-options` is set (then
   `phala-dev-instance-id` must be whitelisted, and `PHALA_DOCKER_COMPOSE_FILE` +
   `.env.phala` must exist).
-* **api** (`venice`) — a direct external API
-  ([venice_dynamic.yaml](../providers/venice_dynamic.yaml)); **no** gateway,
-  sidecar, or redeploy. Requires its credential in the environment
-  (`VENICE_INFERENCE_KEY`). Venice's web search is a vendor body param, passed via
-  promptfoo's `config.passthrough` (templated on/off from
-  `provider-options.venice.web_search`, default `off`).
+* **api** (`venice`) — a direct external API via a **custom Python provider**
+  ([venice_provider.py](../providers/venice_provider.py)); **no** gateway, sidecar,
+  or redeploy. Requires its credential in the environment (`VENICE_INFERENCE_KEY`).
+  Venice's web search is set per run from `provider-options.venice.web_search`
+  (default `off`). The custom provider exists because Venice returns its
+  chain-of-thought in a separate `reasoning_content` field: the provider keeps the
+  full reasoning (and web-search citations) under result `metadata` for human
+  analysis, and formats the graded output as `reasoning + "\n\n\n" + answer` — the
+  same shape the Fidaro gateway emits — so the shared strip transform
+  ([strip_before_triple_newline.py](../hooks/strip_before_triple_newline.py))
+  isolates the answer for graders. Without this, promptfoo's generic `openai:chat`
+  provider would merge the reasoning into the graded text and it could not be
+  reliably stripped afterwards.
 
-Each provider runs through a **dynamic provider** YAML whose model (and, for the
-gateways, temperature/max_tokens) is templated from per-provider
-`COMPARISON_<PREFIX>_*` env vars that `run_comparison.py` sets per run from
-`provider-options` (promptfoo renders `{{ env.* }}` at load time). Putting the
-model in the provider id keeps promptfoo's request-body cache key model-aware. For
-`fidaro-dev`, its `model` must equal `vllm-options.model` (the model the redeploy
-serves) when a redeploy is configured.
+Every provider reads its model (and, for the gateways, temperature/max_tokens, and
+for Venice its web-search flag) from per-provider `COMPARISON_<PREFIX>_*` env vars
+that `run_comparison.py` sets per run from `provider-options` (promptfoo renders
+`{{ env.* }}` in a provider's config at load time) — the Fidaro gateways via their
+dynamic YAMLs, Venice via the custom provider's config block. For `fidaro-dev`, its
+`model` must equal `vllm-options.model` (the model the redeploy serves) when a
+redeploy is configured.
 
 ### One eval, one report
 
