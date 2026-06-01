@@ -18,6 +18,9 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3"
-    ]
+    ],
+    "patchedDependencies": {
+      "promptfoo@0.121.12": "patches/promptfoo@0.121.12.patch"
+    }
   }
 }

@@ -203,6 +203,16 @@ verdict is kept out of the rubric/deterministic tallies. Single-provider runs
 (`fidaro.sh`/CI) leave the env var unset and are unaffected. Design notes:
 [the spec](superpowers/specs/2026-05-27-select-best-comparison-design.md).
 
+> **Patched promptfoo behaviour:** stock promptfoo's `matchesSelectBest` throws an
+> *uncatchable* invariant ("must have at least two outputs to compare") if any test
+> has fewer than two provider outputs — e.g. when one provider errors/drops a result
+> under load. That kills the **entire** eval (no results written), which is brittle
+> for multi-provider runs against external APIs. We patch it (via pnpm
+> `patchedDependencies` → [patches/promptfoo@0.121.12.patch](../patches/promptfoo@0.121.12.patch))
+> to instead mark that test's head-to-head as a graceful failure, so the run
+> completes and the missing side shows as "undecided" in the report. Re-validate the
+> patch whenever promptfoo is upgraded.
+
 ## Project Structure
 
 Note: There's a lot of experimentation cruft in the repo that will eventually be
