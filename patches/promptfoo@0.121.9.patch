@@ -1,0 +1,26 @@
+diff --git a/dist/src/evaluator-BpaUYhLY.js b/dist/src/evaluator-BpaUYhLY.js
+index 251550560ecad0746a8c2304d73df2e5d7a9addd..074070535c5ffd0c1872ea12942fd94fee8d42b5 100644
+--- a/dist/src/evaluator-BpaUYhLY.js
++++ b/dist/src/evaluator-BpaUYhLY.js
+@@ -7075,8 +7075,8 @@ var Evaluator = class {
+ 	async processSelectBestAssertionForTest({ ciProgressReporter, compareCount, compareRowsCount, isWebUI, progressBarManager, prompts, providerAbortSignal, repeatCacheContextByTestIdx, runEvalOptions, testIdx }) {
+ 		if (isWebUI) logger.info(`Running model-graded comparison ${compareCount} of ${compareRowsCount}...`);
+ 		const resultsToCompare = await this.getResultsToCompare(testIdx);
+-		if (resultsToCompare.length === 0) {
+-			logger.warn(`Expected results to be found for test index ${testIdx}`);
++		if (resultsToCompare.length < 2) {
++			logger.warn(`select-best for test index ${testIdx} got ${resultsToCompare.length} result(s); need >=2 to compare, skipping (patched in llm_test_suite)`);
+ 			return;
+ 		}
+ 		const compareAssertion = resultsToCompare[0].testCase.assert?.find((a) => a.type === "select-best");
+@@ -7120,8 +7120,8 @@ var Evaluator = class {
+ 	}
+ 	async processMaxScoreAssertionForTest({ ciProgressReporter, compareCount, isWebUI, progressBarManager, prompts, runEvalOptions, testIdx }) {
+ 		const resultsToCompare = await this.getResultsToCompare(testIdx);
+-		if (resultsToCompare.length === 0) {
+-			logger.warn(`Expected results to be found for test index ${testIdx}`);
++		if (resultsToCompare.length < 2) {
++			logger.warn(`max-score for test index ${testIdx} got ${resultsToCompare.length} result(s); need >=2 to compare, skipping (patched in llm_test_suite)`);
+ 			return;
+ 		}
+ 		const maxScoreAssertion = resultsToCompare[0].testCase.assert?.find((a) => a.type === "max-score");
