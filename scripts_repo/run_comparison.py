@@ -818,6 +818,9 @@ def main(argv: list[str] | None = None) -> int:
     # report_provider_args. Plumb the config path (and the dev system prompt, when
     # set) through so the header can show which inputs produced this run.
     report = run_dir / f"report__{ts}.html"
+    # Raw-response CSV emitted alongside the HTML on every run, for eyeballing
+    # the models' answers (no scores) side by side.
+    responses_csv = run_dir / f"responses__{ts}.csv"
     report_cmd = [
         sys.executable,
         str(repo_root / "scripts_repo" / "compare_runs.py"),
@@ -826,6 +829,8 @@ def main(argv: list[str] | None = None) -> int:
         *report_provider_args(config),
         "--out",
         str(report),
+        "--csv",
+        str(responses_csv),
         "--config-path",
         str(config_path.resolve()),
     ]

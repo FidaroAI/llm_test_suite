@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import json
 import re
@@ -1315,6 +1316,105 @@ def render_html_n(rows, columns, drift, tolerance,
     )
 
 
+# --- raw-response CSV export -----------------------------------------------
+# A spreadsheet of the models' raw answers (no scores, no verdicts), one row per
+# test: column 1 the rendered prompt, then one column per provider. For eyeballing
+# how providers actually responded, side by side.
+
+# Reasoning delimiter, kept in sync with hooks/strip_before_triple_newline.py —
+# that hook is the source of truth applied to outputs before the live tests
+# assert. Duplicated here (rather than imported) because the hook lives outside
+# this package and importing it would need path manipulation.
+_REASONING_DELIMITER = "\n\n\n"
+
+
+def strip_reasoning(output):
+    """Drop a reasoning prefix from a model output.
+
+    Mirrors hooks/strip_before_triple_newline.py: everything up to and including
+    the first ``\\n\\n\\n`` is reasoning; the rest is the final answer. Non-string
+    outputs (e.g. an auto-parsed json_schema dict) are returned unchanged.
+    """
+    if not isinstance(output, str):
+        return output
+    idx = output.find(_REASONING_DELIMITER)
+    if idx == -1:
+        return output
+    return output[idx + len(_REASONING_DELIMITER):]
+
+
+def extract_responses(eval_json: dict, provider_label: str | None = None) -> dict:
+    """Map test identity -> {prompt, output, suite} for one provider.
+
+    ``output`` is the reasoning-stripped final answer; ``prompt`` is the rendered
+    user message (see :func:`_prompt_text`); ``suite`` groups the row. Scoped to
+    ``provider_label`` for the unified eval file; the first result per identity
+    wins (consistent with :func:`extract_request_info` / :func:`extract_cells`).
+    """
+    out: dict = {}
+    for result in eval_json.get("results", {}).get("results", []):
+        provider = result.get("provider") or {}
+        if provider_label is not None and provider.get("label") != provider_label:
+            continue
+        test_case = result.get("testCase") or {}
+        identity = _test_identity(result, test_case)
+        if identity in out:
+            continue
+        meta = test_case.get("metadata") or {}
+        raw_output = (result.get("response") or {}).get("output")
+        out[identity] = {
+            "prompt": _prompt_text((result.get("prompt") or {}).get("raw") or ""),
+            "output": strip_reasoning(raw_output) if raw_output is not None else "",
+            "suite": meta.get("suite") or NO_SUITE,
+        }
+    return out
+
+
+def _csv_cell(value) -> str:
+    """Coerce a response value to a CSV cell: None -> '', non-str -> str()."""
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
+
+
+def write_response_csv(per_provider: dict, ordered_keys: list, out_path) -> int:
+    """Write the response CSV from already-extracted per-provider maps.
+
+    ``per_provider`` maps provider key -> {identity: {prompt, output, suite}};
+    ``ordered_keys`` is the column order (baseline first). One row per test
+    identity (the union across providers), ordered by ``(suite, identity)``; the
+    prompt/suite are taken from the first column that ran the test. Returns the
+    number of data rows written.
+    """
+    meta: dict = {}  # identity -> (suite, prompt), first listed column wins
+    for key in ordered_keys:
+        for identity, rec in per_provider.get(key, {}).items():
+            meta.setdefault(identity, (rec.get("suite") or NO_SUITE, rec.get("prompt", "")))
+    order = sorted(meta, key=lambda i: (meta[i][0], i))
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["prompt"] + list(ordered_keys))
+        for identity in order:
+            _, prompt = meta[identity]
+            row = [prompt]
+            for key in ordered_keys:
+                rec = per_provider.get(key, {}).get(identity)
+                row.append(_csv_cell(rec.get("output") if rec else ""))
+            writer.writerow(row)
+    return len(order)
+
+
+def build_response_csv(eval_json: dict, columns: list, out_path) -> int:
+    """Write a response CSV from one unified eval file split by ``columns``.
+
+    Each :class:`ProviderColumn` is shown under its config key; its results are
+    selected by the provider label. Baseline first. Returns the row count.
+    """
+    per_provider = {c.key: extract_responses(eval_json, c.label) for c in columns}
+    return write_response_csv(per_provider, [c.key for c in columns], out_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -1340,6 +1440,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("report.html"),
         help="Output HTML path (default: report.html).",
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="Also write a CSV of the raw (reasoning-stripped) responses: one "
+        "row per test, column 1 the rendered prompt, then one column per "
+        "provider (baseline first). No scores or verdicts — for eyeballing the "
+        "answers side by side.",
     )
     parser.add_argument(
         "--ui-base-url",
@@ -1430,6 +1539,9 @@ def _main_n(args, eval_json, suites) -> int:
         ),
         encoding="utf-8",
     )
+    if args.csv:
+        n = build_response_csv(eval_json, columns, args.csv)
+        print(f"  {n} response rows -> {args.csv}")
     others = [c.key for c in columns if not c.is_baseline]
     rtab = summarize_rubric_table(rows, columns, args.tolerance)
     summary = " | ".join(
@@ -1477,6 +1589,13 @@ def main(argv: list[str] | None = None) -> int:
                     system_prompt_path=args.system_prompt_path),
         encoding="utf-8",
     )
+    if args.csv:
+        per_provider = {
+            "baseline": extract_responses(baseline_json, base_provider),
+            "candidate": extract_responses(candidate_json, cand_provider),
+        }
+        n = write_response_csv(per_provider, ["baseline", "candidate"], args.csv)
+        print(f"  {n} response rows -> {args.csv}")
     msg = (
         f"rubric: {counts['improved']} improved, {counts['regressed']} regressed, "
         f"{counts['within']} within, {counts['new']} new, {counts['removed']} removed"
