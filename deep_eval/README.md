@@ -121,6 +121,34 @@ JUDGE_MODEL=gpt-4o
 .venv/bin/python -m pytest tests/test_rubric.py -v -s   # -s prints the judge's reasoning
 ```
 
+## Reporting (scores, reasons, persisted runs)
+
+Bare `pytest` only gives pass/fail, because the tests use `assert_test()` (the
+pytest-assertion analog). For promptfoo-style reporting, use DeepEval's own
+runner instead — it's a pytest plugin that prints a per-metric table and, with
+`DEEPEVAL_RESULTS_FOLDER` set, writes a structured JSON report per run:
+
+```bash
+export DEEPEVAL_RESULTS_FOLDER=.results          # gitignored
+.venv/bin/deepeval test run tests/test_rubric.py -id "haiku-judge-run-1"
+```
+
+This prints a table (each metric's **score vs threshold**, pass/fail, and the
+judge's **reason**) and saves `.results/test_run_<timestamp>.json` containing,
+per test case: `input`, `actualOutput`, `success`, and a `metricsData` list with
+`score`, `threshold`, `reason`, `evaluationModel` (e.g.
+`bedrock:us.anthropic.claude-haiku-4-5-…`), `evaluationCost`, and `verboseLogs`
+(the judge's step-by-step). `-id` labels the run; the JSON is easy to diff,
+`jq`, or render to CSV/HTML.
+
+Useful flags: `-r N` (repeat each case N times — judge stability), `-n N`
+(parallel processes), `-c` (use cached results), `-d failing` (only show
+failures). A fully local workflow; nothing leaves the machine.
+
+> For a hosted dashboard (run history, diffing, charts) there's also Confident
+> AI via `deepeval login` — but that uploads prompts, outputs, and judge
+> reasoning to an external service, so it's off by default here.
+
 ## How the LLM-as-judge works here
 
 GEval normally scores by reading the judge's token **logprobs**, which only
@@ -135,4 +163,5 @@ structured output instead of having to parse JSON out of free text.
 - The live tests **skip with a clear reason** when the endpoint/judge isn't
   configured or reachable, so the suite stays green out of the box. In a real
   CI you'd likely let an unreachable endpoint fail loudly (see `tests/_live.py`).
-- `.env`, `.venv/`, and DeepEval's `.deepeval*` cache are gitignored.
+- `.env`, `.venv/`, DeepEval's `.deepeval*` cache, and the `.results/` report
+  folder are gitignored.

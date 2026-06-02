@@ -2,6 +2,8 @@
 .env
 .deepeval/
 .deepeval-cache.json
+# DEEPEVAL_RESULTS_FOLDER: per-run test_run_*.json reports
+.results/
 __pycache__/
 *.pyc
 .pytest_cache/
