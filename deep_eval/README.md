@@ -93,7 +93,22 @@ ANTHROPIC_API_KEY=sk-ant-...
 JUDGE_MODEL=claude-sonnet-4-6
 ```
 
-Or any OpenAI-compatible judge (e.g. OpenAI, or a Bedrock OpenAI-compatible URL):
+Or **native AWS Bedrock** — the same Claude models as the parent promptfoo suite
+(`bedrock:…` providers). Auth is a Bedrock API key (bearer token) or the standard
+AWS credential chain:
+
+```bash
+JUDGE_PROVIDER=bedrock
+AWS_BEARER_TOKEN_BEDROCK=...          # or AWS_ACCESS_KEY_ID/SECRET, or AWS_PROFILE
+JUDGE_REGION=us-east-1               # optional; falls back to AWS_REGION, then us-east-1
+JUDGE_MODEL=us.anthropic.claude-haiku-4-5-20251001-v1:0
+```
+
+> Use `JUDGE_PROVIDER=bedrock` (not `openai`) to judge with a Bedrock-hosted
+> Claude. Bedrock's OpenAI-compatible `/openai/v1` endpoint only serves the
+> `openai.gpt-oss-*` models and returns `model_not_found` for Claude model IDs.
+
+Or any OpenAI-compatible judge (e.g. OpenAI itself):
 
 ```bash
 JUDGE_PROVIDER=openai

@@ -39,23 +39,40 @@ class ModelUnderTestConfig:
         return ", ".join(gaps)
 
 
+def _aws_chain_present() -> bool:
+    """Heuristic: are AWS SigV4 credentials available via env/profile?
+
+    We can't see credentials in ~/.aws or instance metadata, so this only checks
+    the env vars — enough to keep the live test's skip behaviour tidy out of the
+    box without erroring when no AWS auth is configured at all.
+    """
+    return bool(_first("AWS_ACCESS_KEY_ID", "AWS_PROFILE"))
+
+
 @dataclass(frozen=True)
 class JudgeConfig:
-    provider: str          # "anthropic" | "openai"
+    provider: str          # "anthropic" | "openai" | "bedrock"
     model: str
     api_key: str | None
     base_url: str | None   # only for the openai-compatible provider
+    region: str | None = None   # only for the bedrock provider
 
     @property
     def is_configured(self) -> bool:
         if self.provider == "anthropic":
             return bool(self.api_key)
+        if self.provider == "bedrock":
+            # AnthropicBedrock authenticates with a Bedrock API key (bearer token,
+            # our `api_key`) OR the standard AWS SigV4 credential chain.
+            return bool(self.api_key) or _aws_chain_present()
         return bool(self.api_key and self.base_url)
 
     @property
     def missing(self) -> str:
         if self.provider == "anthropic":
             return "ANTHROPIC_API_KEY"
+        if self.provider == "bedrock":
+            return "AWS_BEARER_TOKEN_BEDROCK or AWS credentials (AWS_ACCESS_KEY_ID / AWS_PROFILE)"
         return "JUDGE_API_KEY and JUDGE_BASE_URL"
 
 
@@ -76,6 +93,19 @@ def judge_config() -> JudgeConfig:
             model=_first("JUDGE_MODEL", default="claude-sonnet-4-6"),
             api_key=_first("ANTHROPIC_API_KEY"),
             base_url=None,
+        )
+    if provider == "bedrock":
+        # Native Bedrock (not the OpenAI-compatible /openai/v1 shim, which only
+        # serves the gpt-oss models). Defaults to the same Haiku 4.5 cross-region
+        # inference profile the parent promptfoo suite judges with.
+        return JudgeConfig(
+            provider="bedrock",
+            model=_first("JUDGE_MODEL", default="us.anthropic.claude-haiku-4-5-20251001-v1:0"),
+            # Bearer token (AWS_BEARER_TOKEN_BEDROCK); None falls through to the
+            # AWS SigV4 credential chain inside AnthropicBedrock.
+            api_key=_first("JUDGE_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"),
+            base_url=None,
+            region=_first("JUDGE_REGION", "AWS_REGION", default="us-east-1"),
         )
     return JudgeConfig(
         provider="openai",

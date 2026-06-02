@@ -6,7 +6,7 @@ for a structured `{score, reason}` object. We satisfy that by returning a popula
 pydantic instance via `instructor`, which is far more robust than parsing JSON
 out of free text.
 
-Backends: Anthropic (default) or any OpenAI-compatible endpoint.
+Backends: Anthropic (default), native AWS Bedrock, or any OpenAI-compatible endpoint.
 """
 from __future__ import annotations
 
@@ -30,7 +30,14 @@ class CloudJudge(DeepEvalBaseLLM):
     # DeepEvalBaseLLM.__init__ calls this; build both sync + async clients.
     def load_model(self):
         cfg = self._cfg
-        if cfg.provider == "anthropic":
+        if cfg.provider == "bedrock":
+            from anthropic import AnthropicBedrock, AsyncAnthropicBedrock
+
+            # api_key is the Bedrock bearer token (AWS_BEARER_TOKEN_BEDROCK); when
+            # None, AnthropicBedrock falls back to the standard AWS SigV4 chain.
+            self._raw_sync = AnthropicBedrock(aws_region=cfg.region, api_key=cfg.api_key)
+            self._raw_async = AsyncAnthropicBedrock(aws_region=cfg.region, api_key=cfg.api_key)
+        elif cfg.provider == "anthropic":
             from anthropic import Anthropic, AsyncAnthropic
 
             self._raw_sync = Anthropic(api_key=cfg.api_key)
@@ -41,10 +48,11 @@ class CloudJudge(DeepEvalBaseLLM):
             self._raw_sync = OpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
             self._raw_async = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
 
+        # Bedrock speaks the Anthropic Messages API, so it wraps the same way.
         from_fn = (
-            instructor.from_anthropic
-            if cfg.provider == "anthropic"
-            else instructor.from_openai
+            instructor.from_openai
+            if cfg.provider == "openai"
+            else instructor.from_anthropic
         )
         self._sync = from_fn(self._raw_sync)
         self._async = from_fn(self._raw_async)
@@ -76,7 +84,7 @@ class CloudJudge(DeepEvalBaseLLM):
 
     # --- plain-text fallbacks (rarely used; GEval almost always passes a schema)
     def _raw_text(self, prompt: str) -> str:
-        if self._cfg.provider == "anthropic":
+        if self._cfg.provider in ("anthropic", "bedrock"):
             msg = self._raw_sync.messages.create(
                 model=self._cfg.model,
                 max_tokens=2048,
@@ -90,7 +98,7 @@ class CloudJudge(DeepEvalBaseLLM):
         return r.choices[0].message.content or ""
 
     async def _a_raw_text(self, prompt: str) -> str:
-        if self._cfg.provider == "anthropic":
+        if self._cfg.provider in ("anthropic", "bedrock"):
             msg = await self._raw_async.messages.create(
                 model=self._cfg.model,
                 max_tokens=2048,
