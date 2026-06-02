@@ -1,4 +1,26 @@
 {
+  "providers-under-test": {
+    "fidaro-prod": true,
+    "fidaro-dev": false,
+    "venice": true
+  },
+  "baseline-provider": "fidaro-prod",
+  "provider-options": {
+    "fidaro-prod": {
+      "model": "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
+      "temperature": 0.7,
+      "max_tokens": 100000
+    },
+    "fidaro-dev": {
+      "model": "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
+      "temperature": 0.7,
+      "max_tokens": 100000
+    },
+    "venice": {
+      "model": "kimi-k2-6",
+      "web_search": "on"
+    }
+  },
   "vllm-prod-url": "https://3bae0d639fdab82b8ea3bff4d8ff1515d38455e5-8000.dstack-pha-use1.phala.network/v1",
   "vllm-dev-url": "https://099098730db24cb5c3d6d7e24bf97c769f1be1c4-8000.dstack-pha-use1.phala.network/v1",
   "system-prompt-file": "system_prompts/fidaro_prod.md",
@@ -14,16 +36,6 @@
     "reasoning-parser": "gemma4",
     "enable-auto-tool-choice": true,
     "tool-call-parser": "gemma4"
-  },
-  "prod-provider-options": {
-    "model": "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
-    "temperature": 0.7,
-    "max_tokens": 100000
-  },
-  "dev-provider-options": {
-    "model": "Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
-    "temperature": 0.7,
-    "max_tokens": 100000
   },
   "promptfoo-filters": {},
   "suite-generation-config": {

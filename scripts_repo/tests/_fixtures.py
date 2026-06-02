@@ -82,6 +82,35 @@ def deterministic_result(
     }
 
 
+def response_result(
+    provider_label,
+    description,
+    suite,
+    output,
+    prompt_raw=None,
+    prompt_label="user_only",
+):
+    """Build one result entry carrying a raw ``response.output`` (and prompt.raw).
+
+    Used by the response-CSV tests, which read the raw model output and the
+    rendered prompt rather than graded assertions. ``output`` is stored verbatim
+    (pre-transform, reasoning prefix and all); ``prompt_raw`` is the promptfoo
+    ``prompt.raw`` (typically a JSON chat-messages array string).
+    """
+    return {
+        "provider": {"id": "x", "label": provider_label},
+        "prompt": {"label": prompt_label, "raw": prompt_raw if prompt_raw is not None else ""},
+        "vars": {"user": "..."},
+        "response": {"output": output},
+        "testCase": {
+            "description": description,
+            "vars": {"user": "..."},
+            "assert": [],
+            "metadata": {"suite": suite} if suite is not None else {},
+        },
+    }
+
+
 def make_eval_json(results, eval_id="eval-test"):
     """Wrap a list of result entries in the eval-result-JSON envelope."""
     return {"evalId": eval_id, "results": {"results": list(results)}}

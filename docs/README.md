@@ -1,7 +1,8 @@
 # Fidaro Model Eval Suite
 
 A [promptfoo](https://www.promptfoo.dev)-powered suite for comparing production
-Fidaro against dev Fidaro and [coming soon] other 3rd parties.
+Fidaro against dev Fidaro and third-party competitors (e.g. Venice). See
+[Comparison runs](#comparison-runs-config-driven).
 
 ## Setup / Quick Start
 
@@ -99,68 +100,118 @@ ordinary runs emit zero stock tests; the wrapper enables it via
 
 ## Comparison runs (config-driven)
 
-[run_comparison.py](../scripts_repo/run_comparison.py) drives a whole prod-vs-dev
-comparison from a single config file, so gateway/model configuration and the test
-run stay together. Put a named config in `comparisons/` (e.g.
-`comparisons/prod_vs_dev_gemma.json`; see [example.json](../comparisons/example.json))
-and run:
+[run_comparison.py](../scripts_repo/run_comparison.py) drives a whole comparison
+from a single config file, so gateway/model configuration and the test run stay
+together. It compares an **arbitrary enabled set of providers** — our prod and dev
+Fidaro gateways plus third-party competitors (first one: Venice) — against one
+designated **baseline**, in a single promptfoo eval. Put a named config in
+`comparisons/` (see [example.json](../comparisons/example.json)) and run:
 
 ```
-python scripts_repo/run_comparison.py comparisons/prod_vs_dev_gemma.json
+python scripts_repo/run_comparison.py comparisons/prod_vs_venice.json
 ```
 
-Each invocation writes its outputs (prod/dev results, the comparison report,
-the rendered compose) to a fresh per-run subdirectory
+Each invocation writes its outputs (the eval result, the comparison report, any
+rendered compose) to a fresh per-run subdirectory
 `comparisons/<name>/run_<YYYYMMDD-HHMMSS>/`, so runs never overwrite each other.
 The vLLM-options cache that drives the redeploy decision lives one level up at
 `comparisons/<name>/` so it persists across runs. These directories are
-gitignored; only the config JSONs are tracked. The script validates the config,
-optionally redeploys the Phala dev CVM when `vllm-options` change (after
-confirmation — see [deploy_phala.py](../scripts_repo/deploy_phala.py)), starts
-both plaintext gateways (mounting a dev system prompt if given), runs **one**
-eval against both providers (always `--no-cache`; see below), and opens the
-report. It does **not** freeze a baseline. `BRAVE_API_KEY`
-must be in the environment; a Phala redeploy also needs `PHALA_DOCKER_COMPOSE_FILE`
-set and `.env.phala` in the repo root. Full design:
+gitignored; only the config JSONs are tracked. It does **not** freeze a baseline.
+Full design (multi-provider):
+[the spec](superpowers/specs/2026-06-01-multi-provider-comparison-design.md);
+original orchestrator:
 [the spec](superpowers/specs/2026-05-22-comparison-orchestrator-design.md).
 
-Each side of a comparison runs through a **dynamic provider**
-(`fidaro_plaintext_gateway_phala_dynamic_{prod,dev}.yaml`) rather than the static
-`fidaro_plaintext_gateway_phala_{prod,dev}.yaml`. The static providers freeze their
-`openai:chat` model/temperature/max_tokens and so can't reflect a gateway the run
-has reconfigured. The dynamic ones template those values from
-`COMPARISON_{PROD,DEV}_{MODEL,TEMPERATURE,MAX_TOKENS}` env vars (promptfoo renders
-`{{ env.* }}` in a provider's id/config at load time); `run_comparison.py` sets
-them per run from the comparison config's `prod-provider-options` /
-`dev-provider-options` (`{model, temperature, max_tokens}`). Putting the model in
-the provider id keeps promptfoo's request-body cache key model-aware, so a cached
-result can't leak across models. For dev the `model` must equal `vllm-options.model`
-(the model the redeploy serves); prod's `model` is whatever prod Phala runs. The
-static providers are kept for ad-hoc runs. See
-[example.json](../comparisons/example.json).
+### Which providers run
 
-Both providers run in a **single** promptfoo eval (filtered to the two dynamic
-providers), not two separate passes. `compare_runs.py` then splits that one
-result file into the prod (baseline) and dev (candidate) sides via
-`--baseline-provider` / `--candidate-provider` (the classic two-file invocation
-still works for frozen baselines). Running both in one eval means a head-to-head
-assertion such as `select-best` can compare prod and dev directly. The trade-off:
-a single eval has one global cache setting, and a dev redeploy can change the
-gateway server-side (system prompt / vLLM options) in ways promptfoo's cache key
-can't see, so the unified run is always `--no-cache` — correctness over the prod
-cache reuse the old two-pass design allowed.
+The config's top-level `providers-under-test` is a `{key: bool}` map, and
+`baseline-provider` names one of the **enabled** keys (validation errors
+otherwise). Each enabled key needs an entry in `provider-options`; all option
+fields are optional and vary per provider:
 
-Because both sides share one eval, `run_comparison.py` automatically grades a
-**`select-best` head-to-head** on every test: it sets `COMPARISON_SELECT_BEST=1`,
-which makes `tests/classification.py:augment` append a `select-best` assertion
-(graded by the same Bedrock judge, one extra grader call per test — no extra
-generation eval). promptfoo's built-in select-best template never sees the
-prompt, so the assertion ships a custom `rubricPrompt` that injects the user's
-question via `{{ user }}`. The report's new **best** column names the winner
-(`prod`/`candidate`) per test; the verdict is kept out of the rubric/deterministic
-tallies. Single-provider runs (`fidaro.sh`/CI) leave the env var unset and are
-unaffected. Design notes:
+```jsonc
+"providers-under-test": { "fidaro-prod": true, "fidaro-dev": false, "venice": true },
+"baseline-provider": "fidaro-prod",
+"provider-options": {
+  "fidaro-prod": { "model": "Qwen/...", "temperature": 0.7, "max_tokens": 100000 },
+  "venice":      { "model": "kimi-k2-6", "web_search": "on" }
+}
+```
+
+The known providers and *how* each runs (gateway vs direct API, ports, env prefix,
+promptfoo label) live in one place:
+[providers_registry.py](../scripts_repo/providers_registry.py). Adding a competitor
+is one registry row + one provider YAML. There are two **kinds**:
+
+* **gateway** (`fidaro-prod`, `fidaro-dev`) — routed through a locally-started
+  plaintext Docker gateway (ports 8082/8084) and the shared web-fetch sidecar.
+  `run_comparison.py` starts a gateway only for the *enabled* gateway providers,
+  so a venice-vs-prod run stands up one gateway, not two. `BRAVE_API_KEY` is
+  required only when at least one gateway provider is enabled. A Phala dev redeploy
+  happens only when `fidaro-dev` is enabled **and** `vllm-options` is set (then
+  `phala-dev-instance-id` must be whitelisted, and `PHALA_DOCKER_COMPOSE_FILE` +
+  `.env.phala` must exist).
+* **api** (`venice`) — a direct external API via a **custom Python provider**
+  ([venice_provider.py](../providers/venice_provider.py)); **no** gateway, sidecar,
+  or redeploy. Requires its credential in the environment (`VENICE_INFERENCE_KEY`).
+  Venice's web search is set per run from `provider-options.venice.web_search`
+  (default `off`). The custom provider exists because Venice returns its
+  chain-of-thought in a separate `reasoning_content` field: the provider keeps the
+  full reasoning (and web-search citations) under result `metadata` for human
+  analysis, and formats the graded output as `reasoning + "\n\n\n" + answer` — the
+  same shape the Fidaro gateway emits — so the shared strip transform
+  ([strip_before_triple_newline.py](../hooks/strip_before_triple_newline.py))
+  isolates the answer for graders. Without this, promptfoo's generic `openai:chat`
+  provider would merge the reasoning into the graded text and it could not be
+  reliably stripped afterwards.
+
+Every provider reads its model (and, for the gateways, temperature/max_tokens, and
+for Venice its web-search flag) from per-provider `COMPARISON_<PREFIX>_*` env vars
+that `run_comparison.py` sets per run from `provider-options` (promptfoo renders
+`{{ env.* }}` in a provider's config at load time) — the Fidaro gateways via their
+dynamic YAMLs, Venice via the custom provider's config block. For `fidaro-dev`, its
+`model` must equal `vllm-options.model` (the model the redeploy serves) when a
+redeploy is configured.
+
+### One eval, one report
+
+All enabled providers run in a **single** promptfoo eval (filtered to their dynamic
+labels via `providers_filter`), always `--no-cache` (a single eval has one global
+cache setting, and a dev redeploy can change the gateway server-side in ways
+promptfoo's cache key can't see). `compare_runs.py` then splits that one result
+file by provider label into report columns: `run_comparison.py` passes
+`--baseline-provider-col key=label` for the baseline and `--provider-col key=label`
+for each other provider (the classic two-file `--baseline-provider`/
+`--candidate-provider` invocation still works for frozen baselines).
+
+The report shows, per assertion: the **baseline** column (tagged `(baseline)`,
+named by its config key), one column per other provider, one **Δ** column per
+non-baseline provider (`other − baseline`, rubric scores only), and an N-way
+**best** winner. There is no `status` column. The summary at the top is **tabular**
+— one row per non-baseline provider giving improved/regressed/within/new/removed
+(rubric) and pass/fail transitions (deterministic) vs the baseline, plus a best
+tally. Per-suite summaries use the same shape.
+
+Because the providers share one eval, `run_comparison.py` grades a **`select-best`
+head-to-head** whenever ≥2 providers run: it sets `COMPARISON_SELECT_BEST=1`, which
+makes `tests/classification.py:augment` append a `select-best` assertion (graded by
+the same Bedrock judge, one extra grader call per test). The judge sees all N
+providers' answers and picks one winner; the **best** column names the winning
+provider key. promptfoo's built-in template never sees the prompt, so the assertion
+ships a custom `rubricPrompt` injecting the user's question via `{{ user }}`. The
+verdict is kept out of the rubric/deterministic tallies. Single-provider runs
+(`fidaro.sh`/CI) leave the env var unset and are unaffected. Design notes:
 [the spec](superpowers/specs/2026-05-27-select-best-comparison-design.md).
+
+> **Patched promptfoo behaviour:** stock promptfoo's `matchesSelectBest` throws an
+> *uncatchable* invariant ("must have at least two outputs to compare") if any test
+> has fewer than two provider outputs — e.g. when one provider errors/drops a result
+> under load. That kills the **entire** eval (no results written), which is brittle
+> for multi-provider runs against external APIs. We patch it (via pnpm
+> `patchedDependencies` → [patches/promptfoo@0.121.12.patch](../patches/promptfoo@0.121.12.patch))
+> to instead mark that test's head-to-head as a graceful failure, so the run
+> completes and the missing side shows as "undecided" in the report. Re-validate the
+> patch whenever promptfoo is upgraded.
 
 ## Project Structure
 
@@ -311,8 +362,11 @@ python scripts_repo/classify_tests.py --force              # re-classify everyth
   prod access (if possible).
 * Iterate on the choice of model. Similar challenge to the previous point.
 * Configure a provider to run Perplexity or Venice and compare against Fidaro.
-  * Via their APIs — might not match the quality of their web apps.
-  * Via e.g. Playwright automation to get the full web experience.
+  * ~~Via their APIs~~ Done for Venice — see [Comparison runs](#comparison-runs-config-driven)
+    and the [provider registry](../scripts_repo/providers_registry.py). Add Perplexity
+    the same way (one registry row + one provider YAML). Note: an API might not match
+    the quality of a vendor's web app.
+  * Via e.g. Playwright automation to get the full web experience (still a TODO).
 * IDEA: to speed up tests, maybe use Bedrock with the same model as us. Tool calls will
   be tricky and might need a small client to handle them. We could test quality without
   tool calls, but results would be limited.

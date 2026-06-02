@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import json
 import re
@@ -428,6 +429,170 @@ def _classify_deterministic(baseline_passed: bool, candidate_passed: bool) -> st
     return "improved" if candidate_passed else "regressed"
 
 
+# --- N-provider model ------------------------------------------------------
+# The pairwise CellDiff above compares exactly two sides. The model below
+# generalizes that to an arbitrary set of providers with one designated
+# baseline: one Row per CellKey holding every provider's value, plus a delta of
+# each non-baseline provider against the baseline. This is what the multi-column
+# report (compare against prod or dev, plus competitors like Venice) is built on.
+
+
+@dataclass(frozen=True)
+class ProviderColumn:
+    key: str        # config key; shown as the column header
+    label: str      # promptfoo provider label; used to split the unified eval file
+    is_baseline: bool
+
+
+@dataclass
+class Row:
+    key: "CellKey"
+    suite: str
+    kind: str                      # "rubric" | "deterministic" | "best"
+    metric: str | None
+    assertion_value: str
+    assertion_type: str
+    values: dict                   # provider key -> score (rubric) / pass (det) / None
+    deltas: dict                   # non-baseline key -> (other - baseline) | None
+    best: str | None               # winning provider key, for kind == "best"
+    search: str = ""
+
+
+def best_winner_among(per_provider: dict) -> str | None:
+    """Provider key whose select-best component passed, or None if not exactly one.
+
+    ``per_provider`` maps provider key -> Cell (or None). In an N-way select-best
+    exactly one provider's component passes; ambiguity (none or several) is
+    reported as undecided (None).
+    """
+    winners = [k for k, c in per_provider.items() if c is not None and c.passed is True]
+    return winners[0] if len(winners) == 1 else None
+
+
+def build_rows(cells_by_provider: dict, columns: list) -> list:
+    """Join per-provider cell maps into one Row per CellKey.
+
+    ``cells_by_provider`` maps provider key -> {CellKey: Cell}; ``columns`` is the
+    ordered ProviderColumn list (baseline first). Rubric deltas are computed as
+    ``other - baseline`` when both sides have a rubric score; deterministic/best
+    rows carry no deltas. A row is emitted for any CellKey present for at least one
+    provider (so a test only one provider ran still appears).
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    all_keys: set = set()
+    for m in cells_by_provider.values():
+        all_keys |= set(m)
+    rows: list = []
+    for key in sorted(all_keys, key=lambda k: (k.test, k.prompt, k.assertion)):
+        per_provider = {c.key: cells_by_provider.get(c.key, {}).get(key) for c in columns}
+        present = next((c for c in per_provider.values() if c is not None), None)
+        if present is None:
+            continue
+        kind = present.kind
+        values: dict = {}
+        for ckey, cell in per_provider.items():
+            if cell is None:
+                values[ckey] = None
+            elif kind == "rubric":
+                values[ckey] = cell.score
+            else:  # deterministic or best
+                values[ckey] = cell.passed
+        deltas: dict = {}
+        if kind == "rubric":
+            base_cell = per_provider.get(baseline)
+            for o in others:
+                oc = per_provider.get(o)
+                deltas[o] = (
+                    oc.score - base_cell.score
+                    if (oc is not None and base_cell is not None)
+                    else None
+                )
+        best = best_winner_among(per_provider) if kind == "best" else None
+        rows.append(
+            Row(
+                key=key,
+                suite=present.suite,
+                kind=kind,
+                metric=present.metric,
+                assertion_value=present.assertion_value,
+                assertion_type=present.assertion_type,
+                values=values,
+                deltas=deltas,
+                best=best,
+                search=present.search,
+            )
+        )
+    return rows
+
+
+def summarize_rubric_table(rows: list, columns: list, tolerance: float) -> dict:
+    """Per-non-baseline-provider rubric tally vs baseline.
+
+    Returns ``{provider_key: {improved, regressed, within, new, removed}}``. A cell
+    present for the other provider but not the baseline counts as ``new`` (and the
+    reverse as ``removed``); both present are classified by the delta band.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    out = {
+        o: {"improved": 0, "regressed": 0, "within": 0, "new": 0, "removed": 0}
+        for o in others
+    }
+    for row in rows:
+        if row.kind != "rubric":
+            continue
+        b = row.values.get(baseline)
+        for o in others:
+            v = row.values.get(o)
+            if b is None and v is not None:
+                out[o]["new"] += 1
+            elif b is not None and v is None:
+                out[o]["removed"] += 1
+            elif b is not None and v is not None:
+                out[o][classify(v - b, tolerance)] += 1
+    return out
+
+
+def summarize_deterministic_table(rows: list, columns: list) -> dict:
+    """Per-non-baseline-provider deterministic tally vs baseline.
+
+    ``new_passes`` / ``new_fails`` count pass/fail transitions relative to the
+    baseline among tests both ran; ``total_passes`` / ``total_fails`` count the
+    other provider's own verdicts.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    out = {
+        o: {"new_passes": 0, "new_fails": 0, "total_passes": 0, "total_fails": 0}
+        for o in others
+    }
+    for row in rows:
+        if row.kind != "deterministic":
+            continue
+        b = row.values.get(baseline)
+        for o in others:
+            v = row.values.get(o)
+            if v is True:
+                out[o]["total_passes"] += 1
+            elif v is False:
+                out[o]["total_fails"] += 1
+            if b is not None and v is not None and b != v:
+                out[o]["new_passes" if v else "new_fails"] += 1
+    return out
+
+
+def summarize_best_table(rows: list, columns: list) -> dict:
+    """Wins per provider key across best rows (+ ``undecided``)."""
+    out = {c.key: 0 for c in columns}
+    out["undecided"] = 0
+    for row in rows:
+        if row.kind != "best":
+            continue
+        out[row.best if row.best in out else "undecided"] += 1
+    return out
+
+
 def diff_cells(baseline_cells: dict, candidate_cells: dict, tolerance: float) -> list:
     """Join baseline and candidate cells by key; classify every cell."""
     diffs: list = []
@@ -568,6 +733,16 @@ tr.test-b td { background: #ffffff; }
             cursor: pointer; color: #aaa; vertical-align: middle; line-height: 1; }
 .copy-btn:hover { color: #1a1a1a; }
 .copy-btn.copied { color: #0a7d28; }
+/* N-provider report: deltas are coloured by their own band (there is no status
+   column), and the summary tables size to content rather than full width. */
+td.delta-improved { color: #0a7d28; font-weight: 600; }
+td.delta-regressed { color: #c0341d; font-weight: 600; }
+td.delta-within { color: #888; }
+.summary table, .suite-summary table { width: auto; margin: .25rem 1rem .75rem 0;
+            display: inline-table; vertical-align: top; }
+.summary h4, .suite-summary h4 { margin: .6rem 0 .15rem; font-size: .9rem;
+            color: #555; }
+.col-baseline { font-weight: 600; }
 """
 
 
@@ -874,6 +1049,701 @@ def render_html(diffs: list, drift, tolerance: float,
     )
 
 
+# --- N-provider report -----------------------------------------------------
+
+
+def parse_provider_col_args(baseline: str, others: list) -> list:
+    """Turn ``key=label`` CLI args into ordered ProviderColumns (baseline first)."""
+
+    def split(s):
+        key, _, label = s.partition("=")
+        return key, label
+
+    bkey, blabel = split(baseline)
+    cols = [ProviderColumn(bkey, blabel, is_baseline=True)]
+    for o in others:
+        k, lbl = split(o)
+        cols.append(ProviderColumn(k, lbl, is_baseline=False))
+    return cols
+
+
+def _drift_n(cells_by_provider: dict, columns: list):
+    """Drift between the baseline and the union of the other providers.
+
+    Returns ``(missing_from_others, only_in_others)``: baseline tests no other
+    provider ran, and tests some other provider ran but the baseline did not.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    base_tests = {k.test for k in cells_by_provider.get(baseline, {})}
+    other_tests: set = set()
+    for o in others:
+        other_tests |= {k.test for k in cells_by_provider.get(o, {})}
+    return sorted(base_tests - other_tests), sorted(other_tests - base_tests)
+
+
+def _eval_header_n(columns, eval_ids, base_url, config_path=None,
+                   system_prompt_path=None) -> str:
+    """Header naming each provider column's eval (and the run's config/prompt)."""
+
+    def prov_row(col):
+        eval_id = (eval_ids or {}).get(col.key)
+        label = col.key + (" (baseline)" if col.is_baseline else "")
+        if eval_id:
+            href = html.escape(f"{base_url}/eval/{eval_id}", quote=True)
+            value = (f'<a href="{href}" target="_blank" rel="noopener">'
+                     f"{html.escape(eval_id)}</a>")
+        else:
+            value = '<span class="muted">(unknown)</span>'
+        return f'<div><span class="evlabel">{html.escape(label)}</span> {value}</div>'
+
+    def file_row(label, path):
+        absolute = str(Path(path).resolve())
+        href = html.escape(f"file://{absolute}", quote=True)
+        return (f'<div><span class="evlabel">{label}</span> '
+                f'<a href="{href}" target="_blank" rel="noopener">'
+                f'{html.escape(absolute)}</a></div>')
+
+    parts = [prov_row(c) for c in columns]
+    if config_path:
+        parts.append(file_row("Config", config_path))
+    if system_prompt_path:
+        parts.append(file_row("System prompt", system_prompt_path))
+    return f'<div class="evals">{"".join(parts)}</div>'
+
+
+def _delta_td(delta, tolerance) -> str:
+    """A delta cell coloured by its band (improved/regressed/within)."""
+    if delta is None:
+        return '<td class="num delta">—</td>'
+    cls = classify(delta, tolerance)  # improved | regressed | within
+    return f'<td class="num delta delta-{cls}">{_fmt_delta(delta)}</td>'
+
+
+def _summary_table(title, header_cells, body_rows) -> str:
+    return (f"<h4>{title}</h4><table><thead><tr>{header_cells}</tr></thead>"
+            f"<tbody>{body_rows}</tbody></table>")
+
+
+def _summary_tables_html(rows, columns, tolerance, css_class) -> str:
+    """Per-non-baseline-provider rubric / deterministic / best summary tables.
+
+    A kind's table appears only when at least one row of that kind is present.
+    """
+    baseline = next(c.key for c in columns if c.is_baseline)
+    others = [c.key for c in columns if not c.is_baseline]
+    blocks = []
+
+    if any(r.kind == "rubric" for r in rows):
+        t = summarize_rubric_table(rows, columns, tolerance)
+        head = (f"<th>vs {html.escape(baseline)}</th><th>improved</th>"
+                f"<th>regressed</th><th>within &plusmn;{tolerance:g}</th>"
+                "<th>new</th><th>removed</th>")
+        body = "".join(
+            f"<tr><td>{html.escape(o)}</td>"
+            f"<td class='num'>{t[o]['improved']}</td>"
+            f"<td class='num'>{t[o]['regressed']}</td>"
+            f"<td class='num'>{t[o]['within']}</td>"
+            f"<td class='num'>{t[o]['new']}</td>"
+            f"<td class='num'>{t[o]['removed']}</td></tr>"
+            for o in others)
+        blocks.append(_summary_table("Rubric", head, body))
+
+    if any(r.kind == "deterministic" for r in rows):
+        t = summarize_deterministic_table(rows, columns)
+        head = (f"<th>vs {html.escape(baseline)}</th><th>new passes</th>"
+                "<th>new fails</th><th>total passes</th><th>total fails</th>")
+        body = "".join(
+            f"<tr><td>{html.escape(o)}</td>"
+            f"<td class='num'>{t[o]['new_passes']}</td>"
+            f"<td class='num'>{t[o]['new_fails']}</td>"
+            f"<td class='num'>{t[o]['total_passes']}</td>"
+            f"<td class='num'>{t[o]['total_fails']}</td></tr>"
+            for o in others)
+        blocks.append(_summary_table("Deterministic", head, body))
+
+    if any(r.kind == "best" for r in rows):
+        t = summarize_best_table(rows, columns)
+        head = "".join(f"<th>{html.escape(c.key)}</th>" for c in columns) \
+            + "<th>undecided</th>"
+        body = ("<tr>"
+                + "".join(f"<td class='num'>{t[c.key]}</td>" for c in columns)
+                + f"<td class='num'>{t['undecided']}</td></tr>")
+        blocks.append(_summary_table("Best (head-to-head)", head, body))
+
+    return f'<div class="{css_class}">{"".join(blocks)}</div>'
+
+
+def _row_sort_key(row, others):
+    # Worst (most negative) delta across non-baseline providers first; rows with
+    # no numeric delta (deterministic/best) sort after.
+    ds = [row.deltas[o] for o in others if row.deltas.get(o) is not None]
+    return (0, min(ds)) if ds else (1, 0.0)
+
+
+def render_html_n(rows, columns, drift, tolerance,
+                  eval_ids=None, ui_base_url=DEFAULT_UI_BASE_URL,
+                  errored=None, curls=None, config_path=None,
+                  system_prompt_path=None) -> str:
+    """Render the N-provider HTML report.
+
+    Columns: test, assertion type, assertion, metric, one value column per
+    provider (baseline first, tagged), one delta column per non-baseline provider
+    (other - baseline; rubric only), and an N-way ``best`` winner. There is no
+    ``status`` column. ``eval_ids`` / ``errored`` / ``curls`` are keyed by provider
+    key; in a unified run every provider shares one eval id. ``drift`` is
+    ``(missing_from_others, only_in_others)`` from :func:`_drift_n`.
+    """
+    eval_ids = eval_ids or {}
+    errored = errored or {}
+    curls = curls or {}
+    others = [c for c in columns if not c.is_baseline]
+
+    aggregate = _summary_tables_html(rows, columns, tolerance, "summary")
+
+    missing, extra = drift
+    drift_html = ""
+    if missing or extra:
+        parts = []
+        if missing:
+            parts.append("only the baseline ran: "
+                         + ", ".join(html.escape(t) for t in missing))
+        if extra:
+            parts.append("baseline did not run: "
+                         + ", ".join(html.escape(t) for t in extra))
+        drift_html = f'<div class="drift">⚠ config drift — {"; ".join(parts)}</div>'
+
+    def value_cell(col, row):
+        return _cell_td(
+            row.kind, row.values.get(col.key), eval_ids.get(col.key), row.search,
+            ui_base_url, row.key.test in errored.get(col.key, set()),
+            curls.get(col.key, {}).get(row.key.test, ""),
+        )
+
+    # Dynamic column headers: a value column per provider, then a delta per other.
+    value_headers = "".join(
+        f'<th class="{"col-baseline" if c.is_baseline else ""}">'
+        f'{html.escape(c.key)}{" (baseline)" if c.is_baseline else ""}</th>'
+        for c in columns)
+    delta_headers = "".join(f"<th>&Delta; {html.escape(c.key)}</th>" for c in others)
+    thead = ("<th>test</th><th>assertion type</th><th>assertion</th><th>metric</th>"
+             + value_headers + delta_headers + "<th>best</th>")
+    n_value = len(columns)
+    n_delta = len(others)
+
+    # Group rows by suite (first-seen order), then by test.
+    suites: list = []
+    grouped: dict = {}
+    for r in rows:
+        if r.suite not in grouped:
+            grouped[r.suite] = []
+            suites.append(r.suite)
+        grouped[r.suite].append(r)
+
+    sections = []
+    parity_counter = 0
+    for suite in suites:
+        test_groups: dict = {}
+        group_order: list = []
+        for r in grouped[suite]:
+            gkey = (r.key.test, r.key.prompt)
+            if gkey not in test_groups:
+                test_groups[gkey] = []
+                group_order.append(gkey)
+            test_groups[gkey].append(r)
+        group_order.sort(
+            key=lambda gk: min(
+                (_row_sort_key(r, [c.key for c in others]) for r in test_groups[gk]),
+                default=(1, 0.0),
+            )
+        )
+
+        body_rows = []
+        for gkey in group_order:
+            parity = "a" if parity_counter % 2 == 0 else "b"
+            parity_counter += 1
+            for r in sorted(test_groups[gkey],
+                            key=lambda r: _row_sort_key(r, [c.key for c in others])):
+                if r.kind == "best":
+                    # Single per-test head-to-head row: type column carries the
+                    # assertion type, value/delta columns are dashes, best names
+                    # the winning provider.
+                    winner = r.best or "—"
+                    body_rows.append(
+                        f'<tr class="test-{parity}">'
+                        f"<td>{html.escape(r.key.test)}</td>"
+                        f"<td>{html.escape(r.assertion_type or 'select-best')}</td>"
+                        "<td></td><td></td>"
+                        + '<td class="num">—</td>' * n_value
+                        + '<td class="num delta">—</td>' * n_delta
+                        + f'<td class="best-winner">{html.escape(winner)}</td>'
+                        "</tr>"
+                    )
+                    continue
+                value_tds = "".join(value_cell(c, r) for c in columns)
+                delta_tds = "".join(
+                    _delta_td(r.deltas.get(c.key), tolerance) for c in others
+                )
+                body_rows.append(
+                    f'<tr class="test-{parity}">'
+                    f"<td>{html.escape(r.key.test)}</td>"
+                    f"<td>{html.escape(r.assertion_type or '')}</td>"
+                    f"<td>{html.escape(r.assertion_value)}</td>"
+                    f"<td>{html.escape(r.metric or '')}</td>"
+                    + value_tds + delta_tds
+                    + '<td class="best-winner">—</td>'
+                    "</tr>"
+                )
+        sections.append(
+            f"<h2>{html.escape(suite)}</h2>"
+            + _summary_tables_html(grouped[suite], columns, tolerance, "suite-summary")
+            + f"<table><thead><tr>{thead}</tr></thead><tbody>"
+            + "".join(body_rows) + "</tbody></table>"
+        )
+
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<title>Provider comparison</title>"
+        f"<style>{_CSS}</style></head><body>"
+        "<h1>Provider comparison</h1>"
+        + _eval_header_n(columns, eval_ids, ui_base_url, config_path=config_path,
+                         system_prompt_path=system_prompt_path)
+        + aggregate
+        + drift_html
+        + "".join(sections)
+        + _COPY_SCRIPT
+        + "</body></html>"
+    )
+
+
+# --- raw-response CSV export -----------------------------------------------
+# A spreadsheet of the models' raw answers (no scores, no verdicts), one row per
+# test: column 1 the rendered prompt, then one column per provider. For eyeballing
+# how providers actually responded, side by side.
+
+# Reasoning delimiter, kept in sync with hooks/strip_before_triple_newline.py —
+# that hook is the source of truth applied to outputs before the live tests
+# assert. Duplicated here (rather than imported) because the hook lives outside
+# this package and importing it would need path manipulation.
+_REASONING_DELIMITER = "\n\n\n"
+
+
+def strip_reasoning(output):
+    """Drop a reasoning prefix from a model output.
+
+    Mirrors hooks/strip_before_triple_newline.py: everything up to and including
+    the first ``\\n\\n\\n`` is reasoning; the rest is the final answer. Non-string
+    outputs (e.g. an auto-parsed json_schema dict) are returned unchanged.
+    """
+    if not isinstance(output, str):
+        return output
+    idx = output.find(_REASONING_DELIMITER)
+    if idx == -1:
+        return output
+    return output[idx + len(_REASONING_DELIMITER):]
+
+
+def extract_responses(eval_json: dict, provider_label: str | None = None) -> dict:
+    """Map test identity -> {prompt, output, suite} for one provider.
+
+    ``output`` is the reasoning-stripped final answer; ``prompt`` is the rendered
+    user message (see :func:`_prompt_text`); ``suite`` groups the row. Scoped to
+    ``provider_label`` for the unified eval file; the first result per identity
+    wins (consistent with :func:`extract_request_info` / :func:`extract_cells`).
+    """
+    out: dict = {}
+    for result in eval_json.get("results", {}).get("results", []):
+        provider = result.get("provider") or {}
+        if provider_label is not None and provider.get("label") != provider_label:
+            continue
+        test_case = result.get("testCase") or {}
+        identity = _test_identity(result, test_case)
+        if identity in out:
+            continue
+        meta = test_case.get("metadata") or {}
+        raw_output = (result.get("response") or {}).get("output")
+        out[identity] = {
+            "prompt": _prompt_text((result.get("prompt") or {}).get("raw") or ""),
+            "output": strip_reasoning(raw_output) if raw_output is not None else "",
+            "suite": meta.get("suite") or NO_SUITE,
+        }
+    return out
+
+
+def _csv_cell(value) -> str:
+    """Coerce a response value to a CSV cell: None -> '', non-str -> str()."""
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
+
+
+def write_response_csv(per_provider: dict, ordered_keys: list, out_path) -> int:
+    """Write the response CSV from already-extracted per-provider maps.
+
+    ``per_provider`` maps provider key -> {identity: {prompt, output, suite}};
+    ``ordered_keys`` is the column order (baseline first). One row per test
+    identity (the union across providers), ordered by ``(suite, identity)``; the
+    prompt/suite are taken from the first column that ran the test. Returns the
+    number of data rows written.
+    """
+    meta: dict = {}  # identity -> (suite, prompt), first listed column wins
+    for key in ordered_keys:
+        for identity, rec in per_provider.get(key, {}).items():
+            meta.setdefault(identity, (rec.get("suite") or NO_SUITE, rec.get("prompt", "")))
+    order = sorted(meta, key=lambda i: (meta[i][0], i))
+
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["prompt"] + list(ordered_keys))
+        for identity in order:
+            _, prompt = meta[identity]
+            row = [prompt]
+            for key in ordered_keys:
+                rec = per_provider.get(key, {}).get(identity)
+                row.append(_csv_cell(rec.get("output") if rec else ""))
+            writer.writerow(row)
+    return len(order)
+
+
+def build_response_csv(eval_json: dict, columns: list, out_path) -> int:
+    """Write a response CSV from one unified eval file split by ``columns``.
+
+    Each :class:`ProviderColumn` is shown under its config key; its results are
+    selected by the provider label. Baseline first. Returns the row count.
+    """
+    per_provider = {c.key: extract_responses(eval_json, c.label) for c in columns}
+    return write_response_csv(per_provider, [c.key for c in columns], out_path)
+
+
+# --- raw-response HTML table -----------------------------------------------
+# The same per-test / per-provider response grid as the CSV, but as a
+# self-contained interactive HTML table: word-wrapped cells (row height
+# auto-adjusts to content), columns and rows the reader can drag-resize, and a
+# layout that fills and reflows with the browser window. Built for eyeballing
+# long answers side by side — spreadsheets mangle the embedded newlines/commas.
+
+_RESPONSES_CSS = """
+html, body { margin: 0; height: 100%; }
+body { font-family: -apple-system, system-ui, sans-serif; color: #1a1a1a; }
+.wrap { padding: 1rem; box-sizing: border-box; }
+h1 { font-size: 1.1rem; margin: 0 0 .5rem; }
+.hint { color: #666; font-size: .85rem; margin: 0 0 .75rem; }
+/* width:100% + fixed layout => the table fills and reflows with the window;
+   column widths come from the <col> elements. */
+table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+th, td {
+  border: 1px solid #d0d0d0; padding: .4rem .55rem; vertical-align: top;
+  /* word wrapping by default; row height grows to fit the content. */
+  white-space: normal; overflow-wrap: anywhere; word-break: break-word;
+  overflow: hidden; position: relative;
+}
+th { background: #f4f4f4; text-align: left; position: sticky; top: 0; z-index: 1; }
+td { font-size: .9rem; }
+td:first-child { color: #333; font-weight: 500; }
+/* Drag handles: a thin strip on a cell's right edge (column) / bottom edge (row). */
+.col-resize { position: absolute; top: 0; right: -3px; width: 7px; height: 100%;
+  cursor: col-resize; user-select: none; z-index: 3; }
+.row-resize { position: absolute; left: 0; bottom: -3px; width: 100%; height: 7px;
+  cursor: row-resize; user-select: none; z-index: 3; }
+/* Rendered-markdown cells: compact margins so a cell stays tight, headings sized
+   down to fit, code/quote/rule styled lightly. */
+td .md > :first-child { margin-top: 0; }
+td .md > :last-child { margin-bottom: 0; }
+td .md p { margin: .4em 0; }
+td .md h1, td .md h2, td .md h3, td .md h4, td .md h5, td .md h6 {
+  margin: .55em 0 .3em; font-size: 1em; font-weight: 700; }
+td .md ul, td .md ol { margin: .3em 0; padding-left: 1.3em; }
+td .md li { margin: .15em 0; }
+td .md a { color: #1a4fa0; }
+td .md code { background: #f0f0f0; padding: 0 .25em; border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+td .md pre { background: #f0f0f0; padding: .5em .6em; border-radius: 4px;
+  overflow: auto; white-space: pre-wrap; }
+td .md pre code { background: none; padding: 0; }
+td .md blockquote { margin: .4em 0; padding-left: .7em; color: #555;
+  border-left: 3px solid #ddd; }
+td .md hr { border: 0; border-top: 1px solid #ccc; margin: .6em 0; }
+"""
+
+# Vanilla-JS drag handlers. Column handles resize the matching <col> (works under
+# table-layout:fixed); row handles set an explicit height on the <tr>. Both clamp
+# to a small minimum so a column/row can't be dragged away entirely.
+_RESPONSES_SCRIPT = """
+<script>
+(function () {
+  document.querySelectorAll('.col-resize').forEach(function (h) {
+    h.addEventListener('mousedown', function (e) {
+      var col = document.querySelector('col[data-c="' + h.dataset.c + '"]');
+      var startX = e.clientX, startW = col.getBoundingClientRect().width;
+      function move(ev) {
+        col.style.width = Math.max(40, startW + ev.clientX - startX) + 'px';
+      }
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+      e.preventDefault();
+    });
+  });
+  document.querySelectorAll('.row-resize').forEach(function (h) {
+    h.addEventListener('mousedown', function (e) {
+      var row = h.closest('tr');
+      var startY = e.clientY, startH = row.getBoundingClientRect().height;
+      function move(ev) {
+        row.style.height = Math.max(24, startH + ev.clientY - startY) + 'px';
+      }
+      function up() {
+        document.removeEventListener('mousemove', move);
+        document.removeEventListener('mouseup', up);
+      }
+      document.addEventListener('mousemove', move);
+      document.addEventListener('mouseup', up);
+      e.preventDefault();
+    });
+  });
+})();
+</script>
+"""
+
+
+# --- minimal markdown rendering --------------------------------------------
+# Model answers are almost always markdown (bold, headings, bullet/numbered
+# lists, the occasional link/quote/rule). Rather than add a markdown dependency
+# (this repo deliberately avoids them — see parse_provider_yaml), a focused
+# renderer covers that subset. It is NOT a full CommonMark implementation:
+# nested lists, tables and reference links are out of scope and fall through as
+# text. All source text is HTML-escaped before any markup is added, so a model
+# response can never inject raw HTML.
+
+_MD_HR_RE = re.compile(r"^\s*([-*_])(?:\s*\1){2,}\s*$")
+_MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+_MD_UL_RE = re.compile(r"^\s*[-*+]\s+(.*)$")
+_MD_OL_RE = re.compile(r"^\s*\d+[.)]\s+(.*)$")
+_MD_BQ_RE = re.compile(r"^\s*>\s?(.*)$")
+
+# Strong markdown signals used for detection. Lone ``*``/``_`` (italic) is
+# deliberately excluded so prose like "2 * 3" or "snake_case" is not mistaken
+# for markdown; a cell with real italics almost always also carries bold/lists.
+_MD_MARKERS = [
+    re.compile(r"\*\*[^*\n]+\*\*"),                  # **bold**
+    re.compile(r"__[^_\n]+__"),                      # __bold__
+    re.compile(r"(?m)^\s{0,3}#{1,6}\s+\S"),          # # heading
+    re.compile(r"(?m)^\s*[-*+]\s+\S"),               # - bullet
+    re.compile(r"(?m)^\s*\d+[.)]\s+\S"),             # 1. ordered
+    re.compile(r"(?m)^\s*>\s"),                      # > blockquote
+    re.compile(r"(?m)^\s*([-*_])(?:\s*\1){2,}\s*$"), # --- rule
+    re.compile(r"```"),                              # ``` fenced code
+    re.compile(r"`[^`\n]+`"),                        # `inline code`
+    re.compile(r"\[[^\]\n]+\]\([^)\n]+\)"),          # [text](url)
+]
+
+
+def looks_like_markdown(text) -> bool:
+    """True when ``text`` carries a strong markdown marker (see ``_MD_MARKERS``)."""
+    return isinstance(text, str) and any(p.search(text) for p in _MD_MARKERS)
+
+
+# Link targets come from untrusted model output. Allow only schemes that can't
+# execute script when the anchor is clicked; everything else (javascript:,
+# data:, vbscript:, …) is replaced with "#". Relative/anchor/mailto links pass.
+_SAFE_HREF_RE = re.compile(r"^(?:https?:|mailto:|/|#|\.)", re.IGNORECASE)
+
+
+def _safe_href(url: str) -> str:
+    return url if _SAFE_HREF_RE.match(url) else "#"
+
+
+def _md_inline(text: str) -> str:
+    """Render inline markdown (already plain text) to safe inline HTML.
+
+    Escapes HTML first, then applies inline code, links, bold, italic and
+    strikethrough — in that order so code spans are not reformatted and ``**``
+    is consumed before single ``*``.
+    """
+    text = html.escape(text)  # neutralise any raw HTML in the source first
+
+    codes: list = []
+
+    def _stash(m):
+        codes.append(m.group(1))
+        return f"\x00{len(codes) - 1}\x00"
+
+    text = re.sub(r"`([^`]+)`", _stash, text)  # protect inline code spans
+    text = re.sub(
+        r"\[([^\]]+)\]\(([^)\s]+)\)",
+        lambda m: f'<a href="{_safe_href(m.group(2))}" target="_blank" rel="noopener">{m.group(1)}</a>',
+        text,
+    )
+    text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"__(.+?)__", r"<strong>\1</strong>", text)
+    text = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"<em>\1</em>", text)
+    text = re.sub(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)", r"<em>\1</em>", text)
+    text = re.sub(r"~~(.+?)~~", r"<del>\1</del>", text)
+    text = re.sub(r"\x00(\d+)\x00", lambda m: f"<code>{codes[int(m.group(1))]}</code>", text)
+    return text
+
+
+def _md_starts_block(line: str) -> bool:
+    """True when ``line`` opens a non-paragraph block (stops paragraph gathering)."""
+    s = line.strip()
+    return bool(
+        s.startswith("```")
+        or _MD_HR_RE.match(line)
+        or _MD_HEADING_RE.match(s)
+        or _MD_UL_RE.match(line)
+        or _MD_OL_RE.match(line)
+        or _MD_BQ_RE.match(line)
+    )
+
+
+def _md_list(lines: list, i: int, regex, tag: str) -> tuple:
+    """Consume consecutive list items matching ``regex``; return (html, next_i)."""
+    items = []
+    while i < len(lines) and regex.match(lines[i]):
+        items.append(f"<li>{_md_inline(regex.match(lines[i]).group(1).strip())}</li>")
+        i += 1
+    return f"<{tag}>{''.join(items)}</{tag}>", i
+
+
+def render_markdown(text: str) -> str:
+    """Render a markdown subset to a safe HTML fragment (block + inline)."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: list = []
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        if line.strip().startswith("```"):
+            i += 1
+            buf = []
+            while i < n and not lines[i].strip().startswith("```"):
+                buf.append(lines[i])
+                i += 1
+            i += 1  # skip the closing fence (or run off the end)
+            out.append(f"<pre><code>{html.escape(chr(10).join(buf))}</code></pre>")
+            continue
+        if _MD_HR_RE.match(line):
+            out.append("<hr>")
+            i += 1
+            continue
+        heading = _MD_HEADING_RE.match(line.strip())
+        if heading:
+            level = len(heading.group(1))
+            out.append(f"<h{level}>{_md_inline(heading.group(2).strip())}</h{level}>")
+            i += 1
+            continue
+        if _MD_BQ_RE.match(line):
+            buf = []
+            while i < n and _MD_BQ_RE.match(lines[i]):
+                buf.append(_md_inline(_MD_BQ_RE.match(lines[i]).group(1)))
+                i += 1
+            out.append(f"<blockquote>{'<br>'.join(buf)}</blockquote>")
+            continue
+        if _MD_UL_RE.match(line):
+            block, i = _md_list(lines, i, _MD_UL_RE, "ul")
+            out.append(block)
+            continue
+        if _MD_OL_RE.match(line):
+            block, i = _md_list(lines, i, _MD_OL_RE, "ol")
+            out.append(block)
+            continue
+        buf = []
+        while i < n and lines[i].strip() and not _md_starts_block(lines[i]):
+            buf.append(_md_inline(lines[i].strip()))
+            i += 1
+        out.append(f"<p>{'<br>'.join(buf)}</p>")
+    return "".join(out)
+
+
+def _response_cell_inner(text) -> str:
+    """Cell contents: rendered markdown when detected, else escaped plain text."""
+    text = _csv_cell(text)
+    if text and looks_like_markdown(text):
+        return f'<div class="md">{render_markdown(text)}</div>'
+    return html.escape(text)
+
+
+def render_responses_html(per_provider: dict, ordered_keys: list) -> str:
+    """Render the interactive raw-response table as a self-contained HTML string.
+
+    ``per_provider`` maps provider key -> {identity: {prompt, output, suite}};
+    ``ordered_keys`` is the column order (baseline first). One row per test
+    identity (the union across providers), ordered by ``(suite, identity)``.
+    """
+    ordered_keys = list(ordered_keys)
+    headers = ["prompt"] + ordered_keys
+
+    # Initial widths as percentages so the untouched table fills/reflows with the
+    # window; the prompt gets a wider share, providers split the rest evenly. A
+    # manual drag overrides the column it touches with a pixel width.
+    prompt_pct = 28
+    provider_pct = (100 - prompt_pct) / len(ordered_keys) if ordered_keys else 100 - prompt_pct
+    widths = [prompt_pct] + [provider_pct] * len(ordered_keys)
+    colgroup = "".join(
+        f'<col data-c="{i}" style="width:{w:.4g}%">' for i, w in enumerate(widths)
+    )
+
+    head_cells = "".join(
+        f'<th>{html.escape(h)}<span class="col-resize" data-c="{i}"></span></th>'
+        for i, h in enumerate(headers)
+    )
+
+    meta: dict = {}  # identity -> (suite, prompt); first listed column wins
+    for key in ordered_keys:
+        for identity, rec in per_provider.get(key, {}).items():
+            meta.setdefault(identity, (rec.get("suite") or NO_SUITE, rec.get("prompt", "")))
+    order = sorted(meta, key=lambda i: (meta[i][0], i))
+
+    body_rows = []
+    for identity in order:
+        _, prompt = meta[identity]
+        cells = [
+            f'<td>{_response_cell_inner(prompt)}'
+            '<span class="row-resize"></span></td>'
+        ]
+        for key in ordered_keys:
+            rec = per_provider.get(key, {}).get(identity)
+            cells.append(f"<td>{_response_cell_inner(rec.get('output') if rec else '')}</td>")
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return (
+        "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<title>Raw responses</title>"
+        f"<style>{_RESPONSES_CSS}</style></head><body><div class='wrap'>"
+        "<h1>Raw responses</h1>"
+        "<p class='hint'>Drag a column's right edge or a row's bottom edge to "
+        "resize. Cells word-wrap and the table reflows with the window.</p>"
+        "<table><colgroup>" + colgroup + "</colgroup>"
+        "<thead><tr>" + head_cells + "</tr></thead>"
+        "<tbody>" + "".join(body_rows) + "</tbody></table>"
+        "</div>" + _RESPONSES_SCRIPT + "</body></html>"
+    )
+
+
+def write_responses_html(per_provider: dict, ordered_keys: list, out_path) -> int:
+    """Render the response table and write it to ``out_path``; return row count."""
+    n = sum(1 for _ in {  # count distinct test identities across providers
+        identity
+        for key in ordered_keys
+        for identity in per_provider.get(key, {})
+    })
+    Path(out_path).write_text(
+        render_responses_html(per_provider, ordered_keys), encoding="utf-8"
+    )
+    return n
+
+
+def build_responses_html(eval_json: dict, columns: list, out_path) -> int:
+    """Write the response HTML table from one unified eval file split by ``columns``."""
+    per_provider = {c.key: extract_responses(eval_json, c.label) for c in columns}
+    return write_responses_html(per_provider, [c.key for c in columns], out_path)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -899,6 +1769,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("report.html"),
         help="Output HTML path (default: report.html).",
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="Also write a CSV of the raw (reasoning-stripped) responses: one "
+        "row per test, column 1 the rendered prompt, then one column per "
+        "provider (baseline first). No scores or verdicts — for eyeballing the "
+        "answers side by side.",
+    )
+    parser.add_argument(
+        "--responses-html",
+        type=Path,
+        default=None,
+        help="Also write an interactive HTML table of the raw "
+        "(reasoning-stripped) responses: one row per test, column 1 the rendered "
+        "prompt, then one column per provider. Word-wrapped cells, drag-resizable "
+        "columns/rows, reflows with the window. For eyeballing answers side by "
+        "side when a spreadsheet mangles the newlines.",
     )
     parser.add_argument(
         "--ui-base-url",
@@ -930,6 +1819,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="The provider label to treat as the candidate in a unified eval file.",
     )
     parser.add_argument(
+        "--baseline-provider-col",
+        default=None,
+        help="N-provider mode: the baseline column as 'key=label' (the config key "
+        "is shown as the column header; the promptfoo provider label splits the "
+        "unified eval file). When given, the report uses the multi-provider layout "
+        "and --baseline-provider/--candidate-provider are ignored.",
+    )
+    parser.add_argument(
+        "--provider-col",
+        action="append",
+        default=None,
+        help="N-provider mode: a non-baseline column as 'key=label' (repeatable).",
+    )
+    parser.add_argument(
         "--config-path",
         default=None,
         help="Path to the comparison config that produced this run. When given, "
@@ -946,11 +1849,61 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _main_n(args, eval_json, suites) -> int:
+    """N-provider report path (driven by run_comparison via --*-provider-col).
+
+    All columns read from the one unified eval file, split by each provider's
+    promptfoo label; the columns are shown under their config keys.
+    """
+    columns = parse_provider_col_args(
+        args.baseline_provider_col, args.provider_col or []
+    )
+    base_dir = Path.cwd()
+    eval_id = read_eval_id(eval_json)
+    cells_by_provider = {
+        c.key: extract_cells(eval_json, suites, c.label) for c in columns
+    }
+    rows = build_rows(cells_by_provider, columns)
+    drift = _drift_n(cells_by_provider, columns)
+    eval_ids = {c.key: eval_id for c in columns}
+    errored = {c.key: errored_tests(eval_json, suites, c.label) for c in columns}
+    curls = {c.key: build_curls(eval_json, base_dir, None, c.label) for c in columns}
+    args.out.write_text(
+        render_html_n(
+            rows, columns, drift, args.tolerance,
+            eval_ids=eval_ids, ui_base_url=args.ui_base_url,
+            errored=errored, curls=curls,
+            config_path=args.config_path,
+            system_prompt_path=args.system_prompt_path,
+        ),
+        encoding="utf-8",
+    )
+    if args.csv:
+        n = build_response_csv(eval_json, columns, args.csv)
+        print(f"  {n} response rows -> {args.csv}")
+    if args.responses_html:
+        n = build_responses_html(eval_json, columns, args.responses_html)
+        print(f"  {n} response rows -> {args.responses_html}")
+    others = [c.key for c in columns if not c.is_baseline]
+    rtab = summarize_rubric_table(rows, columns, args.tolerance)
+    summary = " | ".join(
+        f"{o}: {rtab[o]['improved']} improved, {rtab[o]['regressed']} regressed"
+        for o in others
+    )
+    print(f"{len(columns)} providers, {len(rows)} rows | {summary} -> {args.out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     suites = args.suite  # None => every suite present in either run
 
     baseline_json = read_eval_json(args.baseline_json)
+    # N-provider mode: one unified file (passed as both positionals), split by
+    # the per-column provider labels.
+    if args.baseline_provider_col:
+        return _main_n(args, baseline_json, suites)
+
     candidate_json = read_eval_json(args.candidate_json)
     # Provider labels are only needed for a unified run (one file, both
     # providers); for the classic two-file mode they stay None (all results).
@@ -978,6 +1931,20 @@ def main(argv: list[str] | None = None) -> int:
                     system_prompt_path=args.system_prompt_path),
         encoding="utf-8",
     )
+    if args.csv:
+        per_provider = {
+            "baseline": extract_responses(baseline_json, base_provider),
+            "candidate": extract_responses(candidate_json, cand_provider),
+        }
+        n = write_response_csv(per_provider, ["baseline", "candidate"], args.csv)
+        print(f"  {n} response rows -> {args.csv}")
+    if args.responses_html:
+        per_provider = {
+            "baseline": extract_responses(baseline_json, base_provider),
+            "candidate": extract_responses(candidate_json, cand_provider),
+        }
+        n = write_responses_html(per_provider, ["baseline", "candidate"], args.responses_html)
+        print(f"  {n} response rows -> {args.responses_html}")
     msg = (
         f"rubric: {counts['improved']} improved, {counts['regressed']} regressed, "
         f"{counts['within']} within, {counts['new']} new, {counts['removed']} removed"

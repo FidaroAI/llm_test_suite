@@ -13,15 +13,12 @@ import re
 from scripts_repo.run_comparison import (
     COMPARISON_NETWORK,
     CORE_SYSTEM_PROMPT_PATH,
-    DEV_PROVIDER,
-    PROD_PROVIDER,
     SELECT_BEST_ENV_VAR,
     WEB_FETCH_CONTAINER_PORT,
     WEB_FETCH_NETWORK_ALIAS,
     WEB_FETCH_SIDECAR_URL,
     WHITELISTED_CVM_IDS,
     ConfigError,
-    both_providers_filter,
     build_filter_args,
     comparison_dir,
     comparison_name,
@@ -29,12 +26,15 @@ from scripts_repo.run_comparison import (
     gateway_docker_args,
     parse_env_file,
     provider_options_env,
+    providers_filter,
+    report_provider_args,
     run_dir_name,
     validate_config,
     vllm_options_changed,
     web_fetch_docker_args,
     write_options_cache,
 )
+from scripts_repo.providers_registry import REGISTRY
 
 
 def _load_classification():
@@ -52,24 +52,45 @@ def test_select_best_env_var_matches_classification():
 
 
 def _minimal_config(**overrides):
+    """A minimal valid config: fidaro-prod (baseline) + venice, no redeploy."""
     cfg = {
+        "providers-under-test": {"fidaro-prod": True, "venice": True},
+        "baseline-provider": "fidaro-prod",
+        "provider-options": {
+            "fidaro-prod": {"model": "prod-model", "temperature": 0.7, "max_tokens": 1000},
+            "venice": {"model": "kimi-k2-6", "web_search": "on"},
+        },
         "vllm-prod-url": "https://prod-8000.example.net/v1",
-        "vllm-dev-url": "https://dev-8000.example.net/v1",
         "suite-generation-config": {"simple_facts": {"limit": 5}},
-        "prod-provider-options": {
-            "model": "prod-model",
-            "temperature": 0.7,
-            "max_tokens": 1000,
-        },
-        # Matches the vllm-options model ("x") used by the redeploy tests below.
-        "dev-provider-options": {
-            "model": "x",
-            "temperature": 0.7,
-            "max_tokens": 1000,
-        },
     }
     cfg.update(overrides)
     return cfg
+
+
+# venice is enabled in _minimal_config, so its api key must be in the env.
+_VENICE_ENV = {"VENICE_INFERENCE_KEY": "k"}
+
+
+def _dev_redeploy_config(tmp_path, **overrides):
+    """A fidaro-dev-only config wired for a redeploy (vllm-options present).
+
+    Writes the compose + .env.phala files the redeploy validation requires and
+    returns (config, env) ready to pass to validate_config.
+    """
+    compose = tmp_path / "docker-compose.yaml"
+    compose.write_text("services: {}", encoding="utf-8")
+    (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
+    cfg = {
+        "providers-under-test": {"fidaro-dev": True},
+        "baseline-provider": "fidaro-dev",
+        "provider-options": {"fidaro-dev": {"model": "x"}},
+        "vllm-dev-url": "https://dev-8000.example.net/v1",
+        "suite-generation-config": {"simple_facts": {"limit": 5}},
+        "vllm-options": {"model": "x"},
+        "phala-dev-instance-id": WHITELISTED_CVM_IDS[0],
+    }
+    cfg.update(overrides)
+    return cfg, {"PHALA_DOCKER_COMPOSE_FILE": str(compose)}
 
 
 # --- comparison_name -------------------------------------------------------
@@ -105,64 +126,131 @@ def test_run_dir_name_prefixes_timestamp_with_run():
 
 
 def test_validate_passes_for_minimal_config(tmp_path):
-    validate_config(_minimal_config(), repo_root=tmp_path, env={})
+    validate_config(_minimal_config(), repo_root=tmp_path, env=_VENICE_ENV)
 
 
-@pytest.mark.parametrize(
-    "missing", ["vllm-prod-url", "vllm-dev-url", "suite-generation-config"]
-)
-def test_validate_requires_each_mandatory_key(tmp_path, missing):
+def test_validate_requires_suite_generation_config(tmp_path):
     cfg = _minimal_config()
-    del cfg[missing]
-    with pytest.raises(ConfigError) as exc:
-        validate_config(cfg, repo_root=tmp_path, env={})
-    assert missing in str(exc.value)
+    del cfg["suite-generation-config"]
+    with pytest.raises(ConfigError, match="suite-generation-config"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
 
 
-@pytest.mark.parametrize("missing", ["prod-provider-options", "dev-provider-options"])
-def test_validate_requires_provider_options(tmp_path, missing):
+def test_validate_requires_providers_under_test(tmp_path):
     cfg = _minimal_config()
-    del cfg[missing]
-    with pytest.raises(ConfigError) as exc:
-        validate_config(cfg, repo_root=tmp_path, env={})
-    assert missing in str(exc.value)
+    del cfg["providers-under-test"]
+    with pytest.raises(ConfigError, match="providers-under-test"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
 
 
-def test_validate_requires_provider_option_fields(tmp_path):
+def test_validate_rejects_no_enabled_providers(tmp_path):
     cfg = _minimal_config()
-    del cfg["dev-provider-options"]["max_tokens"]
-    with pytest.raises(ConfigError) as exc:
-        validate_config(cfg, repo_root=tmp_path, env={})
-    assert "max_tokens" in str(exc.value)
+    cfg["providers-under-test"] = {"fidaro-prod": False, "venice": False}
+    with pytest.raises(ConfigError, match="at least one"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_rejects_unknown_provider_key(tmp_path):
+    cfg = _minimal_config()
+    cfg["providers-under-test"]["mystery"] = True
+    with pytest.raises(ConfigError, match="unknown provider"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_baseline_must_be_enabled(tmp_path):
+    cfg = _minimal_config(**{"baseline-provider": "fidaro-dev"})
+    with pytest.raises(ConfigError, match="baseline-provider"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_requires_options_for_each_enabled(tmp_path):
+    cfg = _minimal_config()
+    del cfg["provider-options"]["venice"]
+    with pytest.raises(ConfigError, match="provider-options.*venice"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_allows_options_for_known_but_disabled_provider(tmp_path):
+    # A ready-to-go options block for a toggled-off provider is fine.
+    cfg = _minimal_config()
+    cfg["provider-options"]["fidaro-dev"] = {"model": "y"}  # known, just disabled
+    validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_rejects_options_for_unknown_provider(tmp_path):
+    cfg = _minimal_config()
+    cfg["provider-options"]["vence"] = {"model": "y"}  # typo, not in registry
+    with pytest.raises(ConfigError, match="unknown providers"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_gateway_requires_its_vllm_url(tmp_path):
+    cfg = _minimal_config()
+    del cfg["vllm-prod-url"]
+    with pytest.raises(ConfigError, match="vllm-prod-url"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
+
+
+def test_validate_api_provider_requires_key_env(tmp_path):
+    with pytest.raises(ConfigError, match="VENICE_INFERENCE_KEY"):
+        validate_config(_minimal_config(), repo_root=tmp_path, env={})
+
+
+def test_validate_redeploy_guard_skipped_without_vllm_options(tmp_path):
+    # fidaro-dev enabled but no vllm-options => no redeploy, so no instance-id /
+    # whitelist / compose constraints (the HEAD-era unconditional-check regression).
+    cfg = {
+        "providers-under-test": {"fidaro-dev": True},
+        "baseline-provider": "fidaro-dev",
+        "provider-options": {"fidaro-dev": {"model": "x"}},
+        "vllm-dev-url": "https://dev-8000.example.net/v1",
+        "suite-generation-config": {"simple_facts": {"limit": 5}},
+    }
+    validate_config(cfg, repo_root=tmp_path, env={})
+
+
+def test_validate_full_redeploy_config_passes(tmp_path):
+    cfg, env = _dev_redeploy_config(tmp_path)
+    validate_config(cfg, repo_root=tmp_path, env=env)
 
 
 def test_validate_rejects_dev_model_not_matching_vllm_options(tmp_path):
-    compose = tmp_path / "docker-compose.yaml"
-    compose.write_text("services: {}", encoding="utf-8")
-    (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
-    cfg = _minimal_config(
-        **{"vllm-options": {"model": "served-model"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
-    )
-    # dev-provider-options.model is "x", which != the served "served-model".
-    with pytest.raises(ConfigError) as exc:
-        validate_config(
-            cfg, repo_root=tmp_path, env={"PHALA_DOCKER_COMPOSE_FILE": str(compose)}
-        )
-    assert "must match" in str(exc.value)
+    cfg, env = _dev_redeploy_config(tmp_path, **{"vllm-options": {"model": "served"}})
+    # provider-options['fidaro-dev'].model is "x" != served.
+    with pytest.raises(ConfigError, match="must match"):
+        validate_config(cfg, repo_root=tmp_path, env=env)
 
 
 def test_validate_rejects_vllm_options_without_instance_id(tmp_path):
-    cfg = _minimal_config(**{"vllm-options": {"model": "x"}})
-    with pytest.raises(ConfigError) as exc:
+    cfg, env = _dev_redeploy_config(tmp_path)
+    del cfg["phala-dev-instance-id"]
+    with pytest.raises(ConfigError, match="phala-dev-instance-id"):
+        validate_config(cfg, repo_root=tmp_path, env=env)
+
+
+def test_validate_rejects_non_whitelisted_instance(tmp_path):
+    cfg, env = _dev_redeploy_config(tmp_path, **{"phala-dev-instance-id": "not-listed"})
+    with pytest.raises(ConfigError, match="whitelist"):
+        validate_config(cfg, repo_root=tmp_path, env=env)
+
+
+def test_validate_vllm_options_requires_compose_env(tmp_path):
+    cfg, _ = _dev_redeploy_config(tmp_path)
+    with pytest.raises(ConfigError, match="PHALA_DOCKER_COMPOSE_FILE"):
         validate_config(cfg, repo_root=tmp_path, env={})
-    assert "phala-dev-instance-id" in str(exc.value)
+
+
+def test_validate_vllm_options_requires_env_phala_file(tmp_path):
+    cfg, env = _dev_redeploy_config(tmp_path)
+    (tmp_path / ".env.phala").unlink()
+    with pytest.raises(ConfigError, match=".env.phala"):
+        validate_config(cfg, repo_root=tmp_path, env=env)
 
 
 def test_validate_rejects_missing_system_prompt_file(tmp_path):
     cfg = _minimal_config(**{"system-prompt-file": str(tmp_path / "nope.md")})
-    with pytest.raises(ConfigError) as exc:
-        validate_config(cfg, repo_root=tmp_path, env={})
-    assert "system-prompt-file" in str(exc.value)
+    with pytest.raises(ConfigError, match="system-prompt-file"):
+        validate_config(cfg, repo_root=tmp_path, env=_VENICE_ENV)
 
 
 def test_validate_accepts_existing_system_prompt_file(tmp_path):
@@ -171,45 +259,17 @@ def test_validate_accepts_existing_system_prompt_file(tmp_path):
     validate_config(
         _minimal_config(**{"system-prompt-file": str(prompt)}),
         repo_root=tmp_path,
-        env={},
+        env=_VENICE_ENV,
     )
 
 
-def test_validate_vllm_options_requires_compose_env(tmp_path):
-    cfg = _minimal_config(
-        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
-    )
-    (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
-    with pytest.raises(ConfigError) as exc:
-        validate_config(cfg, repo_root=tmp_path, env={})
-    assert "PHALA_DOCKER_COMPOSE_FILE" in str(exc.value)
-
-
-def test_validate_vllm_options_requires_env_phala_file(tmp_path):
-    compose = tmp_path / "docker-compose.yaml"
-    compose.write_text("services: {}", encoding="utf-8")
-    cfg = _minimal_config(
-        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
-    )
-    with pytest.raises(ConfigError) as exc:
-        validate_config(
-            cfg,
-            repo_root=tmp_path,
-            env={"PHALA_DOCKER_COMPOSE_FILE": str(compose)},
-        )
-    assert ".env.phala" in str(exc.value)
-
-
-def test_validate_passes_full_vllm_options_config(tmp_path):
-    compose = tmp_path / "docker-compose.yaml"
-    compose.write_text("services: {}", encoding="utf-8")
-    (tmp_path / ".env.phala").write_text("X=1", encoding="utf-8")
-    cfg = _minimal_config(
-        **{"vllm-options": {"model": "x"}, "phala-dev-instance-id": WHITELISTED_CVM_IDS[0]}
-    )
-    validate_config(
-        cfg, repo_root=tmp_path, env={"PHALA_DOCKER_COMPOSE_FILE": str(compose)}
-    )
+def test_example_config_validates(monkeypatch):
+    # The shipped example must always be valid under the current schema. Run from
+    # the repo root so its relative system-prompt-file resolves.
+    repo_root = Path(__file__).resolve().parents[2]
+    monkeypatch.chdir(repo_root)
+    cfg = json.loads((repo_root / "comparisons" / "example.json").read_text())
+    validate_config(cfg, repo_root=repo_root, env={"VENICE_INFERENCE_KEY": "k"})
 
 
 # --- vllm options cache ----------------------------------------------------
@@ -248,22 +308,29 @@ def test_write_options_cache_is_identical_copy(tmp_path):
 # --- provider options env --------------------------------------------------
 
 
-def test_provider_options_env_maps_both_sides():
-    cfg = _minimal_config()
-    env = provider_options_env(cfg)
-    assert env == {
-        "COMPARISON_PROD_MODEL": "prod-model",
-        "COMPARISON_PROD_TEMPERATURE": "0.7",
-        "COMPARISON_PROD_MAX_TOKENS": "1000",
-        "COMPARISON_DEV_MODEL": "x",
-        "COMPARISON_DEV_TEMPERATURE": "0.7",
-        "COMPARISON_DEV_MAX_TOKENS": "1000",
+def test_provider_options_env_maps_each_enabled_provider():
+    env = provider_options_env(_minimal_config())
+    # fidaro-prod (gateway): model/temp/max_tokens templated.
+    assert env["COMPARISON_PROD_MODEL"] == "prod-model"
+    assert env["COMPARISON_PROD_TEMPERATURE"] == "0.7"
+    assert env["COMPARISON_PROD_MAX_TOKENS"] == "1000"
+    # venice (api): model + web search; optional temp/max_tokens omitted.
+    assert env["COMPARISON_VENICE_MODEL"] == "kimi-k2-6"
+    assert env["COMPARISON_VENICE_WEB_SEARCH"] == "on"
+    assert "COMPARISON_VENICE_TEMPERATURE" not in env
+    assert "COMPARISON_VENICE_MAX_TOKENS" not in env
+
+
+def test_provider_options_env_web_search_defaults_off():
+    cfg = {
+        "providers-under-test": {"venice": True},
+        "provider-options": {"venice": {"model": "kimi-k2-6"}},
     }
+    assert provider_options_env(cfg)["COMPARISON_VENICE_WEB_SEARCH"] == "off"
 
 
 def test_provider_options_env_values_are_strings():
-    env = provider_options_env(_minimal_config())
-    assert all(isinstance(v, str) for v in env.values())
+    assert all(isinstance(v, str) for v in provider_options_env(_minimal_config()).values())
 
 
 # --- promptfoo filter args -------------------------------------------------
@@ -297,20 +364,36 @@ def test_build_filter_args_repeats_list_values():
     ]
 
 
-# --- both-providers filter (single unified pass) ---------------------------
+# --- providers filter (single unified pass over the enabled set) -----------
 
 
-def test_both_providers_filter_matches_both_dynamic_providers():
-    pat = both_providers_filter()
-    assert re.search(pat, PROD_PROVIDER)
-    assert re.search(pat, DEV_PROVIDER)
+def test_providers_filter_matches_only_enabled_labels():
+    cfg = {"providers-under-test": {"fidaro-prod": True, "venice": True}}
+    pat = providers_filter(cfg)
+    assert re.match(pat, REGISTRY["fidaro-prod"].label)
+    assert re.match(pat, REGISTRY["venice"].label)
+    # fidaro-dev is not enabled, so its dynamic label must be excluded.
+    assert not re.match(pat, REGISTRY["fidaro-dev"].label)
 
 
-def test_both_providers_filter_excludes_static_providers():
-    # The static (non-dynamic) providers must not be swept into the unified pass.
-    pat = both_providers_filter()
-    assert not re.search(pat, "fidaro_plaintext_gateway_phala_prod")
-    assert not re.search(pat, "fidaro_plaintext_gateway_phala_dev")
+def test_providers_filter_excludes_static_providers():
+    cfg = {"providers-under-test": {"fidaro-prod": True}}
+    pat = providers_filter(cfg)
+    assert not re.match(pat, "fidaro_plaintext_gateway_phala_prod")
+
+
+def test_report_provider_args_baseline_first_then_others():
+    cfg = {
+        "providers-under-test": {"fidaro-prod": True, "venice": True},
+        "baseline-provider": "fidaro-prod",
+    }
+    args = report_provider_args(cfg)
+    assert args[:2] == [
+        "--baseline-provider-col",
+        f"fidaro-prod={REGISTRY['fidaro-prod'].label}",
+    ]
+    assert "--provider-col" in args
+    assert f"venice={REGISTRY['venice'].label}" in args
 
 
 # --- gateway docker args ---------------------------------------------------

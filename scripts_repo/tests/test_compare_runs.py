@@ -961,8 +961,9 @@ def test_render_html_links_scores_when_eval_ids_given():
         baseline_eval_id="eval-base",
         candidate_eval_id="eval-cand",
     )
-    assert 'href="http://localhost:3000/eval/eval-base?search=abc123"' in out
-    assert 'href="http://localhost:3000/eval/eval-cand?search=abc123"' in out
+    # Links go to the bare eval view (no ?search=; see _ui_href).
+    assert 'href="http://localhost:3000/eval/eval-base"' in out
+    assert 'href="http://localhost:3000/eval/eval-cand"' in out
     assert ">0.50</a>" in out
 
 
@@ -1004,7 +1005,7 @@ def test_render_html_custom_base_url():
         candidate_eval_id="e2",
         ui_base_url="http://host:9999",
     )
-    assert 'href="http://host:9999/eval/e1?search=s1"' in out
+    assert 'href="http://host:9999/eval/e1"' in out
 
 
 def test_render_html_no_links_without_eval_ids():
@@ -1047,7 +1048,7 @@ def test_render_html_no_link_for_missing_side():
     out = render_html(
         diffs, ([], []), 0.05, baseline_eval_id="e1", candidate_eval_id="e2"
     )
-    assert 'href="http://localhost:3000/eval/e2?search=s1"' in out
+    assert 'href="http://localhost:3000/eval/e2"' in out
     assert "/eval/e1?" not in out
 
 
@@ -1143,7 +1144,7 @@ def test_render_html_missing_errored_cell_shows_error_link():
         candidate_errored=errored_tests(cand_json),
     )
     assert ">ERROR</a>" in out
-    assert 'href="http://localhost:3000/eval/eval-cand?search=sid-err"' in out
+    assert 'href="http://localhost:3000/eval/eval-cand"' in out
 
 
 def test_render_html_missing_not_errored_stays_dash():
@@ -1196,7 +1197,7 @@ def test_render_html_new_errored_cell_links_to_baseline():
         candidate_eval_id="ec",
         baseline_errored=errored_tests(base_json),
     )
-    assert 'href="http://localhost:3000/eval/eb?search=sidn"' in out
+    assert 'href="http://localhost:3000/eval/eb"' in out
     assert ">ERROR</a>" in out
 
 

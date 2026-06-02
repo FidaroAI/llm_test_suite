@@ -1,0 +1,39 @@
+diff --git a/dist/src/evaluator-JaJwSPcl.js b/dist/src/evaluator-JaJwSPcl.js
+index ce01efebcb0635457dab774a9e4ac4d02fbaf469..9173cd9047f2c7681b9785a418490871257cb196 100644
+--- a/dist/src/evaluator-JaJwSPcl.js
++++ b/dist/src/evaluator-JaJwSPcl.js
+@@ -269,7 +269,7 @@ async function matchesClassification(expected, output, threshold, grading) {
+ //#endregion
+ //#region src/matchers/comparison.ts
+ async function matchesSelectBest(criteria, outputs, grading, vars, providerCallContext) {
+-	invariant(outputs.length >= 2, "select-best assertion must have at least two outputs to compare between");
++	if (outputs.length < 2) return Array.from({ length: outputs.length }, () => fail("select-best skipped: fewer than two outputs to compare", void 0));
+ 	const resp = await callProviderWithContext(await getAndCheckProvider("text", grading?.provider, (await getDefaultProviders()).gradingProvider, "select-best check"), await renderLlmRubricPrompt(await loadRubricPrompt(grading?.rubricPrompt, SELECT_BEST_PROMPT), {
+ 		criteria,
+ 		outputs: outputs.map((o) => tryParse(o)),
+diff --git a/dist/src/index.cjs b/dist/src/index.cjs
+index 0e219fdb8fb5c8e833376f709f8d43a98c132c07..eca564ffd6c8c585d0952227b570b6b23b392725 100644
+--- a/dist/src/index.cjs
++++ b/dist/src/index.cjs
+@@ -322,7 +322,7 @@ async function matchesClassification(expected, output, threshold, grading) {
+ //#endregion
+ //#region src/matchers/comparison.ts
+ async function matchesSelectBest(criteria, outputs, grading, vars, providerCallContext) {
+-	require_invariant.invariant(outputs.length >= 2, "select-best assertion must have at least two outputs to compare between");
++	if (outputs.length < 2) return Array.from({ length: outputs.length }, () => require_graders.fail("select-best skipped: fewer than two outputs to compare", void 0));
+ 	const resp = await require_graders.callProviderWithContext(await require_graders.getAndCheckProvider("text", grading?.provider, (await require_graders.getDefaultProviders()).gradingProvider, "select-best check"), await require_graders.renderLlmRubricPrompt(await require_graders.loadRubricPrompt(grading?.rubricPrompt, require_graders.SELECT_BEST_PROMPT), {
+ 		criteria,
+ 		outputs: outputs.map((o) => require_graders.tryParse(o)),
+diff --git a/dist/src/index.js b/dist/src/index.js
+index ee5047ba72be7aff3f8e71e63f4c22ba9e003670..b375dc6518a05939185a1c60c05ee12243ae52c2 100644
+--- a/dist/src/index.js
++++ b/dist/src/index.js
+@@ -300,7 +300,7 @@ async function matchesClassification(expected, output, threshold, grading) {
+ //#endregion
+ //#region src/matchers/comparison.ts
+ async function matchesSelectBest(criteria, outputs, grading, vars, providerCallContext) {
+-	invariant(outputs.length >= 2, "select-best assertion must have at least two outputs to compare between");
++	if (outputs.length < 2) return Array.from({ length: outputs.length }, () => fail("select-best skipped: fewer than two outputs to compare", void 0));
+ 	const resp = await callProviderWithContext(await getAndCheckProvider("text", grading?.provider, (await getDefaultProviders()).gradingProvider, "select-best check"), await renderLlmRubricPrompt(await loadRubricPrompt(grading?.rubricPrompt, SELECT_BEST_PROMPT), {
+ 		criteria,
+ 		outputs: outputs.map((o) => tryParse(o)),

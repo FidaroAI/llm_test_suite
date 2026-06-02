@@ -17,6 +17,19 @@ providers:
   # run_comparison.py (which sets those env vars and starts the gateways).
   - file://providers/fidaro_plaintext_gateway_phala_dynamic_prod.yaml
   - file://providers/fidaro_plaintext_gateway_phala_dynamic_dev.yaml
+  # Venice competitor (direct API; no gateway). A custom Python provider so we can keep
+  # Venice's separate reasoning_content for human analysis AND reformat it as
+  # reasoning + "\n\n\n" + answer, so the shared strip transform (hooks/strip_before_triple_newline.py)
+  # isolates the answer for graders — exactly like the Fidaro gateway. Driven by
+  # run_comparison.py, which sets COMPARISON_VENICE_* and requires VENICE_INFERENCE_KEY.
+  # See providers/venice_provider.py. Label kept as venice_dynamic (the registry key).
+  - id: file://providers/venice_provider.py
+    label: venice_dynamic
+    config:
+      model: "{{ env.COMPARISON_VENICE_MODEL }}"
+      api_key: "{{ env.VENICE_INFERENCE_KEY }}"
+      api_base_url: https://api.venice.ai/api/v1
+      web_search: "{{ env.COMPARISON_VENICE_WEB_SEARCH }}"
   # Use this for testing against a local dstack and local vllm. The only real difference in the
   # provider config is the model name.
   # - file://providers/fidaro_plaintext_gateway_local.yaml
