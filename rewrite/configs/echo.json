@@ -1,0 +1,5 @@
+{
+  "name": "echo",
+  "model": "echo",
+  "extra": { "provider_impl": "echo" }
+}

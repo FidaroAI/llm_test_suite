@@ -1,0 +1,29 @@
+[
+  {
+    "id": "example-rubric-1",
+    "user": "Explain why the sky is blue in two sentences.",
+    "assertions": [
+      {
+        "type": "rubric",
+        "value": "Correctly attributes the blue sky to Rayleigh scattering of sunlight",
+        "metric": "accuracy",
+        "weight": 2.0
+      },
+      { "type": "length", "params": { "unit": "words", "max": 60 } }
+    ],
+    "metadata": { "suite": "examples", "request_type": "factual_qa", "domain": "science_stem" }
+  },
+  {
+    "id": "example-multiturn-1",
+    "messages": [
+      { "role": "user", "content": "I'm planning a trip to Japan." },
+      { "role": "assistant", "content": "Great! When are you going and what are your interests?" },
+      { "role": "user", "content": "Two weeks in spring; I love food and history. Give me a 3-line outline." }
+    ],
+    "assertions": [
+      { "type": "g_eval", "value": "A coherent itinerary that covers both food and history", "metric": "quality" },
+      { "type": "icontains", "value": "Kyoto" }
+    ],
+    "metadata": { "suite": "examples", "request_type": "planning", "domain": "consumer_lifestyle" }
+  }
+]

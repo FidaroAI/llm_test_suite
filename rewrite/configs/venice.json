@@ -1,0 +1,9 @@
+{
+  "name": "venice",
+  "model": "openai/kimi-k2-6",
+  "base_url": "https://api.venice.ai/api/v1",
+  "api_key_env": "VENICE_INFERENCE_KEY",
+  "params": { "temperature": 0.7 },
+  "extra": { "web_search": "off" },
+  "cache_key_fields": ["model", "temperature", "web_search"]
+}

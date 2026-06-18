@@ -1,0 +1,422 @@
+[
+  {
+    "id": "simple_facts-6c3396ab0e",
+    "user": "What is the capital of France?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Paris"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-6f15ed24ec",
+    "user": "What software company is headquartered in Redmond, Washington?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Microsoft"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-2181fb382d",
+    "user": "What is a word, phrase, number, or other sequence of characters that reads the same backward as forward?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Palindrome"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-d16a6169d0",
+    "user": "What is the world's largest retailer as of 2026?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Walmart"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-f5d3f4b24b",
+    "user": "Which day of the week does the Jewish Sabbath begin?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Friday"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-413c6b2e37",
+    "user": "What phone company produced the 3310?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Nokia"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-7d5be28ddd",
+    "user": "What company was initially known as \"Blue Ribbon Sports\"?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Nike"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-afd8036252",
+    "user": "Which country has the highest life expectancy as of 2026?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Monaco"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-2fa6e4b65c",
+    "user": "What is the most common surname in the United States?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Smith"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-5c03ae8729",
+    "user": "What art form is described as decorative handwriting or handwritten lettering?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Calligraphy"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-3553518d3b",
+    "user": "What is acrophobia a fear of?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Heights"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-55a4bf1506",
+    "user": "What is the name of the Chinese philosophical system that emphasizes harmony with nature?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Taoism"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-03c26255f3",
+    "user": "What is the 4th letter of the Greek alphabet?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Delta"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-1c89a8e3be",
+    "user": "How many dots appear on a pair of dice?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "42"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-29a06ad821",
+    "user": "Who was the Ancient Greek God of the Sun?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Apollo"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-469c059fea",
+    "user": "Aureolin is a shade of what color?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Yellow"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-5097663010",
+    "user": "How many faces does a Dodecahedron have?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "12"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-0d0f044c1e",
+    "user": "How many minutes are in a full week?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "10,080"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-5fb6f71390",
+    "user": "Where would you be if you were standing on the Spanish Steps?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Rome"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-ca8295fdf6",
+    "user": "What city is known as The Eternal City?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Rome"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-e805b92a7a",
+    "user": "In which country would you find Mount Kilimanjaro?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Tanzania"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-ff6e1bd1cf",
+    "user": "True or false: Halloween originated as an ancient Irish festival.",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "True"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-834a5f9e70",
+    "user": "What is the capital of Ireland?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Dublin"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-d1fbb2d7cb",
+    "user": "What is the state capital of New York?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Albany"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-5d46fe9595",
+    "user": "What is the smallest U.S. state by area?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Rhode Island"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-c98fb1a40c",
+    "user": "What river flows through the Grand Canyon?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Colorado River"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-6d93da5541",
+    "user": "True or false: Holland is a region in The Netherlands?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "True"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  },
+  {
+    "id": "simple_facts-85e44f3c53",
+    "user": "What is the capital of Canada?",
+    "assertions": [
+      {
+        "type": "icontains",
+        "value": "Ottawa"
+      }
+    ],
+    "metadata": {
+      "suite": "simple_facts",
+      "request_type": "unclassified",
+      "domain": "unclassified"
+    }
+  }
+]

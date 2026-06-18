@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llmeval"
+version = "0.1.0"
+description = "Cache-key-centric LLM evaluation suite: decoupled generation, running, grading, comparison."
+requires-python = ">=3.10"
+# Core runtime deps are intentionally small. litellm is the provider layer and is
+# lazy-imported, so the core (cache, store, assertions, stats, reports) is usable
+# and testable without it installed.
+dependencies = [
+    "pydantic>=2.5",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+# Needed only to actually call real LLM providers.
+providers = ["litellm>=1.40"]
+dev = ["pytest>=8.0", "pylint>=3.0"]
+
+[project.scripts]
+llmeval = "llmeval.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llmeval*"]
+
+[tool.pytest.ini_options]
+testpaths = ["framework_tests"]
+addopts = "-q"
+
+[tool.pylint.main]
+# framework_tests holds pytest tests; lint the package proper.
+ignore = ["framework_tests"]
+
+[tool.pylint.format]
+max-line-length = 100
+
+[tool.pylint."messages control"]
+disable = [
+    "missing-function-docstring",
+    "missing-class-docstring",
+    "too-few-public-methods",
+    "too-many-instance-attributes",  # store row dataclasses are plain data records
+    "import-outside-toplevel",       # litellm/tiktoken are lazy-imported on purpose
+    "duplicate-code",
+    "redefined-builtin",             # assertion grader params named `type` mirror the spec field
+]
+
+[tool.pylint.design]
+max-args = 12
+max-positional-arguments = 12
+max-locals = 30  # report/store assembly functions are local-heavy by nature

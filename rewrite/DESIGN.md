@@ -1,0 +1,215 @@
+# Rewrite — Design & Decisions
+
+Standalone rebuild of the Fidaro eval suite. Self-contained in this directory so it
+can be lifted into its own git repo. Built autonomously from the handwritten brief;
+decisions I made without being able to ask are marked **[DECISION]**, and open
+questions are left as **TODO** in code and listed in [§9](#9-open-questions--todos).
+
+---
+
+## 1. What this is for
+
+Three primary workflows (from the brief, in priority order):
+
+1. **Compare Fidaro vs a competitor** over many tests — *direct* (judge picks the best)
+   and *indirect* (rate each, compare ratings).
+2. **Compare Fidaro vs Fidaro-dev** — same two modes.
+3. **Batch-run one provider** — just get outputs/results to read, with or without
+   assertions.
+
+Secondary: regression tests (explicitly lower value right now).
+
+The defining requirement: **decouple the pipeline stages** so each can run, and re-run,
+independently — and put a **user-controlled cache key** at the centre so expensive LLM
+calls are reused exactly when the user wants.
+
+---
+
+## 2. The big decisions
+
+### [DECISION] No DSL, no promptfoo, no pytest-based eval runner
+
+The brief says avoid declarative DSLs (promptfoo) and is wary of pytest-based frameworks
+(deep_eval/inspect) for *this* job — they fit regression testing, not the
+compare-and-analyse workflow. I take this at face value: the eval **runner is a plain
+data-driven Python pipeline**, not a framework's test-collection mechanism.
+
+> pytest *is* used — but only to unit-test this framework's own code. That's orthogonal
+> to how LLM evals are executed.
+
+### [DECISION] Use litellm as the provider layer, build the rest
+
+The one requirement a library clearly nails is "talk to any provider, extensibly":
+**litellm** speaks OpenAI, Anthropic, Bedrock, and any OpenAI-compatible endpoint
+(covers the Fidaro plaintext gateway and Venice), and lets us register custom providers.
+It's a library, not a DSL/framework, so it doesn't impose structure. Everything else —
+the cache, store, grading, comparison, stats, reports — is a focused custom core.
+
+**Why not bend a framework?** The central feature ("the cache key is God": cache keyed
+on a *user-chosen subset* of config, results in a queryable DB, **re-grade and compare
+without re-running**, N-config comparison, best-of-N statistics) is not first-class in
+promptfoo, deep_eval, or inspect_ai. Bending any of them there is more work than a small
+core. The brief explicitly permits "none at all." We borrow proven *ideas* (epochs +
+reducers from inspect; G-Eval from deep_eval) without the dependency.
+
+### [DECISION] Generation is fully separate from running
+
+- **Generation code** lives in `llmeval/generation/` + `generation_sources/`.
+- **Generated test cases** are written as plain JSON to `testcases/` — a *separate
+  directory*, inspectable before any run. This directly fixes the "opaque `*_gen.py`"
+  complaint: you can read exactly what will run.
+- Running consumes `testcases/*.json` and never imports generation code.
+- Hand-written tests are supported: just author a JSON file (or use the small builder
+  helper). Tests need not come from CSV/JSON datasets.
+
+---
+
+## 3. The pipeline
+
+```
+generation/  ──►  testcases/*.json          (data: input + assertions + metadata)
+                        │
+                        ▼
+   run(provider, testcases, policy)  ──►  STORE.results     (cache LLM outputs by cache key)
+                        │
+                        ▼
+   grade(testcases, where=cache_key) ──►  STORE.gradings    (assertion scores; re-runnable)
+                        │
+                        ▼
+   compare / pickbest / stats        ──►  STORE.verdicts    (head-to-head; re-runnable)
+                        │
+                        ▼
+   report(cache_keys)                ──►  reports/*.html
+```
+
+Each arrow is an independent CLI subcommand and a library call. Crucially, **grade**,
+**pickbest**, **compare**, and **report** read cached outputs — they never call the model
+under test again. Editing an assertion or adding a new config to a comparison re-runs
+only what's missing.
+
+---
+
+## 4. The cache key ("God")
+
+A provider's full identity is a namespace:
+
+```
+namespace = { "model": <model>, **params, **extra }
+```
+
+`params` are call params (temperature, max_tokens, top_p…). `extra` is arbitrary
+user metadata that still affects the system under test but isn't an API param — e.g.
+`{"backend_version": "phala-2026-06-01", "system_prompt_id": "v3"}`.
+
+The **cache key** is computed from a user-selected subset:
+
+```python
+ProviderConfig(
+    name="fidaro-dev",
+    model="openai/Qwen3-...",
+    params={"temperature": 0.7, "max_tokens": 100000},
+    extra={"backend_version": "phala-2026-06-01"},
+    cache_key_fields=["model", "temperature", "backend_version"],  # max_tokens IGNORED
+)
+```
+
+- `cache_key_fields=None` ⇒ use the whole namespace.
+- Listed fields are pulled from the merged namespace, canonicalised (sorted JSON), and
+  hashed (sha256, short prefix stored alongside the full JSON).
+- The store keeps both the **hash** (join key) and the **full key JSON** (for grouping
+  and human-readable reports). Two configs that differ only in an ignored field collide
+  on purpose — that's the point.
+
+This gives the requested behaviours for free:
+
+- *"if cached, reuse"* — look up `(test_id, cache_key)`; ≥1 row ⇒ skip.
+- *"keep up to N results"* — `target_n` policy tops up to N rows for best-of-N.
+- *"rerun one failing test until it passes"* — caching is per `(test_id, cache_key)`, so
+  reruns touch only that pair; nothing else is wasted or repeated.
+
+---
+
+## 5. Running, retries, graceful failure (`RunPolicy`)
+
+```python
+RunPolicy(mode="reuse" | "target_n" | "always", target_n=1, retries=2)
+```
+
+- `reuse`: if ≥1 stored result for `(test, key)`, do nothing.
+- `target_n`: ensure up to N results exist (run `N − existing`).
+- `always`: append exactly one more.
+
+Per attempt: call provider; retry up to `retries` on exception. If it still fails, store
+an **error result** (not a crash) and continue with other tests. Passed/usable results
+are persisted immediately, so a later rerun never re-does them.
+
+---
+
+## 6. Assertions / evaluation types
+
+All implement `grade(output, context) -> AssertionResult{passed, score in [0,1], reason}`.
+A `transform` is applied to the output **before grading only** (default
+`strip_reasoning`, the `\n\n\n` rule from the old suite); the stored raw output keeps the
+reasoning.
+
+- **Deterministic**: `contains`, `icontains`, `equals`, `regex`, `not_contains`,
+  `length` (tokens/words/chars min/max), `refusal` (the old regex sweep).
+- **Rubric** (LLM judge): a criterion graded 0–1 (optionally weighted, with a `metric`
+  axis for grouping).
+- **G-Eval** (LLM judge): chain-of-thought scoring against criteria.
+- **Pick-best** (comparison-level): judge sees N configs' answers for one test and names
+  the winner. **Order control** to fight position bias — `as_is`, `fixed`, `random(seed)`,
+  or `both` (run both orderings; record agreement). Stored as a verdict, re-runnable
+  against cached outputs.
+
+Judge calls go through litellm too, so the judge is any provider (default: Bedrock Haiku,
+temperature 0, matching the old suite). The judge is always separate from the model under
+test.
+
+---
+
+## 7. Comparison & statistics
+
+Operate entirely over the store, after the fact:
+
+- **Indirect comparison**: aggregate gradings per `(cache_key, metric)` across test cases
+  and across the N attempts (reducers: `mean`, `max`, `pass_rate`, `majority`). Report
+  per-config means, deltas vs a baseline config, and a **bootstrap 95% CI** (stdlib, no
+  scipy). Best-of-N = `max` reducer over attempts.
+- **Direct comparison**: pick-best **win rates** per config, plus an "undecided" bucket
+  for ties/missing outputs.
+- "Which config is best" beyond means (Bradley–Terry / Elo from pairwise verdicts,
+  significance tests) is **TODO** — a clear extension point is left in `stats.py`.
+
+Reports are standalone HTML (Jinja2): a summary matrix (configs × metrics, with CIs),
+pick-best win rates, and a per-test drill-down with the raw answers.
+
+---
+
+## 8. Out of scope (per brief)
+
+Docker/infra bring-up (gateways, sidecars, Phala redeploy) is **not** part of test runs.
+A provider config just points at an already-running `base_url`. Bringing infra up is a
+separate concern the user owns.
+
+---
+
+## 9. Open questions & TODOs
+
+Left as choices + `TODO` markers in code; safe to revisit:
+
+1. **Advanced "best config" stats** — only mean + bootstrap CI + win-rate shipped.
+   Bradley–Terry/Elo/significance is stubbed in `stats.py`. *(Chose simple, correct,
+   dependency-free over fancy.)*
+2. **HF dataset generation transforms** — the CSV transform and hand-written path are
+   implemented end-to-end; dataset (multifaceted/research_rubrics/agentharm) transforms
+   are specified via the `Source` interface but not all ported. *(Chose to prove the
+   contract on CSV first.)*
+3. **Multi-turn / long-context inputs** — the test-case schema supports a full message
+   list; generation examples are single-turn.
+4. **Real-provider integration tests** need live creds, so only mock-based tests run
+   offline. litellm wiring is covered by a fake-completion unit test.
+5. **Report richness** — one comparison report view; richer slicing is easy to add.
+6. **g-eval scoring scale** — implemented as a 1–10 judge score normalised to 0–1 with a
+   reasoning step, matching deep_eval's shape. Exact prompt is a reasonable default, not
+   tuned.

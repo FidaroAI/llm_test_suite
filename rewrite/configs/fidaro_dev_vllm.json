@@ -1,0 +1,18 @@
+{
+  "name": "fidaro-dev",
+  "model": "openai/Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
+  "base_url": "https://099098730db24cb5c3d6d7e24bf97c769f1be1c4-8000.dstack-pha-use1.phala.network/v1",
+  "api_key_env": "FIDARO_API_KEY",
+  "params": {
+    "temperature": 0.7,
+    "max_tokens": 100000
+  },
+  "extra": {
+    "backend_version": "none"
+  },
+  "cache_key_fields": [
+    "model",
+    "temperature",
+    "backend_version"
+  ]
+}

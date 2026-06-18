@@ -1,0 +1,13 @@
+# Standalone project — meant to be lifted into its own repo.
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Local secrets and run artifacts
+.env
+*.sqlite3
+*.db
+results/
+reports/*.html
