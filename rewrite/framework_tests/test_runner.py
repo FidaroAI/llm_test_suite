@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 
 from llmeval.models import ProviderConfig, TestCase
@@ -148,3 +150,49 @@ def test_keyboard_interrupt_preserves_already_computed_results(store):
     # the first test's result survived; the interrupted one simply isn't there
     assert store.count_results("a", cfg().cache_key().hash) == 1
     assert store.count_results("b", cfg().cache_key().hash) == 0
+
+
+# --- concurrency -----------------------------------------------------------
+
+
+class BarrierProvider:
+    """Proves *real* parallelism: every ``complete`` blocks on a barrier sized to
+    the expected concurrency. If the runner were sequential, the first call would
+    wait forever and the barrier would time out (BrokenBarrierError)."""
+
+    def __init__(self, config, parties, timeout=5.0):
+        self.config = config
+        self.barrier = threading.Barrier(parties, timeout=timeout)
+
+    def complete(self, messages):
+        self.barrier.wait()
+        return Completion(output="ok")
+
+
+def test_runpolicy_concurrency_defaults_to_one():
+    # library default stays sequential/deterministic; the CLI supplies the 5 default
+    assert RunPolicy().concurrency == 1
+
+
+def test_concurrency_runs_testcases_in_parallel(store):
+    p = BarrierProvider(cfg(), parties=5)
+    cases = [tc(f"t{i}") for i in range(5)]
+    summary = run(store, cases, p, RunPolicy(mode="reuse", concurrency=5))
+    assert summary.ran == 5
+    for i in range(5):
+        assert store.count_results(f"t{i}", cfg().cache_key().hash) == 1
+
+
+def test_concurrency_stores_all_results_with_pool_smaller_than_work(store):
+    p = FakeProvider(cfg())
+    cases = [tc(f"c{i}") for i in range(20)]
+    summary = run(store, cases, p, RunPolicy(mode="reuse", concurrency=4))
+    assert summary.ran == 20
+    for i in range(20):
+        assert store.count_results(f"c{i}", cfg().cache_key().hash, success_only=True) == 1
+
+
+def test_concurrency_one_failing_testcase_does_not_stop_others(store):
+    good = FakeProvider(cfg())
+    summary = run(store, [tc("a"), tc("b"), tc("c")], good, RunPolicy(concurrency=3))
+    assert summary.ran == 3

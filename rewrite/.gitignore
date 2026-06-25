@@ -11,3 +11,6 @@ __pycache__/
 *.db
 results/
 reports/*.html
+
+# Default sqllite
+llmeval.sqlite3

@@ -36,19 +36,59 @@ uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
 
 ```bash
 # 1. Generate standardized, inspectable test cases from a CSV
-llmeval generate-csv --csv generation_sources/simple_facts.csv --suite simple_facts --out testcases/
+uv run llmeval generate-csv --csv generation_sources/simple_facts.csv --suite simple_facts --out testcases/
 
 # 2. Run a provider (echo just returns the prompt — good for plumbing checks)
-llmeval run   --testcases testcases/ --provider configs/echo.json --db demo.sqlite3 --filter suite=simple_facts
+uv run llmeval run   --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
 
 # 3. Grade cached outputs (deterministic assertions need no judge)
-llmeval grade --testcases testcases/ --provider configs/echo.json --db demo.sqlite3 --filter suite=simple_facts
+uv run llmeval grade --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
 
 # 4. Render a report
-llmeval report --providers configs/echo.json --db demo.sqlite3 --out report.html
+uv run llmeval report --providers configs/echo.json --out report.html
 ```
 
 Re-run step 2 and you'll see `ran=0 cached=28`: results are reused.
+
+## Generating the standard suites
+
+Beyond ad-hoc CSVs (`generate-csv`), the `generate` command produces the same
+suites as the legacy `tests/*_gen.py` generators, writing inspectable
+`testcases/<suite>.json`:
+
+| Suite | Source | Assertions |
+|---|---|---|
+| `simple_facts`, `simple_facts_regressions` | CSV (`generation_sources/`) | `icontains` |
+| `agentharm_refusal` | `data/agentharm.json` | one refusal `rubric` (`censorship: true`) |
+| `multifaceted` | `data/multifaceted.json` | per-row `rubric` (1–5 anchors embedded) |
+| `research_rubrics` | `data/researchrubrics.json` | `rubric` **and** `g_eval` variants per row |
+| `stock_prices` | CSV + live Stooq fetch | `stock_price` (within 1%) |
+
+```bash
+llmeval generate --suite multifaceted --out testcases/   # one suite
+llmeval generate --all --out testcases/                  # all except network suites
+llmeval generate --suite stock_prices --out testcases/   # hits the network; needs the 'stocks' extra
+```
+
+How many tests each suite emits (and shuffling/stratification) is controlled by a
+suite-generation config (default `suite_generation_config.json`, overridable with
+`--config` or `SUITE_GENERATION_CONFIG_FILE`). A suite absent from the config is
+**off** (emits nothing). Cross-suite `request_type`/`domain` labels are merged
+from `data/classifications/<suite>.json` at generation time. Datasets must be
+downloaded first (`pnpm dataset`); `--all` skips network suites and quietly skips
+any suite whose source isn't present. `stock_prices` bakes the live reference
+into each test at generation time, so run it with `--mode always` (or a fresh DB)
+to avoid a cached answer masking a freshness miss.
+
+Fidelity note: this is generation-only — per-test weighted thresholds and the
+multifaceted 1→5 `rubricPrompt` override from the legacy suite are intentionally
+not reproduced (rubrics grade per-assertion via the standard 0–1 template). See
+`docs/superpowers/specs/2026-06-25-rewrite-all-suites-generation-design.md`.
+
+## Results
+
+Results are stored in a local sqllite db. Default name is llmeval.sqlite3. You can interrogate that
+on the command line to see results.
 
 ## Real providers
 
@@ -110,6 +150,11 @@ the in-flight test is lost, and the next run tops it up.
 first (so `--randomize --limit N` is a random sample); `--seed` fixes the shuffle (default
 `0`, always reproducible). `--filter k=v` narrows by metadata (e.g. `--filter suite=simple_facts`).
 
+**Concurrency:** `--concurrency N` runs N test cases in parallel (default `5`; `1` =
+sequential). Test cases are independent `(test, cache_key)` units, so they fan out across a
+thread pool while the shared SQLite store serialises writes. Ctrl-C stays safe at any
+concurrency — committed results survive and the next run tops up the rest.
+
 ## Assertion types
 
 - **Deterministic** (no judge): `contains`, `icontains`, `equals`, `regex`,
@@ -135,7 +180,7 @@ llmeval/            the package
   models.py         TestCase, AssertionSpec, ProviderConfig
   store.py          SQLite: results (+ full config) / gradings / verdicts
   providers.py      litellm-backed + echo + custom registry
-  runner.py         caching policy, retries, graceful failure
+  runner.py         caching policy, retries, graceful failure, parallel run
   response.py       reasoning-strip transform
   assertions/       deterministic + judge (rubric, g_eval)
   grade.py          apply assertions to cached outputs

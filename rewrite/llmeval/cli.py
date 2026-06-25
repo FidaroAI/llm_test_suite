@@ -19,6 +19,13 @@ import os
 from llmeval.comparison.pickbest import DEFAULT_CRITERION, comparison_key, pick_best
 from llmeval.comparison.report import write_report
 from llmeval.generation.csv_source import generate_from_csv
+from llmeval.generation.suites import (
+    GenPaths,
+    SUITES,
+    all_suite_names,
+    default_paths,
+    write_suite,
+)
 from llmeval.grade import grade
 from llmeval.models import ProviderConfig
 from llmeval.providers import build_provider, make_litellm_judge
@@ -66,12 +73,51 @@ def cmd_generate_csv(args) -> int:
     return 0
 
 
+def cmd_generate(args) -> int:
+    if not args.all and not args.suite:
+        print("error: pass --suite NAME (repeatable) or --all")
+        return 2
+    names = all_suite_names() if args.all else list(args.suite)
+    unknown = [n for n in names if n not in SUITES]
+    if unknown:
+        print(f"error: unknown suite(s) {unknown}; known: {sorted(SUITES)}")
+        return 2
+
+    base = default_paths(args.config)
+    paths = GenPaths(
+        data_dir=args.data_dir or base.data_dir,
+        classifications_dir=args.classifications_dir or base.classifications_dir,
+        generation_sources_dir=args.sources_dir or base.generation_sources_dir,
+        config_path=args.config or base.config_path,
+    )
+    rc = 0
+    for name in names:
+        try:
+            count = write_suite(name, args.out, paths)
+        except FileNotFoundError as exc:
+            # --all is lenient (datasets may not be downloaded); explicit --suite
+            # is a hard error so a typo or missing source is not silently ignored.
+            if args.all:
+                print(f"skipped suite {name!r}: {exc}")
+                continue
+            print(f"error: cannot generate suite {name!r}: {exc}")
+            rc = 1
+            continue
+        print(f"generated {count} test case(s) for suite {name!r} -> {args.out}")
+    return rc
+
+
 def cmd_run(args) -> int:
     store = Store(args.db)
     tcs = load_testcases(args.testcases, _filters(args.filter))
     tcs = select_testcases(tcs, limit=args.limit, randomize=args.randomize, seed=args.seed)
     provider = build_provider(load_provider_config(args.provider))
-    policy = RunPolicy(mode=args.mode, target_n=args.target_n, retries=args.retries)
+    policy = RunPolicy(
+        mode=args.mode,
+        target_n=args.target_n,
+        retries=args.retries,
+        concurrency=args.concurrency,
+    )
     summary = run(store, tcs, provider, policy)
     print(
         f"run: {len(tcs)} test(s); ran={summary.ran} "
@@ -113,6 +159,38 @@ def cmd_report(args) -> int:
     return 0
 
 
+def _add_generate_parser(sub) -> None:
+    g = sub.add_parser("generate-csv", help="transform a CSV into standardized test cases")
+    g.add_argument("--csv", required=True)
+    g.add_argument("--suite", required=True)
+    g.add_argument("--out", required=True, help="output directory")
+    g.add_argument("--prompt-col", default="user")
+    g.add_argument("--expected-col", default="__expected")
+    g.set_defaults(func=cmd_generate_csv)
+
+    gen = sub.add_parser(
+        "generate",
+        help="generate one or more named suites (simple_facts, agentharm_refusal, "
+        "multifaceted, research_rubrics, stock_prices, ...)",
+    )
+    gen.add_argument(
+        "--suite", action="append", default=[],
+        help="suite name (repeatable); see --all for the full set",
+    )
+    gen.add_argument(
+        "--all", action="store_true",
+        help="generate every suite except network ones (stock_prices needs --suite)",
+    )
+    gen.add_argument("--out", default="testcases", help="output directory (default testcases/)")
+    gen.add_argument(
+        "--config", help="suite-generation config JSON (env SUITE_GENERATION_CONFIG_FILE)"
+    )
+    gen.add_argument("--data-dir", help="dir holding dataset JSON (default: repo-root data/)")
+    gen.add_argument("--classifications-dir", help="dir holding <suite>.json label files")
+    gen.add_argument("--sources-dir", help="dir holding CSV sources (default: generation_sources/)")
+    gen.set_defaults(func=cmd_generate)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="llmeval", description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -123,13 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     def add_filters(sp):
         sp.add_argument("--filter", action="append", help="metadata filter k=v (repeatable)")
 
-    g = sub.add_parser("generate-csv", help="transform a CSV into standardized test cases")
-    g.add_argument("--csv", required=True)
-    g.add_argument("--suite", required=True)
-    g.add_argument("--out", required=True, help="output directory")
-    g.add_argument("--prompt-col", default="user")
-    g.add_argument("--expected-col", default="__expected")
-    g.set_defaults(func=cmd_generate_csv)
+    _add_generate_parser(sub)
 
     r = sub.add_parser("run", help="run a provider over test cases (cached by cache key)")
     r.add_argument("--testcases", required=True)
@@ -137,6 +209,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--mode", default="reuse", choices=["reuse", "target_n", "always"])
     r.add_argument("--target-n", type=int, default=1)
     r.add_argument("--retries", type=int, default=2)
+    r.add_argument(
+        "--concurrency", type=int, default=5,
+        help="number of test cases to run in parallel (default 5; 1 = sequential)",
+    )
     r.add_argument("--limit", type=int, default=None, help="run only the first N tests")
     r.add_argument("--randomize", action="store_true", help="shuffle test order before running")
     r.add_argument("--seed", type=int, default=0, help="seed for --randomize (fixed; default 0)")

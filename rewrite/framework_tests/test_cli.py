@@ -1,7 +1,7 @@
 import json
 import os
 
-from llmeval.cli import load_provider_config, main
+from llmeval.cli import build_parser, load_provider_config, main
 
 
 def test_load_provider_config_expands_env(tmp_path, monkeypatch):
@@ -54,6 +54,39 @@ def test_cli_run_is_idempotent_via_cache(tmp_path, capsys):
     s = Store(db)
     assert s.count_results("s-" + __import__("hashlib").sha1(b"Q?").hexdigest()[:10], cfg.cache_key().hash) == 1
     s.close()
+
+
+def test_cli_run_concurrency_flag_defaults_to_five():
+    parser = build_parser()
+    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p"])
+    assert args.concurrency == 5
+
+
+def test_cli_run_concurrency_flag_override():
+    parser = build_parser()
+    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p", "--concurrency", "12"])
+    assert args.concurrency == 12
+
+
+def test_cli_run_with_concurrency_offline(tmp_path):
+    import sqlite3
+
+    csv = tmp_path / "f.csv"
+    csv.write_text(
+        'user,__expected\n"q1?","icontains:a"\n"q2?","icontains:b"\n"q3?","icontains:c"\n'
+    )
+    tc_dir = tmp_path / "tc"
+    main(["generate-csv", "--csv", str(csv), "--suite", "s", "--out", str(tc_dir)])
+    prov = tmp_path / "echo.json"
+    prov.write_text(json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}}))
+    db = str(tmp_path / "db.sqlite3")
+    rc = main(
+        ["run", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db, "--concurrency", "3"]
+    )
+    assert rc == 0
+    conn = sqlite3.connect(db)
+    assert conn.execute("select count(*) from results").fetchone()[0] == 3
+    conn.close()
 
 
 def test_cli_run_limit_runs_only_n(tmp_path):

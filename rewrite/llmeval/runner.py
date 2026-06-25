@@ -14,6 +14,7 @@ Each result is attempted with retries; a persistent failure is stored as an *err
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -28,6 +29,11 @@ class RunPolicy:
     mode: str = "reuse"
     target_n: int = 1
     retries: int = 2
+    # How many test cases to run in parallel. 1 = sequential (deterministic, the
+    # library default); the CLI raises this to 5. Each test case is an independent
+    # unit of work, so parallelism is across test cases — the per-test attempt
+    # numbering never races.
+    concurrency: int = 1
 
 
 @dataclass
@@ -94,7 +100,28 @@ def run_testcase(store: Store, testcase, provider: Provider, policy: RunPolicy) 
 
 
 def run(store: Store, testcases: Iterable, provider: Provider, policy: RunPolicy) -> RunSummary:
+    """Run a provider over every test case, optionally in parallel.
+
+    Each test case is an independent (test_id, cache_key) unit, so we fan them out
+    across a thread pool of size ``policy.concurrency``. The slow part is the model
+    call in ``provider.complete``; the shared ``Store`` is thread-safe (see store.py).
+    With ``concurrency == 1`` execution is strictly sequential — same as before, which
+    keeps ordering deterministic and lets Ctrl-C leave already-committed results intact.
+    """
+    cases = list(testcases)
+    concurrency = max(1, policy.concurrency)
+
+    if concurrency == 1 or len(cases) <= 1:
+        total = RunSummary()
+        for testcase in cases:
+            total += run_testcase(store, testcase, provider, policy)
+        return total
+
     total = RunSummary()
-    for testcase in testcases:
-        total += run_testcase(store, testcase, provider, policy)
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        futures = [pool.submit(run_testcase, store, tc, provider, policy) for tc in cases]
+        # as_completed yields on the calling thread, so accumulation stays single-threaded;
+        # a worker exception (e.g. KeyboardInterrupt) re-raises here and unwinds the pool.
+        for fut in as_completed(futures):
+            total += fut.result()
     return total

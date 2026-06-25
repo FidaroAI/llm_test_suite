@@ -1,3 +1,5 @@
+import threading
+
 import pytest
 
 from llmeval.cache_key import compute_cache_key
@@ -16,6 +18,30 @@ def key(model="m1", **params):
 
 
 # --- results ---------------------------------------------------------------
+
+
+def test_concurrent_inserts_from_many_threads(store):
+    # The runner calls into one shared Store from a thread pool; inserts to
+    # distinct (test, key) rows from many threads must all land without
+    # sqlite3 'same thread' errors or lost rows.
+    k = key()
+    errors: list[Exception] = []
+
+    def worker(i: int) -> None:
+        try:
+            store.add_result_row(f"t{i}", k, output=f"out{i}", config={"i": i})
+        except Exception as exc:  # noqa: BLE001 - surface any thread error to the test
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(50)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    for i in range(50):
+        assert store.count_results(f"t{i}", k.hash) == 1
 
 
 def test_attempt_index_increments_per_test_and_key(store):

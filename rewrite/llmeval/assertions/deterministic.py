@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from llmeval.assertions.base import AssertionResult, GradeContext, register
@@ -99,3 +100,89 @@ def _refusal(spec: AssertionSpec, output: Any, ctx: GradeContext) -> AssertionRe
     if matches:
         return AssertionResult(False, 0.0, f"refusal language detected: {matches[:3]}")
     return AssertionResult(True, 1.0, "no refusal markers")
+
+
+# Stock-price freshness check — ported from the legacy assert_stock_price.py.
+# Network-free: the live reference is baked into ``spec.params`` at generation time
+# by the stock_prices generator, so grading just parses the answer and compares.
+#
+# Params: reference_price (float), reference_currency (e.g. "USD"/"GBp"),
+# reference_fetched_at (ISO-8601), symbol (for readable reasons), tolerance_pct
+# (default 1.0), max_age_hours (default 24).
+_NUMBER_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+
+
+def _extract_numbers(text: str) -> list[float]:
+    out = []
+    for tok in _NUMBER_RE.findall(text):
+        try:
+            out.append(float(tok.replace(",", "")))
+        except ValueError:
+            continue
+    return out
+
+
+def _stale_age_hours(fetched_at: Any, max_age_hours: float) -> float | None:
+    """Return the age in hours if it exceeds ``max_age_hours``, else None."""
+    if not fetched_at:
+        return None  # unknown age; don't block on it
+    try:
+        ts = datetime.fromisoformat(str(fetched_at))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    age_h = (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+    return age_h if age_h > max_age_hours else None
+
+
+@register("stock_price")
+def _stock_price(spec: AssertionSpec, output: Any, ctx: GradeContext) -> AssertionResult:
+    p = spec.params
+    symbol = p.get("symbol") or "?"
+    reference = p.get("reference_price")
+    currency = p.get("reference_currency") or ""
+    tol_pct = float(p.get("tolerance_pct", 1.0))
+    max_age_hours = float(p.get("max_age_hours", 24))
+
+    if reference is None:
+        return AssertionResult(
+            False, 0.0,
+            f"no reference price for {symbol}: regenerate the stock_prices suite",
+        )
+    try:
+        reference = float(reference)
+    except (TypeError, ValueError):
+        return AssertionResult(False, 0.0, f"reference for {symbol} not a number: {reference!r}")
+
+    stale = _stale_age_hours(p.get("reference_fetched_at"), max_age_hours)
+    if stale is not None:
+        return AssertionResult(
+            False, 0.0,
+            f"reference for {symbol} is stale ({stale:.1f}h > {max_age_hours:.0f}h): "
+            "regenerate the stock_prices suite",
+        )
+
+    candidates = _extract_numbers(_text(output))
+    if not candidates:
+        return AssertionResult(
+            False, 0.0, f"no number found in answer for {symbol} (ref {reference:g} {currency})"
+        )
+
+    # GBp listings are quoted in pence; an answer in pounds is reference/100.
+    targets = [reference] + ([reference / 100] if currency == "GBp" else [])
+    best_cand, best_diff = None, float("inf")
+    for cand in candidates:
+        for target in targets:
+            if target == 0:
+                continue
+            diff = abs(cand - target) / abs(target)
+            if diff < best_diff:
+                best_diff, best_cand = diff, cand
+
+    within = best_diff <= tol_pct / 100.0
+    reason = (
+        f"{symbol}: reference {reference:g} {currency}; closest answer "
+        f"{best_cand:g} -> {best_diff * 100:.2f}% {'≤' if within else '>'} {tol_pct:g}% tolerance"
+    )
+    return AssertionResult(within, 1.0 if within else 0.0, reason)

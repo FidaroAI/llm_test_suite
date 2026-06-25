@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterator
@@ -133,9 +134,18 @@ CREATE TABLE IF NOT EXISTS verdicts (
 
 
 class Store:
+    """Thread-safe SQLite results store.
+
+    The runner drives one shared Store from a thread pool (``llmeval run --concurrency``).
+    ``sqlite3`` forbids cross-thread use of a connection by default, so we open with
+    ``check_same_thread=False`` and serialize every DB touch behind a re-entrant lock.
+    Writes are tiny relative to model-call latency, so the lock is not a bottleneck.
+    """
+
     def __init__(self, path: str = ":memory:"):
         self.path = path
-        self._conn = sqlite3.connect(path)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._migrate()
@@ -148,16 +158,18 @@ class Store:
             self._conn.execute("ALTER TABLE results ADD COLUMN config_json TEXT")
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     # --- results -----------------------------------------------------------
 
     def _next_attempt(self, test_id: str, key_hash: str) -> int:
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM results WHERE test_id=? AND cache_key_hash=?",
-            (test_id, key_hash),
-        ).fetchone()
-        return int(row[0])
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM results WHERE test_id=? AND cache_key_hash=?",
+                (test_id, key_hash),
+            ).fetchone()
+            return int(row[0])
 
     def add_result_row(
         self,
@@ -172,49 +184,55 @@ class Store:
         config: Any = None,
     ) -> int:
         """Insert a result; return its row id (for attaching gradings)."""
-        attempt = self._next_attempt(test_id, cache_key.hash)
-        cur = self._conn.execute(
-            """INSERT INTO results
-               (test_id, cache_key_hash, cache_key_json, attempt, output, raw_json,
-                reasoning, tokens_json, latency_ms, error, config_json, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                test_id,
-                cache_key.hash,
-                cache_key.canonical,
-                attempt,
-                output,
-                json.dumps(raw) if raw is not None else None,
-                reasoning,
-                json.dumps(tokens) if tokens is not None else None,
-                latency_ms,
-                error,
-                json.dumps(config) if config is not None else None,
-                _now(),
-            ),
-        )
-        self._conn.commit()
-        return int(cur.lastrowid)
+        # Hold the lock across read-attempt + insert + commit so the attempt index
+        # stays consistent when multiple threads write concurrently.
+        with self._lock:
+            attempt = self._next_attempt(test_id, cache_key.hash)
+            cur = self._conn.execute(
+                """INSERT INTO results
+                   (test_id, cache_key_hash, cache_key_json, attempt, output, raw_json,
+                    reasoning, tokens_json, latency_ms, error, config_json, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    test_id,
+                    cache_key.hash,
+                    cache_key.canonical,
+                    attempt,
+                    output,
+                    json.dumps(raw) if raw is not None else None,
+                    reasoning,
+                    json.dumps(tokens) if tokens is not None else None,
+                    latency_ms,
+                    error,
+                    json.dumps(config) if config is not None else None,
+                    _now(),
+                ),
+            )
+            self._conn.commit()
+            return int(cur.lastrowid)
 
     def add_result(self, *args, **kwargs) -> int:
         """Insert a result; return its 0-based attempt index for (test, key)."""
         test_id = args[0] if args else kwargs["test_id"]
         cache_key = args[1] if len(args) > 1 else kwargs["cache_key"]
-        attempt = self._next_attempt(test_id, cache_key.hash)
-        self.add_result_row(*args, **kwargs)
-        return attempt
+        with self._lock:
+            attempt = self._next_attempt(test_id, cache_key.hash)
+            self.add_result_row(*args, **kwargs)
+            return attempt
 
     def count_results(self, test_id: str, key_hash: str, success_only: bool = False) -> int:
         sql = "SELECT COUNT(*) FROM results WHERE test_id=? AND cache_key_hash=?"
         if success_only:
             sql += " AND error IS NULL"
-        return int(self._conn.execute(sql, (test_id, key_hash)).fetchone()[0])
+        with self._lock:
+            return int(self._conn.execute(sql, (test_id, key_hash)).fetchone()[0])
 
     def get_results(self, test_id: str, key_hash: str) -> list[ResultRow]:
-        rows = self._conn.execute(
-            "SELECT * FROM results WHERE test_id=? AND cache_key_hash=? ORDER BY attempt",
-            (test_id, key_hash),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM results WHERE test_id=? AND cache_key_hash=? ORDER BY attempt",
+                (test_id, key_hash),
+            ).fetchall()
         return [self._result_row(r) for r in rows]
 
     @staticmethod
@@ -250,8 +268,9 @@ class Store:
         judge_model: str | None = None,
     ) -> None:
         """Upsert a grading for (result, assertion). Re-grading overwrites."""
-        self._conn.execute(
-            """INSERT INTO gradings
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO gradings
                (result_id, assertion_key, type, metric, score, passed, weight,
                 reason, judge_model, created_at)
                VALUES (?,?,?,?,?,?,?,?,?,?)
@@ -259,25 +278,26 @@ class Store:
                  type=excluded.type, metric=excluded.metric, score=excluded.score,
                  passed=excluded.passed, weight=excluded.weight, reason=excluded.reason,
                  judge_model=excluded.judge_model, created_at=excluded.created_at""",
-            (
-                result_id,
-                assertion_key,
-                type,
-                metric,
-                score,
-                None if passed is None else int(passed),
-                weight,
-                reason,
-                judge_model,
-                _now(),
-            ),
-        )
-        self._conn.commit()
+                (
+                    result_id,
+                    assertion_key,
+                    type,
+                    metric,
+                    score,
+                    None if passed is None else int(passed),
+                    weight,
+                    reason,
+                    judge_model,
+                    _now(),
+                ),
+            )
+            self._conn.commit()
 
     def get_gradings(self, result_id: int) -> list[GradingRow]:
-        rows = self._conn.execute(
-            "SELECT * FROM gradings WHERE result_id=? ORDER BY assertion_key", (result_id,)
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM gradings WHERE result_id=? ORDER BY assertion_key", (result_id,)
+            ).fetchall()
         return [
             GradingRow(
                 id=r["id"],
@@ -297,14 +317,15 @@ class Store:
 
     def iter_graded_results(self, key_hash: str) -> Iterator[GradedResultRow]:
         """Join results+gradings for one cache key — the input to indirect comparison."""
-        rows = self._conn.execute(
-            """SELECT r.id AS result_id, r.test_id, r.cache_key_hash, r.attempt, r.output,
-                      g.assertion_key, g.type, g.metric, g.score, g.passed, g.weight
-               FROM results r JOIN gradings g ON g.result_id = r.id
-               WHERE r.cache_key_hash=?
-               ORDER BY r.test_id, r.attempt, g.assertion_key""",
-            (key_hash,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT r.id AS result_id, r.test_id, r.cache_key_hash, r.attempt, r.output,
+                          g.assertion_key, g.type, g.metric, g.score, g.passed, g.weight
+                   FROM results r JOIN gradings g ON g.result_id = r.id
+                   WHERE r.cache_key_hash=?
+                   ORDER BY r.test_id, r.attempt, g.assertion_key""",
+                (key_hash,),
+            ).fetchall()
         for r in rows:
             yield GradedResultRow(
                 result_id=r["result_id"],
@@ -330,21 +351,23 @@ class Store:
         candidates: list[str],
         reason: str | None = None,
     ) -> None:
-        self._conn.execute(
-            """INSERT INTO verdicts
-               (test_id, comparison_key, winner_hash, candidates_json, reason, created_at)
-               VALUES (?,?,?,?,?,?)
-               ON CONFLICT(test_id, comparison_key) DO UPDATE SET
-                 winner_hash=excluded.winner_hash, candidates_json=excluded.candidates_json,
-                 reason=excluded.reason, created_at=excluded.created_at""",
-            (test_id, comparison_key, winner_hash, json.dumps(candidates), reason, _now()),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO verdicts
+                   (test_id, comparison_key, winner_hash, candidates_json, reason, created_at)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(test_id, comparison_key) DO UPDATE SET
+                     winner_hash=excluded.winner_hash, candidates_json=excluded.candidates_json,
+                     reason=excluded.reason, created_at=excluded.created_at""",
+                (test_id, comparison_key, winner_hash, json.dumps(candidates), reason, _now()),
+            )
+            self._conn.commit()
 
     def get_verdicts(self, comparison_key: str) -> list[VerdictRow]:
-        rows = self._conn.execute(
-            "SELECT * FROM verdicts WHERE comparison_key=? ORDER BY test_id", (comparison_key,)
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM verdicts WHERE comparison_key=? ORDER BY test_id", (comparison_key,)
+            ).fetchall()
         return [
             VerdictRow(
                 id=r["id"],
