@@ -62,9 +62,8 @@ if [[ "$BUILD" == true ]]; then
 fi
 
 # --- Configure runtime environment ---
-VLLM_BASE_URL="https://${APP_ID}-8000.dstack-pha-use1.phala.network/v1"
-export ORCHESTRATOR_VLLM_BASE_URL="$VLLM_BASE_URL"
-export CLASSIFIER_VLLM_BASE_URL="$VLLM_BASE_URL"
+export VLLM1_BASE_URL="https://${APP_ID}-8000.dstack-pha-use1.phala.network/v1"
+export VLLM2_BASE_URL="https://${APP_ID}-8001.dstack-pha-use1.phala.network/v1"
 
 if [[ "$DEPLOYMENT" == "prod" ]]; then
   export GATEWAY_PORT=8082

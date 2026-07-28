@@ -39,7 +39,7 @@ uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
 uv run llmeval generate-csv --csv generation_sources/simple_facts.csv --suite simple_facts --out testcases/
 
 # 2. Run a provider (echo just returns the prompt — good for plumbing checks)
-uv run llmeval run   --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
+uv run --env-file .env llmeval run   --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
 
 # 3. Grade cached outputs (deterministic assertions need no judge)
 uv run llmeval grade --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
