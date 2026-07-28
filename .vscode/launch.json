@@ -1,37 +1,154 @@
 {
   // Debug configs for the `llmeval` CLI (package lives in ./rewrite).
+  //
+  // There is no llmeval/__main__.py, so `-m llmeval` will NOT work — the entry
+  // point is llmeval.cli:main, hence "module": "llmeval.cli" everywhere below.
+  //
+  // Setup once:  cd rewrite && uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
+  // Env:         cp rewrite/.env.example rewrite/.env  (envFile is ignored if absent)
   "version": "0.2.0",
   "configurations": [
     {
-      // PREFERRED: press F5 to start VSCode listening, then run the CLI yourself.
-      // VSCode opens a debug listener on 5678 and waits. In a terminal (from ./rewrite) run:
-      //
-      //   uv run --with debugpy python -m debugpy --connect 5678 --wait-for-client \
-      //     -m llmeval.cli run --testcases testcases/ --provider configs/fidaro_prod.json --filter suite=simple_facts
-      //
-      // The process connects back to this listener and stops at your breakpoints.
-      "name": "llmeval: attach (listen, then run from CLI)",
+      // Prompts for the CLI args on every F5 — the everyday config.
+      // Type args space-separated, e.g.:
+      //   run --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
+      "name": "llmeval: <ask me for args>",
       "type": "debugpy",
-      "request": "attach",
-      "listen": { "host": "127.0.0.1", "port": 5678 },
+      "request": "launch",
+      "module": "llmeval.cli",
+      "args": "${command:pickArgs}",
+      "cwd": "${workspaceFolder}/rewrite",
+      "python": "${workspaceFolder}/rewrite/.venv/bin/python",
+      "envFile": "${workspaceFolder}/rewrite/.env",
+      "env": { "PYTHONPATH": "${workspaceFolder}/rewrite" },
+      "console": "integratedTerminal",
       "justMyCode": false
     },
     {
-      // FALLBACK: runs the command entirely inside VSCode with hardcoded args.
-      // Edit "args" below per run.
-      "name": "llmeval: run (hardcoded args)",
+      // Offline plumbing check: the echo provider needs no API keys.
+      // Concurrency 1 so breakpoints hit on the main thread in a predictable order.
+      "name": "llmeval: run (echo, offline)",
       "type": "debugpy",
       "request": "launch",
       "module": "llmeval.cli",
       "args": [
         "run",
         "--testcases", "testcases/",
-        "--provider", "configs/fidaro_prod.json",
-        "--filter", "suite=simple_facts"
+        "--provider", "configs/echo.json",
+        "--filter", "suite=simple_facts",
+        "--concurrency", "1"
       ],
       "cwd": "${workspaceFolder}/rewrite",
       "python": "${workspaceFolder}/rewrite/.venv/bin/python",
+      "envFile": "${workspaceFolder}/rewrite/.env",
+      "env": { "PYTHONPATH": "${workspaceFolder}/rewrite" },
       "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Real provider. Edit --provider / --filter to taste; --limit keeps a debug
+      // session short, --mode always bypasses the cache so `run` actually calls out
+      // (default `reuse` will report ran=0 and never enter the provider code).
+      "name": "llmeval: run (real provider)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "llmeval.cli",
+      "args": [
+        "run",
+        "--testcases", "testcases/",
+        "--provider", "configs/fidaro_dev.json",
+        "--filter", "suite=simple_facts",
+        "--limit", "3",
+        "--concurrency", "1",
+        "--mode", "always"
+      ],
+      "cwd": "${workspaceFolder}/rewrite",
+      "python": "${workspaceFolder}/rewrite/.venv/bin/python",
+      "envFile": "${workspaceFolder}/rewrite/.env",
+      "env": { "PYTHONPATH": "${workspaceFolder}/rewrite" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Grading replays cached outputs — no model-under-test calls, but the judge
+      // (Bedrock Haiku by default) does need creds from .env.
+      "name": "llmeval: grade",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "llmeval.cli",
+      "args": [
+        "grade",
+        "--testcases", "testcases/",
+        "--provider", "configs/echo.json",
+        "--filter", "suite=simple_facts",
+        "--regrade"
+      ],
+      "cwd": "${workspaceFolder}/rewrite",
+      "python": "${workspaceFolder}/rewrite/.venv/bin/python",
+      "envFile": "${workspaceFolder}/rewrite/.env",
+      "env": { "PYTHONPATH": "${workspaceFolder}/rewrite" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Generation is fully offline (except stock_prices) — good for stepping
+      // through llmeval/generation/ without touching the network.
+      "name": "llmeval: generate --all",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "llmeval.cli",
+      "args": ["generate", "--all", "--out", "testcases/"],
+      "cwd": "${workspaceFolder}/rewrite",
+      "python": "${workspaceFolder}/rewrite/.venv/bin/python",
+      "envFile": "${workspaceFolder}/rewrite/.env",
+      "env": { "PYTHONPATH": "${workspaceFolder}/rewrite" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Report reads only the SQLite store — offline, deterministic, fast to iterate on.
+      "name": "llmeval: report",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "llmeval.cli",
+      "args": [
+        "report",
+        "--providers", "configs/echo.json",
+        "--out", "report.html"
+      ],
+      "cwd": "${workspaceFolder}/rewrite",
+      "python": "${workspaceFolder}/rewrite/.venv/bin/python",
+      "envFile": "${workspaceFolder}/rewrite/.env",
+      "env": { "PYTHONPATH": "${workspaceFolder}/rewrite" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // Debug the framework's own tests. Runs the whole suite; narrow it by adding
+      // e.g. "framework_tests/test_runner.py::test_name" to args.
+      "name": "llmeval: pytest (framework_tests)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q", "-s"],
+      "cwd": "${workspaceFolder}/rewrite",
+      "python": "${workspaceFolder}/rewrite/.venv/bin/python",
+      "env": { "PYTHONPATH": "${workspaceFolder}/rewrite" },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      // For anything the configs above don't cover: press F5 to start VSCode
+      // listening on 5678, then launch the CLI yourself from ./rewrite:
+      //
+      //   uv run --with debugpy python -m debugpy --connect 5678 --wait-for-client \
+      //     -m llmeval.cli run --testcases testcases/ --provider configs/fidaro_prod.json
+      //
+      // The process connects back and stops at your breakpoints.
+      "name": "llmeval: attach (listen on 5678)",
+      "type": "debugpy",
+      "request": "attach",
+      "listen": { "host": "127.0.0.1", "port": 5678 },
       "justMyCode": false
     }
   ]
