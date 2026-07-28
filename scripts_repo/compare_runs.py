@@ -161,6 +161,28 @@ def extract_request_info(eval_json: dict, provider_label: str | None = None) -> 
     return info
 
 
+def extract_prompts(eval_json: dict, provider_label: str | None = None) -> dict:
+    """Map test identity -> the full rendered prompt that was tested.
+
+    Keyed by the same :func:`_test_identity` used for the cell join, so a row's
+    ``key.test`` looks the prompt up directly. The rendered prompt (the last user
+    message; see :func:`_prompt_text`) is identical across providers, so the first
+    result per identity wins. ``provider_label`` scopes to one provider when given
+    (unused here — kept for parity with the other extractors).
+    """
+    out: dict = {}
+    for result in eval_json.get("results", {}).get("results", []):
+        provider = result.get("provider") or {}
+        if provider_label is not None and provider.get("label") != provider_label:
+            continue
+        test_case = result.get("testCase") or {}
+        identity = _test_identity(result, test_case)
+        if identity in out:
+            continue
+        out[identity] = _prompt_text((result.get("prompt") or {}).get("raw") or "")
+    return out
+
+
 def resolve_endpoints(eval_json: dict, base_dir, override_url: str | None = None) -> dict:
     """Map provider label -> {url, api_key, temperature, max_tokens}.
 
@@ -743,6 +765,18 @@ td.delta-within { color: #888; }
 .summary h4, .suite-summary h4 { margin: .6rem 0 .15rem; font-size: .9rem;
             color: #555; }
 .col-baseline { font-weight: 600; }
+/* Prompt column: the full tested prompt can be long, so the cell wraps and is
+   capped in width; a toggle (see _TOGGLE_PROMPT_SCRIPT) hides the column when it
+   makes the scores hard to read. */
+.controls { margin-bottom: 1rem; }
+.controls button { font: inherit; padding: .35rem .7rem; cursor: pointer;
+            border: 1px solid #ccc; border-radius: 6px; background: #fafafa;
+            color: #1a1a1a; }
+.controls button:hover { background: #f0f0f0; }
+th.col-prompt, td.col-prompt { max-width: 32rem; white-space: pre-wrap;
+            overflow-wrap: anywhere; font-size: .85rem; color: #444;
+            vertical-align: top; }
+body.hide-prompt .col-prompt { display: none; }
 """
 
 
@@ -803,6 +837,19 @@ _COPY_SCRIPT = (
     "navigator.clipboard.writeText(b.dataset.curl).then(()=>{"
     "b.classList.add('copied');const t=b.title;b.title='Copied!';"
     "setTimeout(()=>{b.classList.remove('copied');b.title=t;},1200);});});}"
+    "</script>"
+)
+
+
+# Toggles the prompt column on/off (N-provider report only). The full tested
+# prompt is wide; hiding it makes the score columns easier to scan. Driven by a
+# single button whose label flips with the state.
+_TOGGLE_PROMPT_SCRIPT = (
+    "<script>"
+    "(function(){var b=document.getElementById('toggle-prompt');if(!b)return;"
+    "b.addEventListener('click',function(){"
+    "var hidden=document.body.classList.toggle('hide-prompt');"
+    "b.textContent=hidden?'Show prompt column':'Hide prompt column';});})();"
     "</script>"
 )
 
@@ -1184,19 +1231,22 @@ def _row_sort_key(row, others):
 def render_html_n(rows, columns, drift, tolerance,
                   eval_ids=None, ui_base_url=DEFAULT_UI_BASE_URL,
                   errored=None, curls=None, config_path=None,
-                  system_prompt_path=None) -> str:
+                  system_prompt_path=None, prompts=None) -> str:
     """Render the N-provider HTML report.
 
-    Columns: test, assertion type, assertion, metric, one value column per
-    provider (baseline first, tagged), one delta column per non-baseline provider
-    (other - baseline; rubric only), and an N-way ``best`` winner. There is no
-    ``status`` column. ``eval_ids`` / ``errored`` / ``curls`` are keyed by provider
-    key; in a unified run every provider shares one eval id. ``drift`` is
-    ``(missing_from_others, only_in_others)`` from :func:`_drift_n`.
+    Columns: test, prompt, assertion type, assertion, metric, one value column
+    per provider (baseline first, tagged), one delta column per non-baseline
+    provider (other - baseline; rubric only), and an N-way ``best`` winner. There
+    is no ``status`` column. ``eval_ids`` / ``errored`` / ``curls`` are keyed by
+    provider key; in a unified run every provider shares one eval id. ``drift`` is
+    ``(missing_from_others, only_in_others)`` from :func:`_drift_n`. ``prompts``
+    maps test identity -> the full tested prompt (see :func:`extract_prompts`); the
+    prompt column it fills can be hidden via a toggle button.
     """
     eval_ids = eval_ids or {}
     errored = errored or {}
     curls = curls or {}
+    prompts = prompts or {}
     others = [c for c in columns if not c.is_baseline]
 
     aggregate = _summary_tables_html(rows, columns, tolerance, "summary")
@@ -1226,7 +1276,8 @@ def render_html_n(rows, columns, drift, tolerance,
         f'{html.escape(c.key)}{" (baseline)" if c.is_baseline else ""}</th>'
         for c in columns)
     delta_headers = "".join(f"<th>&Delta; {html.escape(c.key)}</th>" for c in others)
-    thead = ("<th>test</th><th>assertion type</th><th>assertion</th><th>metric</th>"
+    thead = ("<th>test</th><th class=\"col-prompt\">prompt</th>"
+             "<th>assertion type</th><th>assertion</th><th>metric</th>"
              + value_headers + delta_headers + "<th>best</th>")
     n_value = len(columns)
     n_delta = len(others)
@@ -1272,6 +1323,7 @@ def render_html_n(rows, columns, drift, tolerance,
                     body_rows.append(
                         f'<tr class="test-{parity}">'
                         f"<td>{html.escape(r.key.test)}</td>"
+                        f'<td class="col-prompt">{html.escape(prompts.get(r.key.test, ""))}</td>'
                         f"<td>{html.escape(r.assertion_type or 'select-best')}</td>"
                         "<td></td><td></td>"
                         + '<td class="num">—</td>' * n_value
@@ -1287,6 +1339,7 @@ def render_html_n(rows, columns, drift, tolerance,
                 body_rows.append(
                     f'<tr class="test-{parity}">'
                     f"<td>{html.escape(r.key.test)}</td>"
+                    f'<td class="col-prompt">{html.escape(prompts.get(r.key.test, ""))}</td>'
                     f"<td>{html.escape(r.assertion_type or '')}</td>"
                     f"<td>{html.escape(r.assertion_value)}</td>"
                     f"<td>{html.escape(r.metric or '')}</td>"
@@ -1310,8 +1363,11 @@ def render_html_n(rows, columns, drift, tolerance,
                          system_prompt_path=system_prompt_path)
         + aggregate
         + drift_html
+        + '<div class="controls"><button type="button" id="toggle-prompt">'
+          "Hide prompt column</button></div>"
         + "".join(sections)
         + _COPY_SCRIPT
+        + _TOGGLE_PROMPT_SCRIPT
         + "</body></html>"
     )
 
@@ -1868,6 +1924,9 @@ def _main_n(args, eval_json, suites) -> int:
     eval_ids = {c.key: eval_id for c in columns}
     errored = {c.key: errored_tests(eval_json, suites, c.label) for c in columns}
     curls = {c.key: build_curls(eval_json, base_dir, None, c.label) for c in columns}
+    # The rendered prompt is the same across providers, so build one map keyed by
+    # test identity (matching each row's key.test) for the prompt column.
+    prompts = extract_prompts(eval_json)
     args.out.write_text(
         render_html_n(
             rows, columns, drift, args.tolerance,
@@ -1875,6 +1934,7 @@ def _main_n(args, eval_json, suites) -> int:
             errored=errored, curls=curls,
             config_path=args.config_path,
             system_prompt_path=args.system_prompt_path,
+            prompts=prompts,
         ),
         encoding="utf-8",
     )

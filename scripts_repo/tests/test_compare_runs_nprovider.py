@@ -9,6 +9,7 @@ from scripts_repo.compare_runs import (
     ProviderColumn,
     best_winner_among,
     build_rows,
+    extract_prompts,
     main,
     parse_provider_col_args,
     render_html_n,
@@ -227,6 +228,82 @@ def test_render_html_n_best_row_names_winner():
     cells = {"base": {k: _best(k, False)}, "ven": {k: _best(k, True)}}
     out = render_html_n(build_rows(cells, cols), cols, drift=([], []), tolerance=0.05)
     assert 'class="best-winner">ven<' in out
+
+
+# --- prompt column ---------------------------------------------------------
+
+
+def _chat_raw(user_text, system_text=None):
+    """A promptfoo prompt.raw chat-messages array string."""
+    msgs = []
+    if system_text is not None:
+        msgs.append({"role": "system", "content": system_text})
+    msgs.append({"role": "user", "content": user_text})
+    return json.dumps(msgs)
+
+
+def test_extract_prompts_maps_identity_to_rendered_user_prompt():
+    ev = make_eval_json([
+        {
+            "provider": {"id": "x", "label": "L_prod"},
+            "prompt": {"label": "user_only", "raw": _chat_raw("What is 2+2?", "be terse")},
+            "testCase": {"description": "t1", "assert": [], "metadata": {"suite": "s"}},
+        }
+    ])
+    # The rendered prompt is the last user message, not the system message.
+    assert extract_prompts(ev) == {"t1": "What is 2+2?"}
+
+
+def test_render_html_n_includes_prompt_column_and_toggle():
+    k = CellKey("t1", "p", "a")
+    cols = [ProviderColumn("fidaro-prod", "L1", True)]
+    cells = {"fidaro-prod": {k: _rubric(k, 0.8)}}
+    out = render_html_n(
+        build_rows(cells, cols), cols, drift=([], []), tolerance=0.05,
+        prompts={"t1": "What is 2+2?"},
+    )
+    assert '<th class="col-prompt">prompt</th>' in out
+    assert '<td class="col-prompt">What is 2+2?</td>' in out
+    # the hide/show toggle button and its script are present
+    assert 'id="toggle-prompt"' in out
+    assert "hide-prompt" in out
+
+
+def test_render_html_n_prompt_missing_renders_empty_cell():
+    k = CellKey("t1", "p", "a")
+    cols = [ProviderColumn("fidaro-prod", "L1", True)]
+    cells = {"fidaro-prod": {k: _rubric(k, 0.8)}}
+    # No prompts map => the column still renders, with an empty cell.
+    out = render_html_n(build_rows(cells, cols), cols, drift=([], []), tolerance=0.05)
+    assert '<td class="col-prompt"></td>' in out
+
+
+def test_main_n_report_shows_tested_prompt(tmp_path):
+    ev = make_eval_json([
+        {
+            "provider": {"id": "x", "label": "L_prod"},
+            "prompt": {"label": "user_only", "raw": _chat_raw("Capital of France?")},
+            "testCase": {
+                "description": "t1",
+                "assert": [{"type": "llm-rubric", "value": "crit", "metric": "M", "weight": 1}],
+                "metadata": {"suite": "research_rubrics"},
+            },
+            "gradingResult": {"score": 0.8, "componentResults": [{"score": 0.8, "pass": True}]},
+        }
+    ])
+    f = tmp_path / "u.json"
+    f.write_text(json.dumps(ev))
+    out = tmp_path / "r.html"
+    rc = main([
+        str(f), str(f),
+        "--baseline-provider-col", "fidaro-prod=L_prod",
+        "--out", str(out),
+    ])
+    assert rc == 0
+    text = out.read_text()
+    assert '<th class="col-prompt">prompt</th>' in text
+    assert "Capital of France?" in text
+    assert 'id="toggle-prompt"' in text
 
 
 # --- main (N-provider CLI path) --------------------------------------------
