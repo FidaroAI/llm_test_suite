@@ -247,11 +247,75 @@ def test_utf8_bom_is_stripped_from_the_first_header(tmp_path):
 
 def test_cli_writes_a_file(tmp_path, csv_file, capsys):
     out = tmp_path / "nested" / "out.html"
-    assert csv_table.main([str(csv_file), "-o", str(out), "--title", "My data"]) == 0
+    # --no-open, or this test would launch a browser on the machine running it.
+    assert (
+        csv_table.main([str(csv_file), "-o", str(out), "--title", "My data", "--no-open"]) == 0
+    )
     html = out.read_text(encoding="utf-8")
     assert "My data" in html
     assert len(rows_from(html)) == 2
     assert "wrote" in capsys.readouterr().out
+
+
+# --- opening the rendered page --------------------------------------------
+
+
+def test_open_is_the_default(tmp_path, csv_file, monkeypatch):
+    out = tmp_path / "t.html"
+    opened = []
+    monkeypatch.setattr(csv_table, "open_in_browser", lambda p: opened.append(p) or True)
+    assert csv_table.main([str(csv_file), "-o", str(out)]) == 0
+    assert opened == [str(out)]
+
+
+def test_no_open_suppresses_the_launch(tmp_path, csv_file, monkeypatch):
+    out = tmp_path / "t.html"
+    opened = []
+    monkeypatch.setattr(csv_table, "open_in_browser", lambda p: opened.append(p) or True)
+    assert csv_table.main([str(csv_file), "-o", str(out), "--no-open"]) == 0
+    assert opened == []
+
+
+def test_nothing_is_opened_when_writing_to_stdout(csv_file, monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(csv_table, "open_in_browser", lambda p: opened.append(p) or True)
+    assert csv_table.main([str(csv_file)]) == 0
+    assert opened == []
+    assert "<!doctype html>" in capsys.readouterr().out
+
+
+def test_darwin_uses_the_open_command(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(csv_table.sys, "platform", "darwin")
+    monkeypatch.setattr(csv_table.subprocess, "run", lambda argv, check: calls.append(argv))
+    target = tmp_path / "t.html"
+    target.write_text("<html></html>")
+    assert csv_table.open_in_browser(str(target)) is True
+    assert calls == [["open", str(target)]]
+
+
+def test_linux_uses_xdg_open(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(csv_table.sys, "platform", "linux")
+    monkeypatch.setattr(csv_table.subprocess, "run", lambda argv, check: calls.append(argv))
+    target = tmp_path / "t.html"
+    target.write_text("<html></html>")
+    assert csv_table.open_in_browser(str(target)) is True
+    assert calls == [["xdg-open", str(target)]]
+
+
+def test_a_failing_launcher_still_exits_zero(tmp_path, csv_file, monkeypatch, capsys):
+    out = tmp_path / "t.html"
+
+    def boom(argv, check):
+        raise OSError("no such tool")
+
+    monkeypatch.setattr(csv_table.sys, "platform", "darwin")
+    monkeypatch.setattr(csv_table.subprocess, "run", boom)
+    # The HTML rendered; a report you have to double-click is not a failed report.
+    assert csv_table.main([str(csv_file), "-o", str(out)]) == 0
+    assert out.exists()
+    assert "could not open" in capsys.readouterr().err
 
 
 def test_cli_writes_to_stdout_without_o(csv_file, capsys):

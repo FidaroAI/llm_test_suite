@@ -8,7 +8,7 @@ This is the shared foundation every reporting tool builds on. Its whole contract
 so ragged rows are fine (a missing key renders empty) and callers never declare a schema.
 The page ships per-column filters, column show/hide, sorting and CSV export.
 
-Two things worth knowing before editing this file:
+Three things worth knowing before editing this file:
 
 * **The page is self-contained.** Tabulator's JS/CSS are vendored in ``assets/`` and
   *inlined*, so a report is a single file that works offline and survives being emailed.
@@ -18,6 +18,10 @@ Two things worth knowing before editing this file:
   deliberate: the embedded JSON escapes ``<``, ``>`` and ``&`` so a value containing
   ``</script>`` cannot close the data block early, and cells render through a formatter
   that sets ``textContent`` on a fresh element rather than any HTML-interpreting path.
+* **The CLI opens what it writes.** ``--open`` is the default because a report you have to
+  go and find is a report you don't read; ``--no-open`` is there for scripts and CI.
+  :func:`render_table` and :func:`write_table` never open anything, so library callers and
+  tests are unaffected.
 """
 
 from __future__ import annotations
@@ -27,7 +31,10 @@ import csv
 import functools
 import json
 import os
+import subprocess
 import sys
+import webbrowser
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from jinja2 import Template
@@ -346,6 +353,33 @@ _TEMPLATE = """<!doctype html>
 </body></html>"""
 
 
+def open_in_browser(path: str) -> bool:
+    """Hand a rendered file to the OS. Returns whether the launch succeeded.
+
+    Best-effort by design: a report that rendered but could not be opened is not a failed
+    report, so a missing or broken launcher is a warning and the caller still succeeds.
+    Otherwise a headless box or an unusual desktop would turn a working report into a
+    non-zero exit.
+
+    ``open``/``xdg-open`` are preferred over :mod:`webbrowser` on the two platforms that
+    have them, because they respect the user's default application for the file type;
+    ``webbrowser`` is the fallback elsewhere.
+    """
+    target = os.path.abspath(path)
+    if sys.platform == "darwin":
+        argv = ["open", target]
+    elif sys.platform.startswith("linux"):
+        argv = ["xdg-open", target]
+    else:
+        return webbrowser.open(Path(target).as_uri())
+    try:
+        subprocess.run(argv, check=True)
+        return True
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"warning: could not open {target}: {exc}", file=sys.stderr)
+        return False
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m reporting.csv_table",
@@ -355,6 +389,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("-o", "--out", help="output HTML path (default: stdout)")
     parser.add_argument("--title", help="page title (default: the CSV's basename)")
     parser.add_argument("--subtitle", help="optional line under the heading")
+    parser.add_argument(
+        "--open", dest="open_after", action="store_true", default=True,
+        help="open the rendered HTML with the OS opener (default)",
+    )
+    parser.add_argument(
+        "--no-open", dest="open_after", action="store_false",
+        help="write the HTML without opening it",
+    )
     args = parser.parse_args(argv)
 
     html = render_csv_file(args.csv, title=args.title, subtitle=args.subtitle)
@@ -364,6 +406,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(html)
         print(f"wrote {args.out}")
+        # Inside the branch: there is no file to open when the page went to stdout.
+        if args.open_after:
+            open_in_browser(args.out)
     else:
         sys.stdout.write(html)
     return 0
