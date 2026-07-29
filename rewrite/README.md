@@ -45,6 +45,15 @@ Practical upshot: if a workflow here feels like too much typing, that's not a bu
 plumbing — it's a porcelain that hasn't been written yet. Rationale:
 **[DESIGN.md §2](DESIGN.md)**.
 
+The porcelain that exists so far lives in **[reporting/](reporting/README.md)**: a generic
+CSV→HTML table viewer (filter any column, show/hide columns, sort, export) and a report
+showing everything a single run produced.
+
+```bash
+python -m reporting.run_report run_20260729-0451 -o run.html --testcases testcases/
+python -m reporting.csv_table anything.csv -o table.html
+```
+
 ## Install
 
 ```bash
@@ -258,6 +267,8 @@ configs/            example provider/judge configs
 generation_sources/ raw inputs (e.g. CSV)
 testcases/          generated + hand-written test cases (inspectable)
 framework_tests/    unit + integration tests for this framework
+reporting/          porcelain: generic CSV->HTML viewer + per-run report (not in the wheel)
+reporting_tests/    tests for the porcelain
 ```
 
 ## Testing & linting

@@ -30,12 +30,19 @@ where = ["."]
 include = ["llmeval*"]
 
 [tool.pytest.ini_options]
-testpaths = ["framework_tests"]
+# framework_tests covers the llmeval package; reporting_tests covers the porcelain in
+# reporting/, which is deliberately not part of the installed package (see reporting/).
+testpaths = ["framework_tests", "reporting_tests"]
 addopts = "-q"
+# `llmeval` is importable via the editable install; `reporting` is not installed (porcelain
+# isn't shipped with the plumbing), so rootdir goes on sys.path. This lives here rather than
+# in a reporting_tests/conftest.py because pytest imports every conftest under the top-level
+# name `conftest`, and a second one would shadow framework_tests/conftest.py's helpers.
+pythonpath = ["."]
 
 [tool.pylint.main]
-# framework_tests holds pytest tests; lint the package proper.
-ignore = ["framework_tests"]
+# The *_tests dirs hold pytest tests; lint the shipped code proper.
+ignore = ["framework_tests", "reporting_tests"]
 
 [tool.pylint.format]
 max-line-length = 100
