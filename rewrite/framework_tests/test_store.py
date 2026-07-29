@@ -4,7 +4,7 @@ import threading
 from datetime import datetime, timezone
 
 import pytest
-from conftest import a_run
+from conftest import a_run, backdate_run
 
 from llmeval.cache_key import compute_cache_key
 from llmeval.store import SCHEMA_VERSION, IncompatibleSchema, Store, new_run_id
@@ -99,6 +99,74 @@ def test_resolve_run_raises_on_ambiguous_prefix(store):
     # "run_" prefixes every id, so it can never identify one
     with pytest.raises(KeyError, match="matches 2 runs"):
         store.resolve_run("run_")
+
+
+# --- run selection ---------------------------------------------------------
+
+
+def test_select_runs_returns_oldest_first(store):
+    newer = backdate_run(store, a_run(store, key()), "2026-07-03T09:00:00+00:00")
+    older = backdate_run(store, a_run(store, key()), "2026-07-01T09:00:00+00:00")
+    assert [r.id for r in store.select_runs()] == [older, newer]
+
+
+def test_select_runs_by_explicit_ids(store):
+    first = backdate_run(store, a_run(store, key()), "2026-07-01T09:00:00+00:00")
+    second = backdate_run(store, a_run(store, key()), "2026-07-02T09:00:00+00:00")
+    backdate_run(store, a_run(store, key()), "2026-07-03T09:00:00+00:00")
+    # Order comes from started_at, not from the order the ids were given in.
+    assert [r.id for r in store.select_runs(ids=[second, first])] == [first, second]
+
+
+def test_select_runs_with_empty_id_list_selects_nothing(store):
+    a_run(store, key())
+    # An empty list means "these zero runs", not "no filter" — None is what means no filter.
+    assert store.select_runs(ids=[]) == []
+
+
+def test_select_runs_with_empty_cache_key_list_selects_nothing(store):
+    a_run(store, key())
+    assert store.select_runs(cache_key_hashes=[]) == []
+
+
+def test_select_runs_bounds_are_inclusive_to_the_second(store):
+    # Microseconds on the stored value must not push it outside a second-precision bound.
+    only = backdate_run(store, a_run(store, key()), "2026-07-02T09:00:00.123456+00:00")
+    assert [r.id for r in store.select_runs(after="2026-07-02T09:00:00")] == [only]
+    assert [r.id for r in store.select_runs(before="2026-07-02T09:00:00")] == [only]
+
+
+def test_select_runs_window_excludes_outside(store):
+    backdate_run(store, a_run(store, key()), "2026-06-30T23:59:59+00:00")
+    inside = backdate_run(store, a_run(store, key()), "2026-07-01T00:00:00+00:00")
+    backdate_run(store, a_run(store, key()), "2026-07-02T00:00:01+00:00")
+    got = store.select_runs(after="2026-07-01T00:00:00", before="2026-07-02T00:00:00")
+    assert [r.id for r in got] == [inside]
+
+
+def test_select_runs_last_n_takes_most_recent_but_returns_oldest_first(store):
+    backdate_run(store, a_run(store, key()), "2026-07-01T09:00:00+00:00")
+    second = backdate_run(store, a_run(store, key()), "2026-07-02T09:00:00+00:00")
+    third = backdate_run(store, a_run(store, key()), "2026-07-03T09:00:00+00:00")
+    assert [r.id for r in store.select_runs(last_n=2)] == [second, third]
+
+
+def test_select_runs_narrows_by_cache_key(store):
+    mine, theirs = key(temperature=0.7), key(temperature=0.2)
+    ours = backdate_run(store, a_run(store, mine), "2026-07-01T09:00:00+00:00")
+    backdate_run(store, a_run(store, theirs), "2026-07-02T09:00:00+00:00")
+    assert [r.id for r in store.select_runs(cache_key_hashes=[mine.hash])] == [ours]
+
+
+def test_select_runs_applies_last_n_after_cache_key(store):
+    """The last 2 runs *of this provider*, not the last 2 runs then keep this provider's."""
+    mine, theirs = key(temperature=0.7), key(temperature=0.2)
+    first = backdate_run(store, a_run(store, mine), "2026-07-01T09:00:00+00:00")
+    second = backdate_run(store, a_run(store, mine), "2026-07-02T09:00:00+00:00")
+    backdate_run(store, a_run(store, theirs), "2026-07-03T09:00:00+00:00")
+    backdate_run(store, a_run(store, theirs), "2026-07-04T09:00:00+00:00")
+    got = store.select_runs(last_n=2, cache_key_hashes=[mine.hash])
+    assert [r.id for r in got] == [first, second]
 
 
 # --- results ---------------------------------------------------------------

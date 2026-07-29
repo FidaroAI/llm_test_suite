@@ -20,6 +20,21 @@ def a_run(store: Store, cache_key: CacheKey, **kwargs) -> str:
     return store.create_run(cache_key, **kwargs)
 
 
+def backdate_run(store: Store, run_id: str, started_at: str) -> str:
+    """Rewrite a run's ``started_at`` so time-window selection can be tested.
+
+    ``create_run`` deliberately has no ``started_at`` parameter — a run is stamped when it
+    opens and nothing legitimate rewrites that. Tests need runs at known times, so they
+    reach past the public API rather than the API growing a hole for them.
+
+    :param started_at: an ISO-8601 UTC string, e.g. ``"2026-07-01T09:00:00+00:00"``.
+    """
+    # pylint: disable=protected-access
+    store._conn.execute("UPDATE runs SET started_at=? WHERE id=?", (started_at, run_id))
+    store._conn.commit()
+    return run_id
+
+
 @pytest.fixture
 def root_logging_restored():
     """Let a test call ``configure_logging``, then put the root logger back as it was.

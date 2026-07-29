@@ -40,7 +40,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 from llmeval.cache_key import CacheKey
 
@@ -346,6 +346,69 @@ class Store:
             matches = ", ".join(r["id"] for r in rows[:5])
             raise KeyError(f"prefix {prefix!r} matches {len(rows)} runs: {matches}...")
         return rows[0]["id"]
+
+    def select_runs(
+        self,
+        *,
+        ids: Sequence[str] | None = None,
+        after: str | None = None,
+        before: str | None = None,
+        last_n: int | None = None,
+        cache_key_hashes: Sequence[str] | None = None,
+    ) -> list[RunRow]:
+        """Runs matching a selection, **oldest first**.
+
+        Every argument arrives already resolved: ``ids`` are full run ids, ``after`` and
+        ``before`` are ``YYYY-MM-DDTHH:MM:SS`` UTC strings, and ``cache_key_hashes``
+        narrows to particular provider identities. Interpreting what the user typed is
+        :mod:`llmeval.runselect`'s job; this method only queries.
+
+        ``None`` means "no filter"; an **empty sequence** means "these zero things", so
+        ``ids=[]`` selects nothing. Conflating the two would make an over-narrowed
+        selection silently widen to everything.
+
+        Bounds compare against ``substr(started_at, 1, 19)`` rather than the column, so
+        both ends are inclusive to the whole second. The stored value carries microseconds
+        (``2026-07-29T06:12:33.123456+00:00``), and a plain text ``<=`` against a
+        second-precision bound would exclude the very run the user named as the end cap.
+
+        ``last_n`` is applied *after* every other filter, so "the last 3 runs of provider
+        X" is one call. It reverses in Python because SQLite cannot return the last N rows
+        in ascending order without a subquery, and this table has one row per invocation.
+        """
+        where: list[str] = []
+        args: list[Any] = []
+        if ids is not None:
+            if not ids:
+                return []
+            where.append(f"id IN ({','.join('?' * len(ids))})")
+            args.extend(ids)
+        if cache_key_hashes is not None:
+            if not cache_key_hashes:
+                return []
+            where.append(f"cache_key_hash IN ({','.join('?' * len(cache_key_hashes))})")
+            args.extend(cache_key_hashes)
+        if after is not None:
+            where.append("substr(started_at, 1, 19) >= ?")
+            args.append(after)
+        if before is not None:
+            where.append("substr(started_at, 1, 19) <= ?")
+            args.append(before)
+
+        sql = "SELECT * FROM runs"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        if last_n is not None:
+            sql += " ORDER BY started_at DESC, id DESC LIMIT ?"
+            args.append(last_n)
+            with self._lock:
+                rows = self._conn.execute(sql, args).fetchall()
+            return [self._run_row(r) for r in reversed(rows)]
+
+        sql += " ORDER BY started_at, id"
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+        return [self._run_row(r) for r in rows]
 
     @staticmethod
     def _run_row(r: sqlite3.Row) -> RunRow:
