@@ -179,6 +179,14 @@ def test_report_with_an_unknown_run_id_is_an_error(tmp_path):
     assert rc == 2
 
 
+def test_report_with_an_ambiguous_run_prefix_is_an_error(tmp_path):
+    tc_dir, prov, db = _echo_setup(tmp_path)
+    main(["run", "--testcases", tc_dir, "--provider", prov, "--db", db, "--mode", "always"])
+    # "run_" prefixes every id, so it can never identify one.
+    rc = main(["report", "--db", db, "--out", str(tmp_path / "o.csv"), "--run-id", "run_"])
+    assert rc == 2
+
+
 def test_report_run_selection_that_matches_nothing_is_not_an_error(tmp_path):
     _, _, db = _echo_setup(tmp_path)
     out = tmp_path / "rows.csv"

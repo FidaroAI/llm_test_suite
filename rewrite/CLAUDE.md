@@ -36,11 +36,13 @@ subcommand, and prefer porcelain over a flag.
 
 Porcelain may depend on exactly these three, so treat changes to them as breaking:
 
-1. **CLI subcommands** — `generate`, `generate-csv`, `run`, `grade`, `pickbest`, `report`
-   (see [llmeval/cli.py](llmeval/cli.py)). Note that the aggregation/statistics step the
-   docs call "compare" has no subcommand of its own: it's
-   [comparison/stats.py](llmeval/comparison/stats.py), reached via `report` or as a library
-   call. Exposing it directly would be a legitimate plumbing addition.
+1. **CLI subcommands** — `generate`, `generate-csv`, `run`, `grade`, `pickbest`, `report`,
+   `compare-report` (see [llmeval/cli.py](llmeval/cli.py)). `report` emits **CSV** result
+   rows — rendering them as a page is porcelain — while `compare-report` is the statistics
+   and pick-best HTML. Note that the aggregation/statistics step the docs call "compare" has
+   no subcommand of its own: it's [comparison/stats.py](llmeval/comparison/stats.py),
+   reached via `compare-report` or as a library call. Exposing it directly would be a
+   legitimate plumbing addition.
 2. **Test-case JSON** in `testcases/` (see [llmeval/models.py](llmeval/models.py)).
 3. **SQLite schema** — `runs` / `results` / `gradings` / `verdicts` (see
    [llmeval/store.py](llmeval/store.py)). Querying it with plain SQL is a supported way to

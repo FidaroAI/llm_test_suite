@@ -50,39 +50,33 @@ That costs ~470KB per report, which is the deliberate trade.
   entities inside `<script>`/`<style>`, so autoescaping them ships a corrupted library.
   There's a test asserting each asset appears verbatim.
 
-## The run report: `run_report`
+### Opening what it writes
 
-Everything one run produced, as a filterable table.
+`--open` is the default when writing to a file, so the command lands you in a browser. Pass
+`--no-open` in scripts and CI. A launcher that isn't there is a warning, not a failure — the
+HTML rendered, and a report you have to double-click is not a failed report.
+
+## Rendering an llmeval report
+
+`llmeval report` does the selecting and emits CSV; this package renders it. Two commands,
+because the split is the point — every filter is decided once, in the plumbing, and the
+renderer's only input is a file.
 
 ```bash
-python -m reporting.run_report run_20260729-0451 -o run.html \
-    --db llmeval.sqlite3 --testcases testcases/ --csv run.csv
+uv run llmeval report --run-last-n 3 --provider configs/fidaro_prod.json \
+    --testcases testcases/ --out results.csv
+python -m reporting.csv_table results.csv -o results.html --title "last 3 runs"
 ```
 
-The run argument accepts any unambiguous **prefix** of a run id. `--csv` additionally writes
-the rows out, which is also how you feed them to something else.
-
-**One row per result × assertion.** Result fields repeat across a test's assertions, so
-`assertion_key` / `metric` / `score` / `passed` are ordinary columns you can filter on. A
-result with no gradings still yields one row with those columns empty — which is what a
-freshly-run, not-yet-graded run looks like.
-
-`--testcases` is optional and adds `prompt`, `request_type` and `domain` by joining on
-`test_id`. Without it those columns are absent entirely; with it, a `test_id` that isn't in
-the files gets empty values rather than an error.
-
-Two behaviours worth knowing:
-
-* `suite` comes from testcase metadata when available. The fallback parses the
-  `<suite>-<sha1[:10]>[-<variant>]` id shape rather than splitting on `-`, which would
-  mangle variant-suffixed ids.
-* `output` and `reasoning` are stripped of **surrounding** whitespace. Gateway outputs start
-  with blank lines (the `\n\n\n` reasoning-split artifact), which would otherwise push the
-  answer out of the visible cell. Internal formatting is untouched and the store keeps the
-  raw value.
+The CSV has one row per (result × assertion), plus one row per **errored** result with the
+grading columns empty. Rows are grouped by run in chronological order and by attempt within
+a test, so a retried test reads as its failures followed by the answer. See
+[`llmeval/resultrows.py`](../llmeval/resultrows.py) for the column list and the ordering
+guarantee, and the [main README](../README.md#reporting) for the selection flags.
 
 ## Adding a tool
 
-Build rows, hand them to `csv_table.write_table`. Keep row building in a pure function so
-it's testable without HTML — `run_report.run_rows` is the pattern. Tests live in
-`../reporting_tests/`, offline, no credentials.
+Build rows, hand them to `csv_table.write_table`. If the rows come from the store, don't
+build them here at all: which rows a report contains is a plumbing capability and belongs in
+`llmeval/` next to `resultrows.py`, so that it stays testable without HTML and reusable by
+anything that reads a CSV. Tests live in `../reporting_tests/`, offline, no credentials.

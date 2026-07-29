@@ -46,12 +46,12 @@ plumbing — it's a porcelain that hasn't been written yet. Rationale:
 **[DESIGN.md §2](DESIGN.md)**.
 
 The porcelain that exists so far lives in **[reporting/](reporting/README.md)**: a generic
-CSV→HTML table viewer (filter any column, show/hide columns, sort, export) and a report
-showing everything a single run produced.
+CSV→HTML table viewer (filter any column, show/hide columns, sort, export) that opens what
+it renders.
 
 ```bash
-python -m reporting.run_report run_20260729-0451 -o run.html --testcases testcases/
-python -m reporting.csv_table anything.csv -o table.html
+uv run llmeval report --run-last-n 3 --testcases testcases/ --out results.csv
+python -m reporting.csv_table results.csv -o results.html
 ```
 
 ## Install
@@ -73,8 +73,9 @@ uv run --env-file .env llmeval run   --testcases testcases/ --provider configs/e
 # 3. Grade cached outputs (deterministic assertions need no judge)
 uv run llmeval grade --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
 
-# 4. Render a report
-uv run llmeval report --providers configs/echo.json --out report.html
+# 4. Emit the result rows, then view them (the second command opens a browser)
+uv run llmeval report --testcases testcases/ --provider configs/echo.json --out results.csv
+uv run python -m reporting.csv_table results.csv -o report.html
 ```
 
 Re-run step 2 and you'll see `ran=0 cached=28`: results are reused.
@@ -154,6 +155,81 @@ WHERE ru.cache_key_hash = '<hash>' ORDER BY r.test_id, r.id;
 There is **no migration path**: the store checks `PRAGMA user_version` on open and refuses
 a database written by an older build, telling you to delete it.
 
+## Selecting which runs to read
+
+`grade` and `report` both read stored results, so both take the same four flags. They fall
+into three groups and the groups **cannot be combined** — `--run-last-n 3 --run-after X` has
+no single obvious reading, so it's an error rather than a guess.
+
+| Flag | Meaning |
+|---|---|
+| `--run-id a,b,c` | exactly these runs; ids or unambiguous prefixes, comma-separated or repeated |
+| `--run-after V` / `--run-before V` | an inclusive window; `V` is `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM`, either with an explicit `+HH:MM`/`Z` offset, **or a run id** |
+| `--run-last-n N` | the N most recent runs |
+
+Omit them all for every run. A bare timestamp is **UTC** — that's what `runs.started_at`
+holds and what the run id embeds, so `--run-after 2026-07-29` lines up with the ids you see
+in the log. `--run-after run_20260729-0451` means "that run and everything after it".
+
+Run selection composes with provider selection, and the provider narrows **first**:
+`--provider configs/fidaro_prod.json --run-last-n 3` is the last three runs *of that
+provider*, not the last three runs overall filtered down to it.
+
+Naming a run that doesn't exist, or one prefix that matches two runs, is an error (exit 2). A
+window that legitimately matches no runs is not — you get an empty table, because "the last
+3 runs of a provider that has had none" is an answer.
+
+## Grading
+
+Grading is per **result**, not per test: `gradings` is unique on
+`(result_id, assertion_key)`, so every attempt carries its own score and a re-run adds a row
+to grade rather than superseding one. `grade` fills in every `(result, assertion)` pair in
+the selected runs that doesn't have a grading yet, and **skips attempts that errored** —
+there is no output to assert against, and the error row is itself the finding.
+
+```bash
+llmeval grade --testcases testcases/ --provider configs/fidaro_prod.json --run-last-n 1
+```
+
+## Reporting
+
+`report` writes the selected result rows as **CSV**. It renders nothing: turning a table
+into a page is a workflow, so that's [reporting/](reporting/README.md)'s job.
+
+```bash
+llmeval report --run-last-n 3 --provider configs/fidaro_prod.json \
+               --testcases testcases/ --db runs.sqlite3 --out results.csv
+python -m reporting.csv_table results.csv -o results.html   # opens in a browser
+```
+
+**One row per (result × assertion)**, plus **one row per errored result** with the grading
+columns empty. Rows are grouped by run in chronological order, and within a test by attempt,
+so a test that failed once and answered on the retry reads top to bottom:
+
+```
+run1, test x, attempt 0, error=timeout, latency_ms=60001
+run1, test x, attempt 1, assertion1, passed=True
+run1, test x, attempt 1, assertion2, passed=False
+run2, test x, attempt 0, assertion1, passed=True
+```
+
+`latency_ms` is filled in for error rows too, which is how "the timeout is too tight" is
+distinguished from "the provider is down".
+
+`--provider` is repeatable and optional (default: every provider in the database), so one
+report can span several configs — `provider` and `cache_key_hash` are columns. `--testcases`
+is optional and does two things: it adds the `prompt`, `request_type` and `domain` columns,
+and it **selects** — only tests present in those files appear, which is what makes
+`--filter suite=simple_facts` work.
+
+The statistics report — bootstrap CIs, deltas against a baseline, pick-best win rates — is
+`compare-report`, unchanged otherwise:
+
+```bash
+llmeval compare-report --providers configs/fidaro_prod.json configs/venice.json \
+                       --baseline fidaro-prod --order both --out report.html
+```
+
 ## Real providers
 
 Providers are JSON files (see `configs/`). The `model` is a [litellm](https://docs.litellm.ai)
@@ -181,19 +257,23 @@ Bringing infrastructure up (gateways, sidecars, redeploys) is **out of scope** �
 ## The three workflows
 
 ```bash
-# Batch-run one provider, then read results
-llmeval run --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
+# Batch-run one provider, then read what actually happened
+llmeval run    --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
+llmeval grade  --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
+llmeval report --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3 \
+               --run-last-n 1 --out results.csv
+python -m reporting.csv_table results.csv -o results.html
 
 # Indirect comparison (rate each config, compare ratings)
-llmeval grade  --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
-llmeval grade  --testcases testcases/ --provider configs/fidaro_dev.json  --db runs.sqlite3
-llmeval report --providers configs/fidaro_prod.json configs/fidaro_dev.json \
+llmeval grade --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
+llmeval grade --testcases testcases/ --provider configs/fidaro_dev.json  --db runs.sqlite3
+llmeval compare-report --providers configs/fidaro_prod.json configs/fidaro_dev.json \
                --baseline fidaro-prod --metrics accuracy --db runs.sqlite3 --out report.html
 
 # Direct comparison (judge picks the best; both orderings to fight position bias)
 llmeval pickbest --testcases testcases/ --providers configs/fidaro_prod.json configs/venice.json \
                  --order both --db runs.sqlite3
-llmeval report   --providers configs/fidaro_prod.json configs/venice.json \
+llmeval compare-report --providers configs/fidaro_prod.json configs/venice.json \
                  --order both --db runs.sqlite3 --out report.html
 ```
 
@@ -300,6 +380,8 @@ llmeval/            the package
   cache_key.py      user-controlled cache key
   models.py         TestCase, AssertionSpec, ProviderConfig
   store.py          SQLite: runs / results (+ full config) / gradings / verdicts
+  runselect.py      which runs a result-reading stage looks at
+  resultrows.py     stored results -> report rows + CSV
   providers.py      litellm-backed + echo + custom registry
   runner.py         caching policy, retries, timeouts, graceful failure, parallel run
   logs.py           logging config + per-thread deferred emission (readable parallel runs)
@@ -313,7 +395,7 @@ configs/            example provider/judge configs
 generation_sources/ raw inputs (e.g. CSV)
 testcases/          generated + hand-written test cases (inspectable)
 framework_tests/    unit + integration tests for this framework
-reporting/          porcelain: generic CSV->HTML viewer + per-run report (not in the wheel)
+reporting/          porcelain: generic CSV->HTML viewer (not in the wheel)
 reporting_tests/    tests for the porcelain
 ```
 

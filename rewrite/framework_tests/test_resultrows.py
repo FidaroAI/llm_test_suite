@@ -58,6 +58,12 @@ def test_metadata_wins_over_the_id_shape():
     assert suite_of("simple_facts-6c3396ab0e", case) == "overridden"
 
 
+def test_metadata_without_a_suite_key_falls_through_to_the_id():
+    """A hand-written test case may carry metadata but no suite; don't return None for it."""
+    case = a_case("simple_facts-6c3396ab0e", request_type="coding")
+    assert suite_of("simple_facts-6c3396ab0e", case) == "simple_facts"
+
+
 # --- one row per (result, assertion) ------------------------------------
 
 
@@ -196,6 +202,15 @@ def test_surrounding_whitespace_is_trimmed_from_text_fields(store):
     row = result_rows(store, runs_of(store, run))[0]
     assert row["output"] == "The answer"
     assert row["reasoning"] == "thinking"
+
+
+def test_trimming_leaves_a_missing_output_as_none(store):
+    """An error row has no output; trimming must not turn None into the string "None"."""
+    run = a_run(store, KEY)
+    store.add_result_row("t-0123456789", run_id=run, error="boom")
+    row = result_rows(store, runs_of(store, run))[0]
+    assert row["output"] is None
+    assert row["reasoning"] is None
 
 
 def test_internal_formatting_is_preserved(store):

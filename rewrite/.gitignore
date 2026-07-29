@@ -11,7 +11,7 @@ __pycache__/
 *.db
 results/
 reports/*.html
-# Generated reports written to the project root (llmeval report / reporting.run_report).
+# Generated reports written to the project root (llmeval report / reporting.csv_table).
 /*.html
 /*.csv
 

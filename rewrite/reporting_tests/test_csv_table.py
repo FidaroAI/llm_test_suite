@@ -337,3 +337,43 @@ def test_write_table_creates_parent_directories(tmp_path):
     out = tmp_path / "a" / "b" / "t.html"
     assert csv_table.write_table([{"a": 1}], str(out), title="t") == str(out)
     assert out.exists()
+
+
+def test_an_llmeval_report_csv_renders_through_this_tool(tmp_path):
+    """The two tools compose: whatever `llmeval report` writes, this renders.
+
+    This is the seam the whole plumbing/porcelain split rests on, so it is checked end to
+    end rather than assumed — a column name or quoting change in `llmeval.resultrows` that
+    broke rendering would otherwise only show up in a browser.
+    """
+    from llmeval.cache_key import compute_cache_key
+    from llmeval.resultrows import result_columns, result_rows, write_csv
+    from llmeval.store import Store
+
+    key = compute_cache_key(model="m1")
+    store = Store(":memory:")
+    try:
+        run = store.create_run(key, provider_name="echo")
+        rid = store.add_result_row(
+            "facts-0123456789",
+            run_id=run,
+            output="an answer, with a comma\nand a newline",
+            latency_ms=12.5,
+        )
+        store.set_grading(rid, "icontains:abc123", type="icontains", score=1.0, passed=True)
+        store.add_result_row("facts-0123456789", run_id=run, error="timeout")
+        rows = result_rows(store, [store.get_run(run)])
+        columns = result_columns(with_tests=False)
+    finally:
+        store.close()
+
+    csv_path = write_csv(rows, columns, str(tmp_path / "rows.csv"))
+    out = tmp_path / "rows.html"
+    assert csv_table.main([csv_path, "-o", str(out), "--no-open"]) == 0
+
+    rendered = rows_from(out.read_text(encoding="utf-8"))
+    assert len(rendered) == 2
+    assert rendered[0]["output"] == "an answer, with a comma\nand a newline"
+    assert rendered[0]["passed"] == "True"
+    assert rendered[1]["error"] == "timeout"
+    assert rendered[1]["assertion_key"] == ""
