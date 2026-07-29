@@ -907,6 +907,9 @@ dev = [
 providers = [
     { name = "litellm" },
 ]
+stocks = [
+    { name = "requests" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -915,8 +918,9 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.5" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "requests", marker = "extra == 'stocks'", specifier = ">=2.28" },
 ]
-provides-extras = ["providers", "dev"]
+provides-extras = ["providers", "stocks", "dev"]
 
 [[package]]
 name = "markdown-it-py"

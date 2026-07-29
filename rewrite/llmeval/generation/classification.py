@@ -11,8 +11,8 @@ re-downloads/reordering and works for suites whose rows carry no stable id.
 Populate the files with the repo's ``scripts_repo/classify_tests.py``.
 
 Unlike the legacy module, this one does **not** attach a promptfoo grading
-transform (the rewrite applies ``strip_reasoning`` per-assertion already) nor the
-``select-best`` env hook (head-to-head is the separate ``pickbest`` command).
+transform (providers normalise their own output, so there is nothing to strip) nor
+the ``select-best`` env hook (head-to-head is the separate ``pickbest`` command).
 """
 
 from __future__ import annotations

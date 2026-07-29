@@ -62,9 +62,17 @@ def test_geval_handles_out_of_ten_phrasing():
     assert grade_assertion(spec, "bad answer", ctx(j)).score == pytest.approx(0.3)
 
 
-def test_judge_sees_reasoning_stripped_answer():
+def test_judge_sees_the_output_verbatim_by_default():
+    # Providers return the answer alone, so nothing is stripped on the way to the judge.
     j = FakeJudge('{"score": 1.0}')
     spec = AssertionSpec(type="rubric", value="accurate")
+    grade_assertion(spec, "Paris is the capital.", ctx(j))
+    assert "Paris is the capital." in j.prompts[0]
+
+
+def test_judge_sees_stripped_answer_when_transform_opted_in():
+    j = FakeJudge('{"score": 1.0}')
+    spec = AssertionSpec(type="rubric", value="accurate", transform="strip_reasoning")
     grade_assertion(spec, "hidden chain of thought\n\n\nParis.", ctx(j))
     assert "hidden chain of thought" not in j.prompts[0]
     assert "Paris." in j.prompts[0]

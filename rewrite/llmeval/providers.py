@@ -7,6 +7,12 @@ registered as a custom factory via :func:`register_provider`.
 
 A provider exposes ``.config`` (a ``ProviderConfig``) and ``.complete(messages)`` →
 ``Completion``. The runner needs nothing more.
+
+Providers are the *only* place that knows a backend's wire format, so they are also the
+only place allowed to reshape it. Every provider returns a ``Completion`` whose ``output``
+is the answer alone and whose ``reasoning`` is the reasoning alone; a backend that inlines
+reasoning in ``content`` must split it here. Everything downstream — grading, reports,
+comparison — then works against one consistent shape and never has to guess.
 """
 
 from __future__ import annotations
@@ -17,7 +23,6 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from llmeval.models import ProviderConfig
-from llmeval.response import DELIMITER
 
 
 @dataclass
@@ -62,13 +67,11 @@ class LiteLLMProvider:
         latency_ms = (time.time() - t0) * 1000.0
 
         msg = resp.choices[0].message
+        # ``output`` is always the answer alone and ``reasoning`` always the reasoning
+        # alone. Reshaping between the two belongs here, in the provider that knows its
+        # own wire format — never downstream, where a grader would have to guess.
         output = msg.content or ""
         reasoning = getattr(msg, "reasoning_content", None)
-        # Normalise to the canonical "reasoning\n\n\nanswer" shape so the shared
-        # strip transform isolates the answer for every provider (some return
-        # reasoning in a separate field rather than inline).
-        if reasoning and DELIMITER not in output:
-            output = f"{reasoning}{DELIMITER}{output}"
 
         usage = getattr(resp, "usage", None)
         tokens = usage.model_dump() if hasattr(usage, "model_dump") else usage

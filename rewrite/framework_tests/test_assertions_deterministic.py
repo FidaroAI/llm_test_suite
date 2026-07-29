@@ -54,12 +54,19 @@ def test_refusal_allow_overrides():
     assert r.passed
 
 
-def test_transform_applied_before_grading():
+def test_no_transform_by_default_so_output_is_graded_verbatim():
+    # Providers hand back the answer alone, so the grader must see exactly what it was
+    # given — nothing is silently stripped.
     out = "secret reasoning here\n\n\nThe capital is Paris."
-    # default strip_reasoning means the reasoning is not visible to the grader
-    spec = AssertionSpec(type="contains", value="reasoning")
+    assert grade_assertion(AssertionSpec(type="contains", value="reasoning"), out).passed
+    assert grade_assertion(AssertionSpec(type="contains", value="Paris"), out).passed
+
+
+def test_transform_applied_before_grading_when_opted_in():
+    out = "secret reasoning here\n\n\nThe capital is Paris."
+    spec = AssertionSpec(type="contains", value="reasoning", transform="strip_reasoning")
     assert not grade_assertion(spec, out).passed
-    spec2 = AssertionSpec(type="contains", value="Paris")
+    spec2 = AssertionSpec(type="contains", value="Paris", transform="strip_reasoning")
     assert grade_assertion(spec2, out).passed
 
 

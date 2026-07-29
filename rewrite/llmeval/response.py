@@ -1,10 +1,18 @@
-"""Output transforms applied *before grading only*.
+"""Opt-in output transforms, applied *before grading only*.
 
-The stored raw output always keeps everything (reasoning included); a transform only
-changes what a given assertion sees. The default ``strip_reasoning`` mirrors the old
-suite: reasoning models emit ``<reasoning>\\n\\n\\n<final answer>`` (an artifact of the
-reasoning parser swapping think-tags for newlines), so graders should see only the part
-after the first triple newline.
+Normalising a backend's wire format is the **provider's** job: every provider returns
+``output`` as the answer alone, with reasoning on its own field. So no transform is
+applied by default, and assertions grade the answer as-is.
+
+These exist as an escape hatch for the case the provider layer cannot cover — a corpus
+of results already in the store that was captured under a different shape, or a backend
+whose format is only distinguishable per test rather than per provider. Set
+``transform`` explicitly on an assertion to opt in.
+
+``strip_reasoning`` handles the legacy shape ``<reasoning>\\n\\n\\n<final answer>`` (an
+artifact of an older reasoning parser swapping think-tags for newlines). Note it splits
+on the *first* triple newline, so it is only safe when the reasoning is known not to
+contain a blank line — which is precisely why it is no longer applied by default.
 """
 
 from __future__ import annotations

@@ -32,7 +32,7 @@ def test_assertions_parsed_with_defaults():
     assert a.type == "icontains"
     assert a.value == "Paris"
     assert a.weight == 1.0
-    assert a.transform == "strip_reasoning"  # default reasoning-strip before grading
+    assert a.transform is None  # no transform: providers already return a clean answer
     assert a.params == {}
 
 

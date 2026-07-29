@@ -24,9 +24,10 @@ class AssertionSpec(BaseModel):
 
     ``value`` is the primary argument (expected substring, rubric criterion, ...).
     ``params`` carries type-specific extras (tolerance, min/max, regex flag, ...).
-    ``transform`` is applied to the output *before grading only*; the stored raw
-    output keeps its reasoning. ``id`` lets re-grading track a specific assertion
-    even after edits.
+    ``transform`` is an *opt-in* reshaping applied to the output before grading only;
+    it defaults to ``None`` because providers already hand back a consistent shape
+    (``output`` is the answer, reasoning lives on its own field). ``id`` lets
+    re-grading track a specific assertion even after edits.
     """
 
     type: str
@@ -35,7 +36,7 @@ class AssertionSpec(BaseModel):
     weight: float = 1.0
     metric: str | None = None
     id: str | None = None
-    transform: str | None = "strip_reasoning"
+    transform: str | None = None
 
 
 class TestCase(BaseModel):
