@@ -1,13 +1,20 @@
 """Command-line interface — one subcommand per pipeline stage.
 
     llmeval generate-csv --csv f.csv --suite facts --out testcases/
-    llmeval run     --testcases testcases/ --provider configs/fidaro_prod.json
-    llmeval grade   --testcases testcases/ --provider configs/fidaro_prod.json
+    llmeval run      --testcases testcases/ --provider configs/fidaro_prod.json
+    llmeval grade    --testcases testcases/ --provider configs/fidaro_prod.json --run-last-n 1
     llmeval pickbest --testcases testcases/ --providers a.json b.json --order both
-    llmeval report  --providers a.json b.json --baseline fidaro-prod --order both --out report.html
+    llmeval report   --run-last-n 3 --testcases testcases/ --out results.csv
+    llmeval compare-report --providers a.json b.json --baseline fidaro-prod --out report.html
 
 Stages share a SQLite DB (``--db``, default ./llmeval.sqlite3). run/grade/pickbest/report
 all read cached results — only ``run`` ever calls the model under test.
+
+``grade`` and ``report`` both read stored results, so both take the same run-selection
+flags (``--run-id``, ``--run-after``/``--run-before``, ``--run-last-n``); see
+:mod:`llmeval.runselect`. ``report`` emits **CSV** — rendering it as a page is porcelain,
+so pipe it to ``python -m reporting.csv_table``. ``compare-report`` is the statistics and
+pick-best HTML.
 
 All output goes through :mod:`logging` to stderr; ``--log-level`` (or
 ``LLMEVAL_LOG_LEVEL``) controls verbosity. Machine-readable results come from the store,
@@ -35,7 +42,9 @@ from llmeval.grade import grade
 from llmeval.logs import configure_logging
 from llmeval.models import ProviderConfig
 from llmeval.providers import build_provider, make_litellm_judge
+from llmeval.resultrows import result_columns, result_rows, write_csv
 from llmeval.runner import RunPolicy, run
+from llmeval.runselect import RunSelectionError, parse_run_selection, resolve_runs
 from llmeval.store import IncompatibleSchema, Store
 from llmeval.testcases import load_testcases, select_testcases
 
@@ -71,6 +80,23 @@ def _filters(items: list[str] | None) -> dict[str, str]:
 def _judge(args):
     cfg = load_provider_config(args.judge) if getattr(args, "judge", None) else DEFAULT_JUDGE
     return make_litellm_judge(cfg)
+
+
+def _run_selection(args):
+    """The run-selection flags, validated. Raises ``RunSelectionError`` on a bad combination."""
+    return parse_run_selection(
+        run_id=args.run_id,
+        run_after=args.run_after,
+        run_before=args.run_before,
+        run_last_n=args.run_last_n,
+    )
+
+
+def _cache_key_hashes(paths: list[str] | None) -> list[str] | None:
+    """Cache-key hashes for the named provider configs, or ``None`` for "every provider"."""
+    if not paths:
+        return None
+    return [load_provider_config(p).cache_key().hash for p in paths]
 
 
 def cmd_generate_csv(args) -> int:
@@ -146,13 +172,23 @@ def cmd_run(args) -> int:
 
 def cmd_grade(args) -> int:
     store = Store(args.db)
-    tcs = load_testcases(args.testcases, _filters(args.filter))
-    cfg = load_provider_config(args.provider)
-    logger.info("grading %d test(s) for %r (regrade=%s)", len(tcs), cfg.name, args.regrade)
-    grade(store, tcs, cfg.cache_key().hash, judge=_judge(args), regrade=args.regrade)
-    logger.info("graded %d test(s) for %r", len(tcs), cfg.name)
-    store.close()
-    return 0
+    try:
+        tcs = load_testcases(args.testcases, _filters(args.filter))
+        cfg = load_provider_config(args.provider)
+        key_hash = cfg.cache_key().hash
+        run_ids = [r.id for r in resolve_runs(store, _run_selection(args), [key_hash])]
+        if not run_ids:
+            logger.warning("no runs match the selection for %r; nothing to grade", cfg.name)
+            return 0
+        logger.info(
+            "grading %d test(s) over %d run(s) for %r (regrade=%s)",
+            len(tcs), len(run_ids), cfg.name, args.regrade,
+        )
+        grade(store, tcs, key_hash, judge=_judge(args), regrade=args.regrade, run_ids=run_ids)
+        logger.info("graded %d test(s) for %r", len(tcs), cfg.name)
+        return 0
+    finally:
+        store.close()
 
 
 def cmd_pickbest(args) -> int:
@@ -169,13 +205,42 @@ def cmd_pickbest(args) -> int:
 
 
 def cmd_report(args) -> int:
+    """Write the selected result rows as CSV. Rendering is porcelain's job.
+
+    Data out, no HTML: turning a CSV into a page (and opening a browser) is a workflow,
+    which per CLAUDE.md lives in ``reporting/`` rather than here. So:
+
+        llmeval report --run-last-n 3 --out rows.csv
+        python -m reporting.csv_table rows.csv -o rows.html
+    """
+    if not os.path.exists(args.db):
+        # sqlite3.connect would happily create an empty database, and the user would get
+        # "0 rows" for what is really a wrong --db path.
+        logger.error("no results database at %s", args.db)
+        return 2
+    store = Store(args.db)
+    try:
+        runs = resolve_runs(store, _run_selection(args), _cache_key_hashes(args.provider))
+        cases_by_id = None
+        if args.testcases:
+            cases_by_id = {c.id: c for c in load_testcases(args.testcases, _filters(args.filter))}
+        rows = result_rows(store, runs, cases_by_id)
+        columns = result_columns(cases_by_id is not None)
+    finally:
+        store.close()
+    write_csv(rows, columns, args.out)
+    logger.info("wrote %d row(s) from %d run(s) -> %s", len(rows), len(runs), args.out)
+    return 0
+
+
+def cmd_compare_report(args) -> int:
     store = Store(args.db)
     configs = [load_provider_config(p) for p in args.providers]
     pairs = [(c.name, c.cache_key().hash) for c in configs]
     metrics = args.metrics if args.metrics else [None]
     ckey = comparison_key(configs, DEFAULT_CRITERION, args.order) if args.order else None
     write_report(store, pairs, metrics, args.out, baseline_name=args.baseline, comparison_key=ckey)
-    logger.info("wrote report -> %s", args.out)
+    logger.info("wrote comparison report -> %s", args.out)
     store.close()
     return 0
 
@@ -212,18 +277,33 @@ def _add_generate_parser(sub) -> None:
     gen.set_defaults(func=cmd_generate)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="llmeval", description=__doc__)
-    sub = p.add_subparsers(dest="command", required=True)
+def _add_db(sp) -> None:
+    sp.add_argument("--db", default=DEFAULT_DB, help="SQLite results DB")
 
-    def add_db(sp):
-        sp.add_argument("--db", default=DEFAULT_DB, help="SQLite results DB")
 
-    def add_filters(sp):
-        sp.add_argument("--filter", action="append", help="metadata filter k=v (repeatable)")
+def _add_filters(sp) -> None:
+    sp.add_argument("--filter", action="append", help="metadata filter k=v (repeatable)")
 
-    _add_generate_parser(sub)
 
+def _add_run_selection(sp) -> None:
+    """The four run-selection flags. Shared by every stage that reads stored results."""
+    sp.add_argument(
+        "--run-id", action="append",
+        help="comma-separated run ids or unambiguous prefixes (repeatable)",
+    )
+    sp.add_argument(
+        "--run-after",
+        help="only runs at or after this point: YYYY-MM-DD or YYYY-MM-DDTHH:MM "
+        "(UTC unless an offset is given), or a run id",
+    )
+    sp.add_argument(
+        "--run-before",
+        help="only runs at or before this point; same forms as --run-after",
+    )
+    sp.add_argument("--run-last-n", type=int, help="only the N most recent runs")
+
+
+def _add_run_parser(sub) -> None:
     r = sub.add_parser("run", help="run a provider over test cases (cached by cache key)")
     r.add_argument("--testcases", required=True)
     r.add_argument("--provider", required=True)
@@ -243,39 +323,80 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--limit", type=int, default=None, help="run only the first N tests")
     r.add_argument("--randomize", action="store_true", help="shuffle test order before running")
     r.add_argument("--seed", type=int, default=0, help="seed for --randomize (fixed; default 0)")
-    add_db(r)
-    add_filters(r)
+    _add_db(r)
+    _add_filters(r)
     r.set_defaults(func=cmd_run)
 
+
+def _add_grade_parser(sub) -> None:
     gr = sub.add_parser("grade", help="grade cached outputs (no model calls)")
     gr.add_argument("--testcases", required=True)
     gr.add_argument("--provider", required=True)
     gr.add_argument("--judge", help="judge provider config JSON (default: Bedrock Haiku)")
     gr.add_argument("--regrade", action="store_true")
-    add_db(gr)
-    add_filters(gr)
+    _add_db(gr)
+    _add_filters(gr)
+    _add_run_selection(gr)
     gr.set_defaults(func=cmd_grade)
 
+
+def _add_pickbest_parser(sub) -> None:
     pb = sub.add_parser("pickbest", help="direct head-to-head over cached outputs")
     pb.add_argument("--testcases", required=True)
     pb.add_argument("--providers", required=True, nargs="+")
     pb.add_argument("--judge")
     pb.add_argument("--order", default="as_is", choices=["as_is", "random", "both"])
     pb.add_argument("--regrade", action="store_true")
-    add_db(pb)
-    add_filters(pb)
+    _add_db(pb)
+    _add_filters(pb)
     pb.set_defaults(func=cmd_pickbest)
 
-    rp = sub.add_parser("report", help="render an HTML comparison report")
-    rp.add_argument("--providers", required=True, nargs="+")
-    rp.add_argument("--baseline", help="baseline provider name (for deltas)")
-    rp.add_argument("--metrics", nargs="*", help="metric names (default: overall)")
+
+def _add_report_parsers(sub) -> None:
+    """The two reporting subcommands: result rows as CSV, and the statistics HTML."""
+    rp = sub.add_parser(
+        "report",
+        help="write the selected result rows as CSV (one row per result x assertion, "
+        "plus one per errored result)",
+    )
+    rp.add_argument("--out", default="results.csv", help="output CSV path")
     rp.add_argument(
+        "--provider", action="append",
+        help="provider config JSON (repeatable; default: every provider in the DB)",
+    )
+    rp.add_argument(
+        "--testcases",
+        help="testcases dir/file; selects which tests appear and adds the prompt, "
+        "request_type and domain columns",
+    )
+    _add_db(rp)
+    _add_filters(rp)
+    _add_run_selection(rp)
+    rp.set_defaults(func=cmd_report)
+
+    cr = sub.add_parser(
+        "compare-report", help="render an HTML comparison report (statistics + pick-best)"
+    )
+    cr.add_argument("--providers", required=True, nargs="+")
+    cr.add_argument("--baseline", help="baseline provider name (for deltas)")
+    cr.add_argument("--metrics", nargs="*", help="metric names (default: overall)")
+    cr.add_argument(
         "--order", choices=["as_is", "random", "both"], help="include pick-best win rates"
     )
-    rp.add_argument("--out", default="report.html")
-    add_db(rp)
-    rp.set_defaults(func=cmd_report)
+    cr.add_argument("--out", default="report.html")
+    _add_db(cr)
+    cr.set_defaults(func=cmd_compare_report)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="llmeval", description=__doc__)
+    sub = p.add_subparsers(dest="command", required=True)
+
+    _add_generate_parser(sub)
+    _add_run_parser(sub)
+    _add_grade_parser(sub)
+    _add_pickbest_parser(sub)
+    _add_report_parsers(sub)
 
     # Every subcommand takes --log-level. Applied in one loop over the registered
     # subparsers rather than per-parser, so a subcommand added later cannot omit it.
@@ -295,8 +416,9 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(getattr(args, "log_level", None))
     try:
         return args.func(args)
-    except IncompatibleSchema as exc:
-        # Expected condition (a DB from an older build), not a bug — no traceback.
+    except (IncompatibleSchema, RunSelectionError) as exc:
+        # Expected conditions (a DB from an older build, a selection that cannot be
+        # satisfied), not bugs — a message, no traceback.
         logger.error("%s", exc)
         return 2
 
