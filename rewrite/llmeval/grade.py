@@ -2,13 +2,22 @@
 
 This stage never calls the model under test — only the (optional) judge. So you can edit
 assertions, add new ones, or change the judge and re-grade existing outputs cheaply.
+
+A grading belongs to a **result**, not to a test: ``gradings`` is unique on
+``(result_id, assertion_key)``, so every attempt a test ever produced can carry its own
+score, and re-running a test adds a row to grade rather than superseding one. Attempts that
+**errored** are skipped entirely — there is no output to assert against, and the error row
+is itself the finding.
+
+``run_ids`` narrows which results are considered, so a re-grade can be aimed at one sitting
+instead of the whole history of a cache key. See :mod:`llmeval.runselect`.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from typing import Callable, Iterable
+from typing import Callable, Collection, Iterable
 
 from llmeval.assertions import GradeContext, grade_assertion
 from llmeval.models import AssertionSpec, TestCase
@@ -38,10 +47,21 @@ def grade_testcase(
     cache_key_hash: str,
     judge: Callable[[str], str] | None = None,
     regrade: bool = False,
+    run_ids: Collection[str] | None = None,
 ) -> None:
-    """Grade every cached (non-error) result of ``testcase`` under one cache key."""
+    """Grade every cached (non-error) result of ``testcase`` under one cache key.
+
+    Every result, not just the newest one — a grading belongs to a result.
+
+    :param run_ids: restrict to results produced by these runs. ``None`` means every run
+        for the cache key. An **empty** collection means no runs, and so grades nothing —
+        the same None-versus-empty distinction :meth:`llmeval.store.Store.select_runs` uses.
+    """
+    allowed = None if run_ids is None else set(run_ids)
     for result in store.get_results(testcase.id, cache_key_hash):
         if result.error is not None:
+            continue
+        if allowed is not None and result.run_id not in allowed:
             continue
         already = set() if regrade else {g.assertion_key for g in store.get_gradings(result.id)}
         ctx = GradeContext(
@@ -74,6 +94,9 @@ def grade(
     cache_key_hash: str,
     judge: Callable[[str], str] | None = None,
     regrade: bool = False,
+    run_ids: Collection[str] | None = None,
 ) -> None:
     for testcase in testcases:
-        grade_testcase(store, testcase, cache_key_hash, judge=judge, regrade=regrade)
+        grade_testcase(
+            store, testcase, cache_key_hash, judge=judge, regrade=regrade, run_ids=run_ids
+        )

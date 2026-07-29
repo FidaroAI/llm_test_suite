@@ -90,3 +90,65 @@ def test_error_rows_are_not_graded(store):
     grade_testcase(store, tc([{"type": "icontains", "value": "Paris"}]), KEY.hash)
     # the only result is an error row; nothing graded
     assert list(store.iter_graded_results(KEY.hash)) == []
+
+
+def test_grades_every_result_across_runs_by_default(store):
+    """A grading belongs to a result, so two runs of one test yield two gradings."""
+    first = store.add_result_row("t1", run_id=a_run(store, KEY), output="Paris is it")
+    second = store.add_result_row("t1", run_id=a_run(store, KEY), output="Also Paris")
+    grade_testcase(store, tc([{"type": "icontains", "value": "Paris"}]), KEY.hash)
+    assert len(store.get_gradings(first)) == 1
+    assert len(store.get_gradings(second)) == 1
+
+
+def test_grades_every_attempt_within_one_run(store):
+    run = a_run(store, KEY)
+    first = store.add_result_row("t1", run_id=run, output="Paris, attempt one")
+    second = store.add_result_row("t1", run_id=run, output="Paris, attempt two")
+    grade_testcase(store, tc([{"type": "icontains", "value": "Paris"}]), KEY.hash)
+    assert len(store.get_gradings(first)) == 1
+    assert len(store.get_gradings(second)) == 1
+
+
+def test_run_ids_narrows_grading_to_those_runs(store):
+    wanted_run = a_run(store, KEY)
+    other_run = a_run(store, KEY)
+    wanted = store.add_result_row("t1", run_id=wanted_run, output="Paris")
+    other = store.add_result_row("t1", run_id=other_run, output="Paris")
+    grade_testcase(
+        store, tc([{"type": "icontains", "value": "Paris"}]), KEY.hash, run_ids=[wanted_run]
+    )
+    assert len(store.get_gradings(wanted)) == 1
+    assert store.get_gradings(other) == []
+
+
+def test_empty_run_ids_grades_nothing(store):
+    rid = seed(store)
+    grade_testcase(store, tc([{"type": "icontains", "value": "Paris"}]), KEY.hash, run_ids=[])
+    assert store.get_gradings(rid) == []
+
+
+def test_error_rows_are_still_skipped_when_narrowing(store):
+    run = a_run(store, KEY)
+    store.add_result_row("t1", run_id=run, error="timeout")
+    grade_testcase(store, tc([{"type": "icontains", "value": "Paris"}]), KEY.hash, run_ids=[run])
+    assert list(store.iter_graded_results(KEY.hash)) == []
+
+
+def test_narrowing_does_not_redo_existing_gradings(store):
+    run = a_run(store, KEY)
+    store.add_result_row("t1", run_id=run, output="Paris")
+
+    class CountingJudge:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, prompt):
+            self.calls += 1
+            return '{"score": 1.0}'
+
+    j = CountingJudge()
+    t = tc([{"type": "rubric", "value": "accurate"}])
+    grade_testcase(store, t, KEY.hash, judge=j, run_ids=[run])
+    grade_testcase(store, t, KEY.hash, judge=j, run_ids=[run])
+    assert j.calls == 1
