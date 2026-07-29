@@ -205,6 +205,22 @@ Per attempt: call provider; retry up to `retries` on exception. If it still fail
 an **error result** (not a crash) and continue with other tests. Passed/usable results
 are persisted immediately, so a later rerun never re-does them.
 
+### [DECISION] Parallel logs are deferred, not interleaved
+
+Running fans test cases across a thread pool, so per-test log records from different
+workers arrive at the handler interleaved and the output becomes unreadable — you cannot
+tell which "retrying" belongs to which prompt. Rather than serialise on a lock per line
+(which orders records but still shreds each test case across the output) or push logs into
+the store (which would make reading them a query), each test case's records are **buffered
+in its own thread and flushed as one contiguous block** when it finishes. Interleaving then
+happens between test cases rather than within them.
+
+The mechanism is a handler wrapper with thread-local buffers, in `llmeval/logs.py`. Costs,
+both documented there and in the README: a block appears only when its test case finishes
+(so the sequential path deliberately doesn't buffer, and `LLMEVAL_LOG_DEFER=0` opts out),
+and timestamps run backwards between blocks because a record is stamped at creation rather
+than emission.
+
 ---
 
 ## 6. Assertions / evaluation types

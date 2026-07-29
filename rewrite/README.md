@@ -191,6 +191,36 @@ sequential). Test cases are independent `(test, cache_key)` units, so they fan o
 thread pool while the shared SQLite store serialises writes. Ctrl-C stays safe at any
 concurrency — committed results survive and the next run tops up the rest.
 
+## Logging
+
+All output goes through the standard `logging` module to **stderr**. Verbosity is
+`--log-level {debug,info,warning,error,critical}` on any subcommand, or `LLMEVAL_LOG_LEVEL`
+in the environment (default `info`). `debug` adds the cache key and cache/to-run counts per
+test case. litellm and the other chatty third-party loggers are pinned to `WARNING`.
+
+Parallel runs would otherwise interleave line by line — two lines of one test case, one of
+another, the rest of the first — so each test case's records are **buffered and flushed as
+one contiguous block** when it finishes:
+
+```
+INFO llmeval.runner run run_20260729-045138-5d8c: 6 test case(s), provider=slow, mode=reuse, concurrency=4
+INFO llmeval.runner facts-03: Question number 3 about geography?
+WARNING llmeval.runner facts-03: attempt 1/2 failed (RuntimeError: connection reset); retrying
+INFO llmeval.runner facts-03: ok in 863ms -> An answer to «Question number 3 ab» with a second line
+INFO llmeval.runner run run_20260729-045138-5d8c: 5/6 test case(s) complete
+```
+
+Two consequences worth knowing:
+
+* A block only appears when its test case **finishes**, so a slow model call is a quiet
+  gap. Sequential runs (`--concurrency 1`) skip buffering entirely and stream live, and
+  `LLMEVAL_LOG_DEFER=0` forces live streaming at any concurrency — use it to watch a call
+  you suspect is hung.
+* **Timestamps run backwards between blocks.** A record is stamped when it is created, not
+  when it is printed, so a test case that started early and finished late prints an early
+  timestamp after a later block. The times are true event times; the log just isn't a
+  clock you can read top to bottom.
+
 ## Assertion types
 
 - **Deterministic** (no judge): `contains`, `icontains`, `equals`, `regex`,
@@ -217,6 +247,7 @@ llmeval/            the package
   store.py          SQLite: runs / results (+ full config) / gradings / verdicts
   providers.py      litellm-backed + echo + custom registry
   runner.py         caching policy, retries, graceful failure, parallel run
+  logs.py           logging config + per-thread deferred emission (readable parallel runs)
   response.py       reasoning-strip transform
   assertions/       deterministic + judge (rubric, g_eval)
   grade.py          apply assertions to cached outputs

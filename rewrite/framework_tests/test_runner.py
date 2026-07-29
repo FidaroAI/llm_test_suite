@@ -1,11 +1,13 @@
+import io
 import threading
 
 import pytest
 from conftest import a_run
 
+from llmeval.logs import configure_logging
 from llmeval.models import ProviderConfig, TestCase
 from llmeval.providers import Completion
-from llmeval.runner import RunPolicy, run, run_testcase
+from llmeval.runner import RunPolicy, excerpt, run, run_testcase
 from llmeval.store import Store
 
 
@@ -265,3 +267,105 @@ def test_concurrency_one_failing_testcase_does_not_stop_others(store):
     good = FakeProvider(cfg())
     result = run(store, [tc("a"), tc("b"), tc("c")], good, RunPolicy(concurrency=3))
     assert result.summary.ran == 3
+
+
+# --- logging ---------------------------------------------------------------
+
+
+def _blocks_for(lines: list[str], test_id: str) -> list[int]:
+    return [n for n, line in enumerate(lines) if f"{test_id}: " in line]
+
+
+def test_parallel_run_keeps_each_test_cases_logs_together(store, root_logging_restored):
+    """Each test case's records must arrive as one contiguous block.
+
+    BarrierProvider makes this a real test rather than a lucky one: no thread can log
+    its result line until every thread has logged its prompt line, so an undeferred
+    runner would necessarily produce four prompt lines followed by four result lines.
+    """
+    stream = io.StringIO()
+    configure_logging("info", stream=stream)
+    cases = [tc(f"t{i}") for i in range(4)]
+    run(store, cases, BarrierProvider(cfg(), parties=4), RunPolicy(mode="reuse", concurrency=4))
+
+    lines = stream.getvalue().splitlines()
+    for i in range(4):
+        idx = _blocks_for(lines, f"t{i}")
+        assert len(idx) == 2, f"expected 2 records for t{i}, got {len(idx)}:\n" + "\n".join(lines)
+        assert idx[1] == idx[0] + 1, f"t{i}'s block was split:\n" + "\n".join(lines)
+
+
+def test_sequential_run_streams_logs_without_deferral(store, root_logging_restored):
+    # Nothing to interleave with, so the sequential path must not pay the latency cost
+    # of buffering: records land as they happen.
+    stream = io.StringIO()
+    configure_logging("info", stream=stream)
+    seen_midway = []
+
+    class WatchingProvider:
+        config = cfg()
+
+        def complete(self, messages):
+            seen_midway.append(stream.getvalue())
+            return Completion(output="ok")
+
+    run(store, [tc("solo")], WatchingProvider(), RunPolicy(mode="reuse", concurrency=1))
+
+    # The prompt line was already emitted while the provider call was in flight.
+    assert "solo: " in seen_midway[0]
+
+
+def test_run_logs_the_run_id_before_calling_the_model(store, root_logging_restored):
+    # The run id is the only handle for querying partial results back, so it has to be
+    # on screen before anything that might hang or be interrupted.
+    stream = io.StringIO()
+    configure_logging("info", stream=stream)
+    seen_midway = []
+
+    class WatchingProvider:
+        config = cfg()
+
+        def complete(self, messages):
+            seen_midway.append(stream.getvalue())
+            return Completion(output="ok")
+
+    result = run(store, [tc()], WatchingProvider(), RunPolicy(mode="reuse"))
+
+    assert result.run_id in seen_midway[0]
+
+
+def test_retries_are_logged(store, run_id, root_logging_restored):
+    stream = io.StringIO()
+    configure_logging("info", stream=stream)
+    run_testcase(store, tc(), FakeProvider(cfg(), fail_times=2), RunPolicy(retries=2), run_id)
+
+    out = stream.getvalue()
+    assert "attempt 1/3 failed" in out
+    assert "attempt 2/3 failed" in out
+
+
+def test_persistent_failure_is_logged_as_an_error(store, run_id, root_logging_restored):
+    stream = io.StringIO()
+    configure_logging("info", stream=stream)
+    run_testcase(store, tc(), FakeProvider(cfg(), always_fail=True), RunPolicy(retries=1), run_id)
+
+    out = stream.getvalue()
+    assert "ERROR" in out
+    assert "failed after 2 attempt(s)" in out
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("short", "short"),
+    ("  padded  ", "padded"),
+    # Newlines collapse: a multi-line answer must not turn one record into many lines,
+    # which would undo the grouping the deferred handler exists to provide.
+    ("line one\nline two", "line one line two"),
+    ("", "<empty>"),
+    (None, "<empty>"),
+])
+def test_excerpt_flattens_and_caps(text, expected):
+    assert excerpt(text) == expected
+
+
+def test_excerpt_truncates_with_an_ellipsis():
+    assert excerpt("x" * 200, limit=10) == "x" * 10 + "..."

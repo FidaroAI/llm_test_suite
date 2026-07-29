@@ -8,12 +8,17 @@
 
 Stages share a SQLite DB (``--db``, default ./llmeval.sqlite3). run/grade/pickbest/report
 all read cached results — only ``run`` ever calls the model under test.
+
+All output goes through :mod:`logging` to stderr; ``--log-level`` (or
+``LLMEVAL_LOG_LEVEL``) controls verbosity. Machine-readable results come from the store,
+not from parsing this output — see CLAUDE.md on the plumbing's public contracts.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 
 from llmeval.comparison.pickbest import DEFAULT_CRITERION, comparison_key, pick_best
@@ -27,12 +32,16 @@ from llmeval.generation.suites import (
     write_suite,
 )
 from llmeval.grade import grade
+from llmeval.logs import configure_logging
 from llmeval.models import ProviderConfig
 from llmeval.providers import build_provider, make_litellm_judge
 from llmeval.runner import RunPolicy, run
 from llmeval.store import IncompatibleSchema, Store
 from llmeval.testcases import load_testcases, select_testcases
 
+logger = logging.getLogger(__name__)
+
+LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 DEFAULT_DB = "llmeval.sqlite3"
 # Matches the legacy suite's judge: Bedrock Claude Haiku, deterministic.
 DEFAULT_JUDGE = ProviderConfig(
@@ -69,18 +78,20 @@ def cmd_generate_csv(args) -> int:
         args.csv, suite=args.suite, out_dir=args.out,
         prompt_col=args.prompt_col, expected_col=args.expected_col,
     )
-    print(f"generated {len(cases)} test case(s) for suite {args.suite!r} -> {args.out}")
+    logger.info(
+        "generated %d test case(s) for suite %r -> %s", len(cases), args.suite, args.out
+    )
     return 0
 
 
 def cmd_generate(args) -> int:
     if not args.all and not args.suite:
-        print("error: pass --suite NAME (repeatable) or --all")
+        logger.error("pass --suite NAME (repeatable) or --all")
         return 2
     names = all_suite_names() if args.all else list(args.suite)
     unknown = [n for n in names if n not in SUITES]
     if unknown:
-        print(f"error: unknown suite(s) {unknown}; known: {sorted(SUITES)}")
+        logger.error("unknown suite(s) %s; known: %s", unknown, sorted(SUITES))
         return 2
 
     base = default_paths(args.config)
@@ -98,12 +109,12 @@ def cmd_generate(args) -> int:
             # --all is lenient (datasets may not be downloaded); explicit --suite
             # is a hard error so a typo or missing source is not silently ignored.
             if args.all:
-                print(f"skipped suite {name!r}: {exc}")
+                logger.warning("skipped suite %r: %s", name, exc)
                 continue
-            print(f"error: cannot generate suite {name!r}: {exc}")
+            logger.error("cannot generate suite %r: %s", name, exc)
             rc = 1
             continue
-        print(f"generated {count} test case(s) for suite {name!r} -> {args.out}")
+        logger.info("generated %d test case(s) for suite %r -> %s", count, name, args.out)
     return rc
 
 
@@ -120,9 +131,11 @@ def cmd_run(args) -> int:
     )
     result = run(store, tcs, provider, policy, notes=args.note)
     summary = result.summary
-    print(
-        f"run {result.run_id}: {len(tcs)} test(s); ran={summary.ran} "
-        f"cached={summary.cached} errors={summary.errors}"
+    # The run's headline. Logged at the end as well as the start (see runner.run) because
+    # this is the line a human reads to decide whether to look at the store at all.
+    logger.info(
+        "run %s finished: %d test(s); ran=%d cached=%d errors=%d",
+        result.run_id, len(tcs), summary.ran, summary.cached, summary.errors,
     )
     store.close()
     return 0
@@ -132,8 +145,9 @@ def cmd_grade(args) -> int:
     store = Store(args.db)
     tcs = load_testcases(args.testcases, _filters(args.filter))
     cfg = load_provider_config(args.provider)
+    logger.info("grading %d test(s) for %r (regrade=%s)", len(tcs), cfg.name, args.regrade)
     grade(store, tcs, cfg.cache_key().hash, judge=_judge(args), regrade=args.regrade)
-    print(f"graded {len(tcs)} test(s) for {cfg.name!r}")
+    logger.info("graded %d test(s) for %r", len(tcs), cfg.name)
     store.close()
     return 0
 
@@ -142,8 +156,11 @@ def cmd_pickbest(args) -> int:
     store = Store(args.db)
     tcs = load_testcases(args.testcases, _filters(args.filter))
     configs = [load_provider_config(p) for p in args.providers]
+    logger.info(
+        "pick-best over %d config(s), %d test(s), order=%s", len(configs), len(tcs), args.order
+    )
     pick_best(store, tcs, configs, _judge(args), order=args.order, regrade=args.regrade)
-    print(f"pick-best over {len(configs)} configs, {len(tcs)} test(s), order={args.order}")
+    logger.info("pick-best complete: %d test(s)", len(tcs))
     store.close()
     return 0
 
@@ -155,7 +172,7 @@ def cmd_report(args) -> int:
     metrics = args.metrics if args.metrics else [None]
     ckey = comparison_key(configs, DEFAULT_CRITERION, args.order) if args.order else None
     write_report(store, pairs, metrics, args.out, baseline_name=args.baseline, comparison_key=ckey)
-    print(f"wrote report -> {args.out}")
+    logger.info("wrote report -> %s", args.out)
     store.close()
     return 0
 
@@ -252,16 +269,27 @@ def build_parser() -> argparse.ArgumentParser:
     add_db(rp)
     rp.set_defaults(func=cmd_report)
 
+    # Every subcommand takes --log-level. Applied in one loop over the registered
+    # subparsers rather than per-parser, so a subcommand added later cannot omit it.
+    for sp in sub.choices.values():
+        sp.add_argument(
+            "--log-level", choices=LOG_LEVELS, default=None,
+            help="verbosity (default: LLMEVAL_LOG_LEVEL, else info)",
+        )
+
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # The entry point owns logging configuration — importing llmeval never touches the
+    # root logger, so a library embedder keeps control of its own handlers.
+    configure_logging(getattr(args, "log_level", None))
     try:
         return args.func(args)
     except IncompatibleSchema as exc:
         # Expected condition (a DB from an older build), not a bug — no traceback.
-        print(f"error: {exc}")
+        logger.error("%s", exc)
         return 2
 
 

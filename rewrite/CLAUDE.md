@@ -51,9 +51,10 @@ else, the CLI is the boundary.
 
 Two consequences to keep in mind:
 
-* **Plumbing output is read by programs, not just people.** Human-readable stdout is fine;
-  human-*only* is not. Anything a person reads off the terminal should also be obtainable
-  from the store.
+* **Plumbing output is read by programs, not just people.** Terminal output is logging on
+  stderr, and porcelain must not parse it — anything a person reads off the terminal has to
+  be obtainable from the store as well. If you add something a caller genuinely needs and
+  it is only in a log line, that is a missing store column, not a formatting task.
 * **Store schema changes are expensive.** There is no migration path — `store.py` checks
   `PRAGMA user_version` and refuses a database written by an older build, telling the user
   to delete it. Porcelain that accumulates historical results pays for every schema bump,
@@ -69,3 +70,21 @@ uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
 
 Tests must stay runnable with no API keys and no network — that's why there's an `echo`
 provider and fake judges. Don't add a test that needs live credentials to pass.
+
+### Logging conventions
+
+* **No `print`.** Use `logger = logging.getLogger(__name__)` per module. `print` in library
+  code cannot be levelled, filtered, redirected, or deferred, and it breaks the grouping
+  described below.
+* **Only the entry point configures logging.** `llmeval.logs.configure_logging` is called
+  from `cli.main` and nowhere else. Importing `llmeval` must never touch the root logger —
+  an embedder owns its own handlers.
+* **Anything that runs in the thread pool must log inside `deferred_logs`**, or its records
+  will interleave with other workers'. `run_testcase` does this via its `defer_logs`
+  argument; if you add another parallel stage (grading and pick-best are sequential today,
+  and both are obvious candidates), wrap its per-unit work the same way.
+* **Prefix per-unit records with the unit's id** (`logger.info("%s: ...", testcase.id)`).
+  Redundant inside a contiguous block, but it is what keeps the output greppable and
+  readable when deferral is off.
+* Use `%s` lazy formatting, not f-strings, in log calls — the standard reason (no
+  formatting cost for a record that gets filtered out).
