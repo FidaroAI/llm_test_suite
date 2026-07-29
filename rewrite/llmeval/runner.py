@@ -10,12 +10,16 @@ Policies:
 
 Each result is attempted with retries; a persistent failure is stored as an *error row*
 (graceful) so the run continues and a later invocation can top it up.
+
+Every invocation opens a *run* and stamps its results with the run id. That is pure
+provenance — it records which sitting produced a row and never affects the caching
+arithmetic above, which stays keyed on ``(test_id, cache_key)`` alone.
 """
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Iterable
 
 from llmeval.providers import Completion, Provider
@@ -50,6 +54,14 @@ class RunSummary:
         )
 
 
+@dataclass
+class RunResult:
+    """What one ``run()`` produced: the counts, plus the id to query them back by."""
+
+    run_id: str
+    summary: RunSummary
+
+
 def _to_run(mode: str, existing_success: int, target_n: int) -> int:
     if mode == "reuse":
         return 0 if existing_success >= 1 else 1
@@ -71,12 +83,12 @@ def _attempt(provider: Provider, messages, retries: int) -> tuple[Completion | N
     return None, last_err
 
 def short_string(s):
-    if len(s) > 50:
-        return f"{s[0:50]}..."
-    else:
-        return s
+    return f"{s[:50]}..." if len(s) > 50 else s
 
-def run_testcase(store: Store, testcase, provider: Provider, policy: RunPolicy) -> RunSummary:
+
+def run_testcase(
+    store: Store, testcase, provider: Provider, policy: RunPolicy, run_id: str
+) -> RunSummary:
     key = provider.config.cache_key()
     config = provider.config.model_dump()  # full config stored alongside every result
     existing = store.count_results(testcase.id, key.hash, success_only=True)
@@ -93,6 +105,7 @@ def run_testcase(store: Store, testcase, provider: Provider, policy: RunPolicy) 
             store.add_result_row(
                 testcase.id,
                 key,
+                run_id=run_id,
                 output=completion.output,
                 raw=completion.raw,
                 reasoning=completion.reasoning,
@@ -102,13 +115,19 @@ def run_testcase(store: Store, testcase, provider: Provider, policy: RunPolicy) 
             )
         else:
             print(f"Error: {err}")
-            store.add_result_row(testcase.id, key, error=err, config=config)
+            store.add_result_row(testcase.id, key, run_id=run_id, error=err, config=config)
             errors += 1
         ran += 1
     return RunSummary(ran=ran, cached=existing, errors=errors)
 
 
-def run(store: Store, testcases: Iterable, provider: Provider, policy: RunPolicy) -> RunSummary:
+def run(
+    store: Store,
+    testcases: Iterable,
+    provider: Provider,
+    policy: RunPolicy,
+    notes: str | None = None,
+) -> RunResult:
     """Run a provider over every test case, optionally in parallel.
 
     Each test case is an independent (test_id, cache_key) unit, so we fan them out
@@ -116,21 +135,37 @@ def run(store: Store, testcases: Iterable, provider: Provider, policy: RunPolicy
     call in ``provider.complete``; the shared ``Store`` is thread-safe (see store.py).
     With ``concurrency == 1`` execution is strictly sequential — same as before, which
     keeps ordering deterministic and lets Ctrl-C leave already-committed results intact.
+
+    Opens a run up front and marks it finished only on the success path. An interrupted
+    run keeps every result it committed but leaves ``finished_at`` NULL, so a partial
+    run is visibly partial rather than silently claiming to have completed. (Deliberately
+    *not* a ``finally`` — that would stamp a crashed run as finished.)
     """
     cases = list(testcases)
     concurrency = max(1, policy.concurrency)
 
-    if concurrency == 1 or len(cases) <= 1:
-        total = RunSummary()
-        for testcase in cases:
-            total += run_testcase(store, testcase, provider, policy)
-        return total
+    run_id = store.create_run(
+        provider.config.cache_key(),
+        provider_name=provider.config.name,
+        config=provider.config.model_dump(),
+        params=asdict(policy),
+        notes=notes,
+    )
 
     total = RunSummary()
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [pool.submit(run_testcase, store, tc, provider, policy) for tc in cases]
-        # as_completed yields on the calling thread, so accumulation stays single-threaded;
-        # a worker exception (e.g. KeyboardInterrupt) re-raises here and unwinds the pool.
-        for fut in as_completed(futures):
-            total += fut.result()
-    return total
+    if concurrency == 1 or len(cases) <= 1:
+        for testcase in cases:
+            total += run_testcase(store, testcase, provider, policy, run_id)
+    else:
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = [
+                pool.submit(run_testcase, store, tc, provider, policy, run_id) for tc in cases
+            ]
+            # as_completed yields on the calling thread, so accumulation stays
+            # single-threaded; a worker exception (e.g. KeyboardInterrupt) re-raises
+            # here and unwinds the pool.
+            for fut in as_completed(futures):
+                total += fut.result()
+
+    store.finish_run(run_id)
+    return RunResult(run_id=run_id, summary=total)

@@ -1,4 +1,5 @@
 import pytest
+from conftest import a_run
 
 from llmeval.cache_key import compute_cache_key
 from llmeval.grade import assertion_key, grade_testcase
@@ -17,7 +18,9 @@ KEY = compute_cache_key(model="m1", params={"temperature": 0.7})
 
 
 def seed(store, output="The capital is Paris.", test_id="t1"):
-    return store.add_result_row(test_id, KEY, output=output, reasoning="thinking")
+    return store.add_result_row(
+        test_id, KEY, run_id=a_run(store, KEY), output=output, reasoning="thinking"
+    )
 
 
 def tc(assertions, test_id="t1"):
@@ -83,7 +86,7 @@ def test_explicit_id_is_used_as_key(store):
 
 
 def test_error_rows_are_not_graded(store):
-    store.add_result_row("t1", KEY, error="timeout")
+    store.add_result_row("t1", KEY, run_id=a_run(store, KEY), error="timeout")
     grade_testcase(store, tc([{"type": "icontains", "value": "Paris"}]), KEY.hash)
     # the only result is an error row; nothing graded
     assert list(store.iter_graded_results(KEY.hash)) == []

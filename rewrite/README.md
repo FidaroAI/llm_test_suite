@@ -90,6 +90,22 @@ not reproduced (rubrics grade per-assertion via the standard 0–1 template). Se
 Results are stored in a local sqllite db. Default name is llmeval.sqlite3. You can interrogate that
 on the command line to see results.
 
+Every `llmeval run` opens a **run** and stamps each result with its id, which the command
+prints when it finishes (`run run_20260729-142530-a3f1: ...`). Add `--note "..."` to record
+why you kicked it off. Runs are provenance only — caching and grading still key on the
+cache key, and `attempt` keeps counting across runs so best-of-N accumulates as expected.
+
+```sql
+-- what runs exist?
+SELECT id, provider_name, notes, started_at, finished_at FROM runs ORDER BY id DESC;
+
+-- everything one run produced (finished_at NULL => it crashed or is still going)
+SELECT test_id, attempt, error, latency_ms FROM results WHERE run_id = 'run_...';
+```
+
+There is **no migration path**: the store checks `PRAGMA user_version` on open and refuses
+a database written by an older build, telling you to delete it.
+
 ## Real providers
 
 Providers are JSON files (see `configs/`). The `model` is a [litellm](https://docs.litellm.ai)
@@ -178,7 +194,7 @@ More advanced "which config is best" methods are a documented extension point (D
 llmeval/            the package
   cache_key.py      user-controlled cache key
   models.py         TestCase, AssertionSpec, ProviderConfig
-  store.py          SQLite: results (+ full config) / gradings / verdicts
+  store.py          SQLite: runs / results (+ full config) / gradings / verdicts
   providers.py      litellm-backed + echo + custom registry
   runner.py         caching policy, retries, graceful failure, parallel run
   response.py       reasoning-strip transform

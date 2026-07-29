@@ -30,7 +30,7 @@ from llmeval.grade import grade
 from llmeval.models import ProviderConfig
 from llmeval.providers import build_provider, make_litellm_judge
 from llmeval.runner import RunPolicy, run
-from llmeval.store import Store
+from llmeval.store import IncompatibleSchema, Store
 from llmeval.testcases import load_testcases, select_testcases
 
 DEFAULT_DB = "llmeval.sqlite3"
@@ -118,9 +118,10 @@ def cmd_run(args) -> int:
         retries=args.retries,
         concurrency=args.concurrency,
     )
-    summary = run(store, tcs, provider, policy)
+    result = run(store, tcs, provider, policy, notes=args.note)
+    summary = result.summary
     print(
-        f"run: {len(tcs)} test(s); ran={summary.ran} "
+        f"run {result.run_id}: {len(tcs)} test(s); ran={summary.ran} "
         f"cached={summary.cached} errors={summary.errors}"
     )
     store.close()
@@ -213,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--concurrency", type=int, default=5,
         help="number of test cases to run in parallel (default 5; 1 = sequential)",
     )
+    r.add_argument("--note", default=None, help="free-text note recorded against this run")
     r.add_argument("--limit", type=int, default=None, help="run only the first N tests")
     r.add_argument("--randomize", action="store_true", help="shuffle test order before running")
     r.add_argument("--seed", type=int, default=0, help="seed for --randomize (fixed; default 0)")
@@ -255,7 +257,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except IncompatibleSchema as exc:
+        # Expected condition (a DB from an older build), not a bug — no traceback.
+        print(f"error: {exc}")
+        return 2
 
 
 if __name__ == "__main__":

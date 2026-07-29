@@ -70,7 +70,8 @@ reducers from inspect; G-Eval from deep_eval) without the dependency.
 generation/  ──►  testcases/*.json          (data: input + assertions + metadata)
                         │
                         ▼
-   run(provider, testcases, policy)  ──►  STORE.results     (cache LLM outputs by cache key)
+   run(provider, testcases, policy)  ──►  STORE.runs        (one row per invocation)
+                        │             └─►  STORE.results     (cache LLM outputs by cache key)
                         │
                         ▼
    grade(testcases, where=cache_key) ──►  STORE.gradings    (assertion scores; re-runnable)
@@ -86,6 +87,18 @@ Each arrow is an independent CLI subcommand and a library call. Crucially, **gra
 **pickbest**, **compare**, and **report** read cached outputs — they never call the model
 under test again. Editing an assertion or adding a new config to a comparison re-runs
 only what's missing.
+
+Two orthogonal axes run through `results`, and keeping them distinct is what makes the
+rest work:
+
+* `cache_key_hash` is **identity** — *what* was under test. Caching, grading and
+  comparison all key on it.
+* `run_id` is **provenance** — *which sitting* produced a row. It never affects caching.
+
+`attempt` numbers within the identity axis and deliberately keeps counting **across**
+runs, so five attempts accumulated over five invocations are the same best-of-N dataset
+as five from one. A run that crashes is left with `finished_at` NULL rather than being
+marked complete.
 
 ---
 

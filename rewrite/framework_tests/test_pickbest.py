@@ -1,6 +1,7 @@
 import re
 
 import pytest
+from conftest import a_run
 
 from llmeval.comparison.pickbest import pick_best_testcase
 from llmeval.models import ProviderConfig, TestCase
@@ -27,7 +28,8 @@ def tc():
 
 
 def seed(store, cfg, output, test_id="t1"):
-    store.add_result_row(test_id, cfg.cache_key(), output=output)
+    key = cfg.cache_key()
+    store.add_result_row(test_id, key, run_id=a_run(store, key), output=output)
 
 
 class ContentJudge:

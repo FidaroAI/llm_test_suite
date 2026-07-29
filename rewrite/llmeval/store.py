@@ -1,7 +1,9 @@
 """SQLite results store — the database the brief asks for.
 
-Three tables, deliberately separated so stages stay decoupled:
+Four tables, deliberately separated so stages stay decoupled:
 
+* ``runs``     — one row per ``llmeval run`` invocation. Gives every result a
+  provenance handle that doesn't depend on reading timestamps out of other columns.
 * ``results``  — cached LLM outputs, one row per (test, cache_key, attempt). Reused so
   expensive calls aren't repeated; topped up to N for best-of-N statistics.
 * ``gradings`` — assertion scores against a result. Separate from results so you can
@@ -10,11 +12,23 @@ Three tables, deliberately separated so stages stay decoupled:
   cached outputs.
 
 Everything analysis needs is a query away (group by ``cache_key_hash``, join gradings).
+
+Two orthogonal axes run through ``results``, and keeping them distinct is what makes
+the rest work:
+
+* ``cache_key_hash`` is *identity* — what was under test.
+* ``run_id`` is *provenance* — which sitting produced this row.
+
+``attempt`` numbers within the identity axis and deliberately keeps counting **across**
+runs, so five attempts accumulated over five invocations are the same dataset as five
+from one. Per-run attempt numbering would conflate the axes and break the top-up
+arithmetic in ``runner._to_run``.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -23,14 +37,56 @@ from typing import Any, Iterator
 
 from llmeval.cache_key import CacheKey
 
+# Bumped whenever the schema changes shape. There is no migration path: a mismatch
+# is a hard error telling the user to delete the file (see ``Store._check_version``).
+SCHEMA_VERSION = 1
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class IncompatibleSchema(RuntimeError):
+    """Raised when a DB on disk was written by a different schema version.
+
+    Typed so the CLI can report it as a plain message instead of a traceback — it's an
+    expected user-facing condition, not a bug.
+    """
+
+
+def new_run_id() -> str:
+    """A sortable, greppable run id: ``run_20260729-142530-a3f1``.
+
+    The UTC timestamp makes ``ORDER BY id`` chronological and lets a human eyeball
+    when a run happened; the random suffix keeps two runs started in the same second
+    distinct. Short enough that a prefix identifies one in practice — see
+    :meth:`Store.resolve_run`.
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"run_{stamp}-{os.urandom(2).hex()}"
+
+
+@dataclass
+class RunRow:
+    id: str
+    provider_name: str | None
+    cache_key_hash: str
+    cache_key_json: str
+    config: Any
+    params: Any
+    notes: str | None
+    started_at: str
+    finished_at: str | None  # None => still running, or the process died
+
+    @property
+    def finished(self) -> bool:
+        return self.finished_at is not None
+
+
 @dataclass
 class ResultRow:
     id: int
+    run_id: str
     test_id: str
     cache_key_hash: str
     cache_key_json: str
@@ -63,6 +119,7 @@ class GradingRow:
 @dataclass
 class GradedResultRow:
     result_id: int
+    run_id: str
     test_id: str
     cache_key_hash: str
     attempt: int
@@ -87,8 +144,22 @@ class VerdictRow:
 
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    provider_name TEXT,
+    cache_key_hash TEXT NOT NULL,
+    cache_key_json TEXT NOT NULL,
+    config_json TEXT,
+    params_json TEXT,
+    notes TEXT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_runs_key ON runs(cache_key_hash);
+
 CREATE TABLE IF NOT EXISTS results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL REFERENCES runs(id),
     test_id TEXT NOT NULL,
     cache_key_hash TEXT NOT NULL,
     cache_key_json TEXT NOT NULL,
@@ -104,6 +175,7 @@ CREATE TABLE IF NOT EXISTS results (
     UNIQUE(test_id, cache_key_hash, attempt)
 );
 CREATE INDEX IF NOT EXISTS idx_results_key ON results(cache_key_hash);
+CREATE INDEX IF NOT EXISTS idx_results_run ON results(run_id);
 
 CREATE TABLE IF NOT EXISTS gradings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,19 +219,129 @@ class Store:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        # Off by default in sqlite3; without it ``results.run_id REFERENCES runs(id)``
+        # is decorative and orphan results become possible again.
+        self._conn.execute("PRAGMA foreign_keys = ON")
+        self._check_version()
         self._conn.executescript(_SCHEMA)
-        self._migrate()
+        self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._conn.commit()
 
-    def _migrate(self) -> None:
-        """Add columns introduced after a DB was first created (idempotent)."""
-        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(results)")}
-        if "config_json" not in cols:
-            self._conn.execute("ALTER TABLE results ADD COLUMN config_json TEXT")
+    def _check_version(self) -> None:
+        """Refuse to open a database written by an incompatible schema.
+
+        There is no migration path by design. A populated DB at the wrong version is a
+        hard error naming the file — we don't silently drop the user's tables, even
+        when the data is cheap to regenerate.
+        """
+        version = int(self._conn.execute("PRAGMA user_version").fetchone()[0])
+        if version == SCHEMA_VERSION:
+            return
+        # A brand-new (or pre-existing but empty) file reports version 0 and has no
+        # tables yet; that's not a mismatch, it's a fresh database.
+        existing = self._conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchone()[0]
+        if version == 0 and existing == 0:
+            return
+        raise IncompatibleSchema(
+            f"{self.path} was written by schema version {version}, but this build "
+            f"expects version {SCHEMA_VERSION}. There is no migration path — delete "
+            f"the file and re-run."
+        )
 
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    # --- runs --------------------------------------------------------------
+
+    def create_run(
+        self,
+        cache_key: CacheKey,
+        provider_name: str | None = None,
+        config: Any = None,
+        params: Any = None,
+        notes: str | None = None,
+    ) -> str:
+        """Open a run and return its id. ``finished_at`` stays NULL until finished."""
+        run_id = new_run_id()
+        with self._lock:
+            self._conn.execute(
+                """INSERT INTO runs
+                   (id, provider_name, cache_key_hash, cache_key_json, config_json,
+                    params_json, notes, started_at, finished_at)
+                   VALUES (?,?,?,?,?,?,?,?,NULL)""",
+                (
+                    run_id,
+                    provider_name,
+                    cache_key.hash,
+                    cache_key.canonical,
+                    json.dumps(config) if config is not None else None,
+                    json.dumps(params) if params is not None else None,
+                    notes,
+                    _now(),
+                ),
+            )
+            self._conn.commit()
+        return run_id
+
+    def finish_run(self, run_id: str) -> None:
+        """Stamp ``finished_at``. A run that crashed simply never gets this call."""
+        with self._lock:
+            self._conn.execute("UPDATE runs SET finished_at=? WHERE id=?", (_now(), run_id))
+            self._conn.commit()
+
+    def get_run(self, run_id: str) -> RunRow | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        return self._run_row(row) if row else None
+
+    def list_runs(self, cache_key_hash: str | None = None, limit: int | None = None):
+        """Runs newest first, optionally narrowed to one cache key."""
+        sql = "SELECT * FROM runs"
+        args: list[Any] = []
+        if cache_key_hash is not None:
+            sql += " WHERE cache_key_hash=?"
+            args.append(cache_key_hash)
+        sql += " ORDER BY started_at DESC, id DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            args.append(limit)
+        with self._lock:
+            rows = self._conn.execute(sql, args).fetchall()
+        return [self._run_row(r) for r in rows]
+
+    def resolve_run(self, prefix: str) -> str:
+        """Expand a run-id prefix to the full id.
+
+        Run ids are 26 characters; nobody types one in full. Raises rather than
+        guessing when the prefix matches nothing or more than one run.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM runs WHERE id LIKE ? ORDER BY id", (prefix + "%",)
+            ).fetchall()
+        if not rows:
+            raise KeyError(f"no run matching prefix {prefix!r}")
+        if len(rows) > 1:
+            matches = ", ".join(r["id"] for r in rows[:5])
+            raise KeyError(f"prefix {prefix!r} matches {len(rows)} runs: {matches}...")
+        return rows[0]["id"]
+
+    @staticmethod
+    def _run_row(r: sqlite3.Row) -> RunRow:
+        return RunRow(
+            id=r["id"],
+            provider_name=r["provider_name"],
+            cache_key_hash=r["cache_key_hash"],
+            cache_key_json=r["cache_key_json"],
+            config=json.loads(r["config_json"]) if r["config_json"] else None,
+            params=json.loads(r["params_json"]) if r["params_json"] else None,
+            notes=r["notes"],
+            started_at=r["started_at"],
+            finished_at=r["finished_at"],
+        )
 
     # --- results -----------------------------------------------------------
 
@@ -175,6 +357,8 @@ class Store:
         self,
         test_id: str,
         cache_key: CacheKey,
+        *,
+        run_id: str,
         output: str | None = None,
         raw: Any = None,
         reasoning: str | None = None,
@@ -183,17 +367,23 @@ class Store:
         error: str | None = None,
         config: Any = None,
     ) -> int:
-        """Insert a result; return its row id (for attaching gradings)."""
+        """Insert a result; return its row id (for attaching gradings).
+
+        ``run_id`` is keyword-only and required: every result must be attributable to
+        a run, so there is no path that produces an orphan row.
+        """
         # Hold the lock across read-attempt + insert + commit so the attempt index
         # stays consistent when multiple threads write concurrently.
         with self._lock:
             attempt = self._next_attempt(test_id, cache_key.hash)
             cur = self._conn.execute(
                 """INSERT INTO results
-                   (test_id, cache_key_hash, cache_key_json, attempt, output, raw_json,
-                    reasoning, tokens_json, latency_ms, error, config_json, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (run_id, test_id, cache_key_hash, cache_key_json, attempt, output,
+                    raw_json, reasoning, tokens_json, latency_ms, error, config_json,
+                    created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
+                    run_id,
                     test_id,
                     cache_key.hash,
                     cache_key.canonical,
@@ -211,13 +401,11 @@ class Store:
             self._conn.commit()
             return int(cur.lastrowid)
 
-    def add_result(self, *args, **kwargs) -> int:
+    def add_result(self, test_id: str, cache_key: CacheKey, **kwargs) -> int:
         """Insert a result; return its 0-based attempt index for (test, key)."""
-        test_id = args[0] if args else kwargs["test_id"]
-        cache_key = args[1] if len(args) > 1 else kwargs["cache_key"]
         with self._lock:
             attempt = self._next_attempt(test_id, cache_key.hash)
-            self.add_result_row(*args, **kwargs)
+            self.add_result_row(test_id, cache_key, **kwargs)
             return attempt
 
     def count_results(self, test_id: str, key_hash: str, success_only: bool = False) -> int:
@@ -235,10 +423,19 @@ class Store:
             ).fetchall()
         return [self._result_row(r) for r in rows]
 
+    def get_results_for_run(self, run_id: str) -> list[ResultRow]:
+        """Every result one run produced, in insertion order."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM results WHERE run_id=? ORDER BY test_id, attempt", (run_id,)
+            ).fetchall()
+        return [self._result_row(r) for r in rows]
+
     @staticmethod
     def _result_row(r: sqlite3.Row) -> ResultRow:
         return ResultRow(
             id=r["id"],
+            run_id=r["run_id"],
             test_id=r["test_id"],
             cache_key_hash=r["cache_key_hash"],
             cache_key_json=r["cache_key_json"],
@@ -315,20 +512,29 @@ class Store:
             for r in rows
         ]
 
-    def iter_graded_results(self, key_hash: str) -> Iterator[GradedResultRow]:
-        """Join results+gradings for one cache key — the input to indirect comparison."""
+    def iter_graded_results(
+        self, key_hash: str, run_id: str | None = None
+    ) -> Iterator[GradedResultRow]:
+        """Join results+gradings for one cache key — the input to indirect comparison.
+
+        Pass ``run_id`` to narrow to a single run; omit it to pool every attempt ever
+        recorded for that cache key (the best-of-N view).
+        """
+        sql = """SELECT r.id AS result_id, r.run_id, r.test_id, r.cache_key_hash, r.attempt,
+                        r.output, g.assertion_key, g.type, g.metric, g.score, g.passed, g.weight
+                 FROM results r JOIN gradings g ON g.result_id = r.id
+                 WHERE r.cache_key_hash=?"""
+        args: list[Any] = [key_hash]
+        if run_id is not None:
+            sql += " AND r.run_id=?"
+            args.append(run_id)
+        sql += " ORDER BY r.test_id, r.attempt, g.assertion_key"
         with self._lock:
-            rows = self._conn.execute(
-                """SELECT r.id AS result_id, r.test_id, r.cache_key_hash, r.attempt, r.output,
-                          g.assertion_key, g.type, g.metric, g.score, g.passed, g.weight
-                   FROM results r JOIN gradings g ON g.result_id = r.id
-                   WHERE r.cache_key_hash=?
-                   ORDER BY r.test_id, r.attempt, g.assertion_key""",
-                (key_hash,),
-            ).fetchall()
+            rows = self._conn.execute(sql, args).fetchall()
         for r in rows:
             yield GradedResultRow(
                 result_id=r["result_id"],
+                run_id=r["run_id"],
                 test_id=r["test_id"],
                 cache_key_hash=r["cache_key_hash"],
                 attempt=r["attempt"],
