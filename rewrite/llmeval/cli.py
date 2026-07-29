@@ -128,14 +128,17 @@ def cmd_run(args) -> int:
         target_n=args.target_n,
         retries=args.retries,
         concurrency=args.concurrency,
+        timeout=args.timeout,
     )
     result = run(store, tcs, provider, policy, notes=args.note)
     summary = result.summary
     # The run's headline. Logged at the end as well as the start (see runner.run) because
     # this is the line a human reads to decide whether to look at the store at all.
+    # ``errors`` counts attempts and ``failed`` counts test cases: errors>0 with failed=0
+    # is a run that retried its way through a flaky provider, not a broken one.
     logger.info(
-        "run %s finished: %d test(s); ran=%d cached=%d errors=%d",
-        result.run_id, len(tcs), summary.ran, summary.cached, summary.errors,
+        "run %s finished: %d test(s); ran=%d cached=%d errors=%d failed=%d",
+        result.run_id, len(tcs), summary.ran, summary.cached, summary.errors, summary.failed,
     )
     store.close()
     return 0
@@ -230,6 +233,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument(
         "--concurrency", type=int, default=5,
         help="number of test cases to run in parallel (default 5; 1 = sequential)",
+    )
+    r.add_argument(
+        "--timeout", type=float, default=60.0,
+        help="seconds allowed per inference call, before retries (default 60). A test "
+        "case's own \"timeout\" field overrides this for that test.",
     )
     r.add_argument("--note", default=None, help="free-text note recorded against this run")
     r.add_argument("--limit", type=int, default=None, help="run only the first N tests")

@@ -29,7 +29,7 @@ def tc():
 
 def seed(store, cfg, output, test_id="t1"):
     key = cfg.cache_key()
-    store.add_result_row(test_id, key, run_id=a_run(store, key), output=output)
+    store.add_result_row(test_id, run_id=a_run(store, key), output=output)
 
 
 class ContentJudge:

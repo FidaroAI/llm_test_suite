@@ -121,8 +121,14 @@ on the command line to see results.
 
 Every `llmeval run` opens a **run** and stamps each result with its id, which the command
 prints when it finishes (`run run_20260729-142530-a3f1: ...`). Add `--note "..."` to record
-why you kicked it off. Runs are provenance only — caching and grading still key on the
-cache key, and `attempt` keeps counting across runs so best-of-N accumulates as expected.
+why you kicked it off. Caching and grading still key on the **cache key**, which the run
+owns: `results` has no cache-key column of its own and reaches it through `run_id`.
+
+**One row per attempt.** Every inference call is stored, successful or not, with its
+`latency_ms` either way. A test that failed twice and answered on the third try is three
+rows — so "how flaky was this provider?" and "what did the retries cost?" are queries, not
+guesses. `attempt` is 0-based **within a run**; pool across runs by cache key for the
+best-of-N view.
 
 ```sql
 -- what runs exist?
@@ -130,6 +136,19 @@ SELECT id, provider_name, notes, started_at, finished_at FROM runs ORDER BY id D
 
 -- everything one run produced (finished_at NULL => it crashed or is still going)
 SELECT test_id, attempt, error, latency_ms FROM results WHERE run_id = 'run_...';
+
+-- which tests needed retries, and how much time went on the failures?
+SELECT test_id,
+       COUNT(*)                                   AS attempts,
+       SUM(error IS NOT NULL)                     AS failed_attempts,
+       SUM(CASE WHEN error IS NOT NULL THEN latency_ms ELSE 0 END) AS wasted_ms
+FROM results WHERE run_id = 'run_...'
+GROUP BY test_id HAVING attempts > 1;
+
+-- the best-of-N pool for one config, oldest first, across every run
+SELECT r.test_id, r.run_id, r.attempt, r.error, r.latency_ms
+FROM results r JOIN runs ru ON ru.id = r.run_id
+WHERE ru.cache_key_hash = '<hash>' ORDER BY r.test_id, r.id;
 ```
 
 There is **no migration path**: the store checks `PRAGMA user_version` on open and refuses
@@ -186,10 +205,37 @@ llmeval report   --providers configs/fidaro_prod.json configs/venice.json \
 | `target_n` (`--target-n N`) | Ensure up to **N** usable results — for best-of-N statistics. Tops up across runs. |
 | `always` | Append one more result every time. |
 
-Failures retry (`--retries`) and, if still failing, are stored as error rows so the run
-continues and a later invocation can top them up. **Ctrl-C is safe**: each result is
-committed as it completes, so an interrupted run keeps everything computed so far — only
-the in-flight test is lost, and the next run tops it up.
+Failures retry (`--retries`, default 2, so 3 attempts) and **every attempt is stored** —
+including the ones that failed, and including their latency. A test case that exhausts its
+retries just leaves error rows and the run carries on; a later invocation tops it up,
+because only successful results count towards the mode's target. **Ctrl-C is safe**: each
+attempt is committed before the next is made, so an interrupted run keeps everything
+computed so far — only the in-flight call is lost.
+
+The closing summary counts attempts and test cases separately, which matters once retries
+are visible:
+
+```
+run run_20260729-142530-a3f1 finished: 12 test(s); ran=14 cached=0 errors=2 failed=0
+```
+
+`ran` is provider calls (= rows written), `errors` is calls that raised, `failed` is test
+cases that gave up. `errors=2 failed=0` above is a run that retried its way through a flaky
+provider — not a broken one.
+
+**Timeouts:** `--timeout SECONDS` caps each inference call (default `60`), applied per
+attempt rather than per test case. There is no implicit ceiling to fall back on — litellm's
+own default is 6000s, which is indistinguishable from a wedged gateway. A single slow test
+case can raise its own without changing the default for the suite, via a `"timeout"` field
+in its JSON:
+
+```jsonc
+{ "id": "research-a1b2c3d4e5", "user": "Write a full equity research note on...",
+  "timeout": 600, "assertions": [ ... ] }
+```
+
+A timed-out attempt is an error row like any other, with `latency_ms` showing what the wait
+cost — which is how you tell "the timeout is too tight" from "the provider is down".
 
 **Selecting which tests to run:** `--limit N` runs only N tests; `--randomize` shuffles
 first (so `--randomize --limit N` is a random sample); `--seed` fixes the shuffle (default
@@ -214,7 +260,7 @@ one contiguous block** when it finishes:
 ```
 INFO llmeval.runner run run_20260729-045138-5d8c: 6 test case(s), provider=slow, mode=reuse, concurrency=4
 INFO llmeval.runner facts-03: Question number 3 about geography?
-WARNING llmeval.runner facts-03: attempt 1/2 failed (RuntimeError: connection reset); retrying
+WARNING llmeval.runner facts-03: attempt 1/2 failed after 231ms (RuntimeError: connection reset); retrying
 INFO llmeval.runner facts-03: ok in 863ms -> An answer to «Question number 3 ab» with a second line
 INFO llmeval.runner run run_20260729-045138-5d8c: 5/6 test case(s) complete
 ```
@@ -255,7 +301,7 @@ llmeval/            the package
   models.py         TestCase, AssertionSpec, ProviderConfig
   store.py          SQLite: runs / results (+ full config) / gradings / verdicts
   providers.py      litellm-backed + echo + custom registry
-  runner.py         caching policy, retries, graceful failure, parallel run
+  runner.py         caching policy, retries, timeouts, graceful failure, parallel run
   logs.py           logging config + per-thread deferred emission (readable parallel runs)
   response.py       reasoning-strip transform
   assertions/       deterministic + judge (rubric, g_eval)

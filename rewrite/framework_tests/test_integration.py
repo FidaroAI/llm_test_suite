@@ -20,7 +20,7 @@ class SimpleProvider:
         self.config = config
         self.output = output
 
-    def complete(self, messages):
+    def complete(self, messages, timeout=None):
         return Completion(output=self.output, reasoning="r")
 
 

@@ -17,7 +17,7 @@ def graded(store, key, test_id, scores, metric="accuracy"):
     """Add one result per score (attempts), each graded on the same assertion."""
     run_id = a_run(store, key)
     for s in scores:
-        rid = store.add_result_row(test_id, key, run_id=run_id, output="x")
+        rid = store.add_result_row(test_id, run_id=run_id, output="x")
         store.set_grading(rid, "a1", type="rubric", score=s, passed=s >= 0.5, metric=metric)
 
 

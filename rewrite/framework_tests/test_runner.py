@@ -1,5 +1,6 @@
 import io
 import threading
+import time
 
 import pytest
 from conftest import a_run
@@ -12,16 +13,18 @@ from llmeval.store import Store
 
 
 class FakeProvider:
-    """Implements the provider protocol: has .config and .complete(messages)."""
+    """Implements the provider protocol: has .config and .complete(messages, timeout)."""
 
     def __init__(self, config, fail_times=0, always_fail=False):
         self.config = config
         self.calls = 0
         self.fail_times = fail_times
         self.always_fail = always_fail
+        self.timeouts = []  # the timeout the runner asked for, per call
 
-    def complete(self, messages):
+    def complete(self, messages, timeout=None):
         self.calls += 1
+        self.timeouts.append(timeout)
         if self.always_fail:
             raise RuntimeError("boom")
         if self.calls <= self.fail_times:
@@ -86,18 +89,46 @@ def test_always_appends_each_call(store, run_id):
 def test_retries_then_succeeds(store, run_id):
     p = FakeProvider(cfg(), fail_times=2)
     summary = run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=2), run_id)
-    assert summary.ran == 1
-    assert summary.errors == 0
+    assert summary.failed == 0
     assert store.count_results("t1", cfg().cache_key().hash, success_only=True) == 1
 
 
 def test_persistent_failure_is_graceful(store, run_id):
     p = FakeProvider(cfg(), always_fail=True)
     summary = run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=1), run_id)
-    assert summary.errors == 1
+    assert summary.failed == 1
     assert store.count_results("t1", cfg().cache_key().hash, success_only=True) == 0
-    # the error row exists so we know it was attempted
-    assert store.count_results("t1", cfg().cache_key().hash) == 1
+    # both exhausted attempts are on record, so the cost of the failure is visible
+    assert store.count_results("t1", cfg().cache_key().hash) == 2
+
+
+def test_every_attempt_is_stored_including_the_ones_that_failed(store, run_id):
+    """Two transient failures then a success is three rows, not one.
+
+    Retries used to leave no trace: a test that needed three calls to answer looked
+    exactly like one that answered first time, so nobody could see what a run cost.
+    """
+    p = FakeProvider(cfg(), fail_times=2)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=2), run_id)
+
+    rows = store.get_results("t1", cfg().cache_key().hash)
+    assert [(r.attempt, r.error is None) for r in rows] == [(0, False), (1, False), (2, True)]
+    assert rows[0].error == "RuntimeError: transient"
+    assert rows[2].output == "reply 3"
+
+
+def test_summary_separates_failed_attempts_from_failed_test_cases(store, run_id):
+    # A test case that came good on its third try is not a failure, but the two
+    # wasted calls are still worth counting.
+    p = FakeProvider(cfg(), fail_times=2)
+    summary = run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=2), run_id)
+    assert (summary.ran, summary.errors, summary.failed) == (3, 2, 0)
+
+
+def test_summary_counts_a_test_case_that_exhausted_its_retries(store, run_id):
+    p = FakeProvider(cfg(), always_fail=True)
+    summary = run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=1), run_id)
+    assert (summary.ran, summary.errors, summary.failed) == (2, 2, 1)
 
 
 def test_one_failing_testcase_does_not_stop_others(store):
@@ -150,7 +181,7 @@ class InterruptingProvider:
         self.interrupt_on = interrupt_on
         self.seen = []
 
-    def complete(self, messages):
+    def complete(self, messages, timeout=None):
         self.seen.append(messages)
         if len(self.seen) > self.interrupt_on:
             raise KeyboardInterrupt
@@ -201,14 +232,16 @@ def test_completed_run_is_marked_finished(store):
 
 def test_run_records_provider_identity_and_policy(store):
     p = FakeProvider(cfg())
-    policy = RunPolicy(mode="target_n", target_n=3, retries=1, concurrency=2)
+    policy = RunPolicy(mode="target_n", target_n=3, retries=1, concurrency=2, timeout=30.0)
     result = run(store, [tc()], p, policy, notes="before the prompt change")
 
     row = store.get_run(result.run_id)
     assert row.provider_name == "p"
     assert row.cache_key_hash == cfg().cache_key().hash
     assert row.config["model"] == "m1"
-    assert row.params == {"mode": "target_n", "target_n": 3, "retries": 1, "concurrency": 2}
+    assert row.params == {
+        "mode": "target_n", "target_n": 3, "retries": 1, "concurrency": 2, "timeout": 30.0,
+    }
     assert row.notes == "before the prompt change"
 
 
@@ -219,8 +252,93 @@ def test_separate_invocations_are_separate_runs(store):
 
     assert first.run_id != second.run_id
     assert len(store.list_runs()) == 2
-    # attempt numbering spans both runs — this is the best-of-N dataset
-    assert [r.attempt for r in store.get_results("t1", cfg().cache_key().hash)] == [0, 1]
+    # Each run numbers its own attempts from 0; the two rows are still one best-of-N
+    # dataset because they share a cache key.
+    rows = store.get_results("t1", cfg().cache_key().hash)
+    assert [r.attempt for r in rows] == [0, 0]
+    assert [r.run_id for r in rows] == [first.run_id, second.run_id]
+
+
+# --- timing ----------------------------------------------------------------
+
+
+class SlowProvider:
+    """Burns measurable wall-clock before answering (or failing)."""
+
+    def __init__(self, config, delay_s, fail=False):
+        self.config = config
+        self.delay_s = delay_s
+        self.fail = fail
+
+    def complete(self, messages, timeout=None):
+        time.sleep(self.delay_s)
+        if self.fail:
+            raise RuntimeError("gave up")
+        return Completion(output="ok")  # no latency_ms: the runner must supply it
+
+
+def test_failed_attempts_record_how_long_they_took(store, run_id):
+    """A failure's cost is the number you most want when choosing a timeout.
+
+    Error rows used to store NULL latency, so the time a run spent waiting on calls
+    that never came back was recorded nowhere at all.
+    """
+    p = SlowProvider(cfg(), delay_s=0.05, fail=True)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=0), run_id)
+
+    row = store.get_results("t1", cfg().cache_key().hash)[0]
+    assert row.error is not None
+    assert row.latency_ms >= 50
+
+
+def test_successful_attempts_keep_the_latency_the_provider_measured(store, run_id):
+    # The provider times the call itself and knows best; the runner's own clock is
+    # only a fallback for attempts that never returned a Completion.
+    class PreciseProvider:
+        config = cfg()
+
+        def complete(self, messages, timeout=None):
+            return Completion(output="ok", latency_ms=123.5)
+
+    run_testcase(store, tc(), PreciseProvider(), RunPolicy(mode="reuse"), run_id)
+    assert store.get_results("t1", cfg().cache_key().hash)[0].latency_ms == 123.5
+
+
+def test_successful_attempts_get_a_measured_latency_when_the_provider_gives_none(store, run_id):
+    p = SlowProvider(cfg(), delay_s=0.05)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse"), run_id)
+    assert store.get_results("t1", cfg().cache_key().hash)[0].latency_ms >= 50
+
+
+# --- timeouts --------------------------------------------------------------
+
+
+def test_runpolicy_timeout_defaults_to_sixty_seconds():
+    # An inference call that hangs must not hang the run: without a default, litellm
+    # waits 6000s (its own default), which is indistinguishable from a wedged run.
+    assert RunPolicy().timeout == 60.0
+
+
+def test_the_policy_timeout_is_passed_to_the_provider(store, run_id):
+    p = FakeProvider(cfg())
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", timeout=12.5), run_id)
+    assert p.timeouts == [12.5]
+
+
+def test_a_test_case_can_override_the_policy_timeout(store, run_id):
+    # Some prompts are legitimately slow (deep research, long tool loops) and should
+    # buy themselves more time without raising the ceiling for the whole suite.
+    p = FakeProvider(cfg())
+    slow_case = TestCase.from_dict({"id": "t1", "user": "hi", "timeout": 300})
+    run_testcase(store, slow_case, p, RunPolicy(mode="reuse", timeout=60.0), run_id)
+    assert p.timeouts == [300.0]
+
+
+def test_every_retry_of_a_test_case_uses_its_timeout(store, run_id):
+    p = FakeProvider(cfg(), fail_times=2)
+    slow_case = TestCase.from_dict({"id": "t1", "user": "hi", "timeout": 7})
+    run_testcase(store, slow_case, p, RunPolicy(mode="reuse", retries=2), run_id)
+    assert p.timeouts == [7.0, 7.0, 7.0]
 
 
 # --- concurrency -----------------------------------------------------------
@@ -231,11 +349,11 @@ class BarrierProvider:
     the expected concurrency. If the runner were sequential, the first call would
     wait forever and the barrier would time out (BrokenBarrierError)."""
 
-    def __init__(self, config, parties, timeout=5.0):
+    def __init__(self, config, parties, barrier_timeout=5.0):
         self.config = config
-        self.barrier = threading.Barrier(parties, timeout=timeout)
+        self.barrier = threading.Barrier(parties, timeout=barrier_timeout)
 
-    def complete(self, messages):
+    def complete(self, messages, timeout=None):
         self.barrier.wait()
         return Completion(output="ok")
 
@@ -305,7 +423,7 @@ def test_sequential_run_streams_logs_without_deferral(store, root_logging_restor
     class WatchingProvider:
         config = cfg()
 
-        def complete(self, messages):
+        def complete(self, messages, timeout=None):
             seen_midway.append(stream.getvalue())
             return Completion(output="ok")
 
@@ -325,7 +443,7 @@ def test_run_logs_the_run_id_before_calling_the_model(store, root_logging_restor
     class WatchingProvider:
         config = cfg()
 
-        def complete(self, messages):
+        def complete(self, messages, timeout=None):
             seen_midway.append(stream.getvalue())
             return Completion(output="ok")
 
