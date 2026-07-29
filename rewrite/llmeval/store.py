@@ -333,8 +333,11 @@ class Store:
     def resolve_run(self, prefix: str) -> str:
         """Expand a run-id prefix to the full id.
 
-        Run ids are 26 characters; nobody types one in full. Raises rather than
+        Run ids are 24 characters; nobody types one in full. Raises rather than
         guessing when the prefix matches nothing or more than one run.
+
+        Note that a prefix short enough to be worth typing cannot separate two runs
+        opened in the same second: they differ only in the trailing random suffix.
         """
         with self._lock:
             rows = self._conn.execute(
