@@ -45,7 +45,7 @@ class LiteLLMProvider:
     def complete(self, messages: list[dict[str, str]]) -> Completion:
         import litellm  # lazy: only needed for real calls
 
-        litellm._turn_on_debug()  # pylint: disable=protected-access
+        # litellm._turn_on_debug()  # pylint: disable=protected-access
 
         kwargs: dict[str, Any] = {
             "model": self.config.model,

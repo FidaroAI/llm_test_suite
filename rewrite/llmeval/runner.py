@@ -70,6 +70,11 @@ def _attempt(provider: Provider, messages, retries: int) -> tuple[Completion | N
             last_err = f"{type(exc).__name__}: {exc}"
     return None, last_err
 
+def short_string(s):
+    if len(s) > 50:
+        return f"{s[0:50]}..."
+    else:
+        return s
 
 def run_testcase(store: Store, testcase, provider: Provider, policy: RunPolicy) -> RunSummary:
     key = provider.config.cache_key()
@@ -78,21 +83,25 @@ def run_testcase(store: Store, testcase, provider: Provider, policy: RunPolicy) 
     n = _to_run(policy.mode, existing, policy.target_n)
     messages = [m.model_dump() for m in testcase.messages]
 
+    print("=" * 80)
+    print(f"Running test case: {short_string(testcase.messages[0].content)}")
     ran = errors = 0
     for _ in range(n):
-        comp, err = _attempt(provider, messages, policy.retries)
-        if err is None and comp is not None:
+        completion, err = _attempt(provider, messages, policy.retries)
+        if err is None and completion is not None:
+            print(f"Success: {short_string(completion.output)}")
             store.add_result_row(
                 testcase.id,
                 key,
-                output=comp.output,
-                raw=comp.raw,
-                reasoning=comp.reasoning,
-                tokens=comp.tokens,
-                latency_ms=comp.latency_ms,
+                output=completion.output,
+                raw=completion.raw,
+                reasoning=completion.reasoning,
+                tokens=completion.tokens,
+                latency_ms=completion.latency_ms,
                 config=config,
             )
         else:
+            print(f"Error: {err}")
             store.add_result_row(testcase.id, key, error=err, config=config)
             errors += 1
         ran += 1
