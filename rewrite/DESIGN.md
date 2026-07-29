@@ -62,6 +62,55 @@ reducers from inspect; G-Eval from deep_eval) without the dependency.
 - Hand-written tests are supported: just author a JSON file (or use the small builder
   helper). Tests need not come from CSV/JSON datasets.
 
+### [DECISION] `llmeval` is plumbing, not porcelain
+
+We borrow git's split. The `llmeval` CLI (together with the SQLite store) is the
+**plumbing** of the test suite: complete, composable, and deliberately *not* friendly.
+Everything the suite can do must be reachable through it — but reaching it may well take
+six explicit flags and a `--db` path. Ergonomics are somebody else's job.
+
+The **porcelain** is a separate layer of tools built *on top of* the plumbing: task
+runners, wrappers that encode a whole comparison workflow, infra bring-up, dashboards, a
+CI entry point. These live outside the `llmeval` package.
+
+Three contracts make up the plumbing surface, and porcelain may depend on all of them:
+
+1. **The CLI subcommands** — `generate`, `generate-csv`, `run`, `grade`, `pickbest`,
+   `report`. (The aggregation step described as `compare` above and in the README is
+   currently library-only — `comparison/stats.py`, reached via `report`.)
+2. **The test-case JSON schema** in `testcases/` (see `llmeval/models.py`).
+3. **The SQLite schema** — `runs` / `results` / `gradings` / `verdicts`. Reading it with
+   plain SQL is a supported way to consume results, not a hack.
+
+The library entry points the subcommands wrap are equally fair game for porcelain written
+in Python; the CLI is the boundary for everything else.
+
+**Why bother naming the layers?** Two reasons.
+
+*It keeps the plumbing honest.* The whole point of this rebuild is that each stage is
+independently re-runnable and the cache key is user-controlled ([§4](#4-the-cache-key-god)).
+Both properties survive only if the CLI stays explicit. The moment we add a friendly
+`llmeval compare-prod-vs-dev` that picks a DB, a judge, and a cache-key policy for you,
+the plumbing has grown opinions and the guarantees get fuzzy. Convenience requests are a
+signal to write porcelain, not to grow a flag.
+
+*It gives the homeless work a home.* [§8](#8-out-of-scope-per-brief) declares infra
+bring-up out of scope, and the README tells you to point `base_url` at something already
+running. That work doesn't vanish — it's porcelain. Same for "run the standard nightly
+comparison and mail me the report".
+
+Consequences worth knowing:
+
+- **Don't add convenience to the plumbing.** Prefer another flag over another subcommand,
+  and prefer porcelain over another flag. A subcommand earns its place by exposing a
+  *capability*, not a *workflow*.
+- **Plumbing output is consumed by programs.** Human-readable is fine; human-*only* is not.
+  Anything a person reads off stdout should also be gettable from the store.
+- **The store's stability is a real constraint on porcelain.** There is currently no
+  migration path: `store.py` checks `PRAGMA user_version` on open and refuses a database
+  written by an older build. Porcelain that caches DB paths or hoards historical results
+  has to cope with "delete it and re-run", so schema changes are not free.
+
 ---
 
 ## 3. The pipeline

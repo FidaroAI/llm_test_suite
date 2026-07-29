@@ -25,6 +25,26 @@ head-to-head **without re-running the model**.
 - **Compare after the fact.** Running just fills a SQLite database; comparison and
   statistics are separate passes over it.
 
+## Plumbing and porcelain
+
+Like git, this suite is split into two layers, and `llmeval` is the **plumbing**:
+
+> Everything is possible with the `llmeval` CLI. Almost nothing is *pleasant* with it.
+
+The CLI is complete and composable but unapologetically low-level — explicit flags, no
+guessed defaults, no workflow shortcuts. Friendliness is the job of the **porcelain**:
+separate tools built on top of the CLI and the database (task runners, one-command
+comparison wrappers, infra bring-up, dashboards, CI entry points). Those live outside the
+`llmeval` package.
+
+So the three things porcelain is allowed to depend on are the plumbing's public contracts:
+the CLI subcommands, the test-case JSON schema, and the SQLite schema (query it with plain
+SQL — that's supported, see [Results](#results)).
+
+Practical upshot: if a workflow here feels like too much typing, that's not a bug in the
+plumbing — it's a porcelain that hasn't been written yet. Rationale:
+**[DESIGN.md §2](DESIGN.md)**.
+
 ## Install
 
 ```bash
