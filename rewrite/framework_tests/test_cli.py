@@ -68,6 +68,18 @@ def test_cli_run_concurrency_flag_override():
     assert args.concurrency == 12
 
 
+def test_cli_run_timeout_flag_defaults_to_sixty_seconds():
+    parser = build_parser()
+    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p"])
+    assert args.timeout == 60.0
+
+
+def test_cli_run_timeout_flag_override():
+    parser = build_parser()
+    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p", "--timeout", "300"])
+    assert args.timeout == 300.0
+
+
 def test_cli_run_with_concurrency_offline(tmp_path):
     import sqlite3
 

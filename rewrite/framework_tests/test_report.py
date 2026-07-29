@@ -18,7 +18,7 @@ def store():
 
 def graded(store, key, test_id, score):
     rid = store.add_result_row(
-        test_id, key, run_id=a_run(store, key), output=f"answer for {test_id}"
+        test_id, run_id=a_run(store, key), output=f"answer for {test_id}"
     )
     store.set_grading(rid, "a1", type="rubric", score=score, passed=score >= 0.5, metric="accuracy")
 
@@ -75,7 +75,7 @@ def test_write_report_creates_file(store, tmp_path):
 def test_html_escapes_untrusted_output(store):
     # a model answer containing markup must not be rendered as raw HTML
     rid = store.add_result_row(
-        "t1", CAND, run_id=a_run(store, CAND), output="<script>alert(1)</script>"
+        "t1", run_id=a_run(store, CAND), output="<script>alert(1)</script>"
     )
     store.set_grading(rid, "a1", type="rubric", score=1.0, passed=True, metric="accuracy")
     graded(store, BASE, "t1", 0.5)

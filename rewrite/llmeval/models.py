@@ -40,12 +40,23 @@ class AssertionSpec(BaseModel):
 
 
 class TestCase(BaseModel):
+    """One prompt plus the checks against its answer.
+
+    ``timeout`` is the per-inference-call ceiling in seconds, and is optional: ``None``
+    means "use the run's default" (``RunPolicy.timeout``). It belongs to the test case
+    rather than the provider because slowness is a property of the *task* — a deep
+    research prompt needs longer than a one-line factual question, whatever model
+    answers it — and because a provider's ``params`` feed its cache key, so a timeout
+    parked there would change the identity under test.
+    """
+
     __test__ = False  # domain model named TestCase; not a pytest test class
 
     id: str
     messages: list[Message]
     assertions: list[AssertionSpec] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    timeout: float | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "TestCase":

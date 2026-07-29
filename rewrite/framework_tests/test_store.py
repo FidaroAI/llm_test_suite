@@ -106,40 +106,67 @@ def test_resolve_run_raises_on_ambiguous_prefix(store):
 
 def test_result_requires_a_run(store):
     with pytest.raises(TypeError):
-        store.add_result_row("t1", key(), output="orphan")
+        store.add_result_row("t1", output="orphan")
 
 
 def test_result_rejects_an_unknown_run_id(store):
     # the FK is enforced (PRAGMA foreign_keys), so a bogus run id cannot slip through
     with pytest.raises(sqlite3.IntegrityError):
-        store.add_result_row("t1", key(), run_id="run_does_not_exist", output="x")
+        store.add_result_row("t1", run_id="run_does_not_exist", output="x")
 
 
 def test_results_carry_their_run(store, run_id):
     k = key()
-    store.add_result_row("t1", k, run_id=run_id, output="x")
+    store.add_result_row("t1", run_id=run_id, output="x")
     assert store.get_results("t1", k.hash)[0].run_id == run_id
 
 
 def test_get_results_for_run_returns_only_that_runs_rows(store):
     k = key()
     r1, r2 = a_run(store, k), a_run(store, k)
-    store.add_result_row("t1", k, run_id=r1, output="a")
-    store.add_result_row("t2", k, run_id=r1, output="b")
-    store.add_result_row("t1", k, run_id=r2, output="c")
+    store.add_result_row("t1", run_id=r1, output="a")
+    store.add_result_row("t2", run_id=r1, output="b")
+    store.add_result_row("t1", run_id=r2, output="c")
 
     assert [r.output for r in store.get_results_for_run(r1)] == ["a", "b"]
     assert [r.output for r in store.get_results_for_run(r2)] == ["c"]
 
 
-def test_attempt_numbering_continues_across_runs(store):
-    # attempt is scoped to (test, cache_key), NOT to the run: five attempts spread
-    # over five invocations must be the same dataset as five from one.
+def test_results_table_does_not_duplicate_the_runs_cache_key(tmp_path):
+    """The cache key is a property of the run; a result reaches it through ``run_id``.
+
+    Holding it on both tables let the two disagree about what a result was produced
+    under, with nothing in the schema to say which copy was right.
+    """
+    db = str(tmp_path / "schema.sqlite3")
+    Store(db).close()
+    conn = sqlite3.connect(db)
+    try:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(results)")}
+    finally:
+        conn.close()
+
+    assert "cache_key_hash" not in columns
+    assert "cache_key_json" not in columns
+
+
+def test_result_rows_still_report_the_cache_key_of_their_run(store):
+    # Normalised in storage, unchanged for readers: the join happens in the store.
     k = key()
-    assert store.add_result("t1", k, run_id=a_run(store, k), output="a") == 0
-    assert store.add_result("t1", k, run_id=a_run(store, k), output="b") == 1
+    store.add_result_row("t1", run_id=a_run(store, k), output="x")
+    row = store.get_results("t1", k.hash)[0]
+    assert row.cache_key_hash == k.hash
+    assert row.cache_key_json == k.canonical
+
+
+def test_attempt_numbering_restarts_at_zero_in_each_run(store):
+    # attempt answers "which try within this run?", so it is scoped to (run, test).
+    # Pool across runs by cache key when you want the best-of-N dataset.
+    k = key()
+    assert store.add_result("t1", run_id=a_run(store, k), output="a") == 0
+    assert store.add_result("t1", run_id=a_run(store, k), output="b") == 0
     assert store.count_results("t1", k.hash) == 2
-    assert [r.attempt for r in store.get_results("t1", k.hash)] == [0, 1]
+    assert [r.attempt for r in store.get_results("t1", k.hash)] == [0, 0]
 
 
 def test_concurrent_inserts_from_many_threads(store, run_id):
@@ -151,7 +178,7 @@ def test_concurrent_inserts_from_many_threads(store, run_id):
 
     def worker(i: int) -> None:
         try:
-            store.add_result_row(f"t{i}", k, run_id=run_id, output=f"out{i}", config={"i": i})
+            store.add_result_row(f"t{i}", run_id=run_id, output=f"out{i}", config={"i": i})
         except Exception as exc:  # noqa: BLE001 - surface any thread error to the test
             errors.append(exc)
 
@@ -166,19 +193,22 @@ def test_concurrent_inserts_from_many_threads(store, run_id):
         assert store.count_results(f"t{i}", k.hash) == 1
 
 
-def test_attempt_index_increments_per_test_and_key(store, run_id):
+def test_attempt_index_increments_within_a_run(store, run_id):
     k = key()
-    assert store.add_result("t1", k, run_id=run_id, output="a") == 0
-    assert store.add_result("t1", k, run_id=run_id, output="b") == 1
-    assert store.add_result("t1", k, run_id=run_id, output="c") == 2
+    assert store.add_result("t1", run_id=run_id, output="a") == 0
+    assert store.add_result("t1", run_id=run_id, output="b") == 1
+    assert store.add_result("t1", run_id=run_id, output="c") == 2
     assert store.count_results("t1", k.hash) == 3
 
 
-def test_results_isolated_by_test_and_key(store, run_id):
+def test_results_isolated_by_test_and_key(store):
+    # A run has exactly one cache key, so two keys means two runs — the schema no
+    # longer lets a result claim a key its run did not use.
     k1, k2 = key(temperature=0.7), key(temperature=0.2)
-    store.add_result("t1", k1, run_id=run_id, output="a")
-    store.add_result("t1", k2, run_id=run_id, output="b")
-    store.add_result("t2", k1, run_id=run_id, output="c")
+    r1, r2 = a_run(store, k1), a_run(store, k2)
+    store.add_result("t1", run_id=r1, output="a")
+    store.add_result("t1", run_id=r2, output="b")
+    store.add_result("t2", run_id=r1, output="c")
     assert store.count_results("t1", k1.hash) == 1
     assert store.count_results("t1", k2.hash) == 1
     assert store.count_results("t2", k1.hash) == 1
@@ -186,8 +216,8 @@ def test_results_isolated_by_test_and_key(store, run_id):
 
 def test_success_only_count_excludes_errors(store, run_id):
     k = key()
-    store.add_result("t1", k, run_id=run_id, output="ok")
-    store.add_result("t1", k, run_id=run_id, error="boom")
+    store.add_result("t1", run_id=run_id, output="ok")
+    store.add_result("t1", run_id=run_id, error="boom")
     assert store.count_results("t1", k.hash) == 2
     assert store.count_results("t1", k.hash, success_only=True) == 1
 
@@ -195,7 +225,7 @@ def test_success_only_count_excludes_errors(store, run_id):
 def test_get_results_round_trips_payload(store, run_id):
     k = key()
     store.add_result(
-        "t1", k, run_id=run_id, output="hello", reasoning="because",
+        "t1", run_id=run_id, output="hello", reasoning="because",
         tokens={"total": 12}, latency_ms=4.5,
     )
     rows = store.get_results("t1", k.hash)
@@ -210,13 +240,13 @@ def test_get_results_round_trips_payload(store, run_id):
 def test_stores_full_provider_config(store, run_id):
     k = key()
     cfg = {"name": "p", "model": "m1", "params": {"temperature": 0.7, "max_tokens": 100}}
-    store.add_result_row("t1", k, run_id=run_id, output="x", config=cfg)
+    store.add_result_row("t1", run_id=run_id, output="x", config=cfg)
     assert store.get_results("t1", k.hash)[0].config == cfg
 
 
 def test_config_is_optional(store, run_id):
     k = key()
-    store.add_result_row("t1", k, run_id=run_id, output="x")
+    store.add_result_row("t1", run_id=run_id, output="x")
     assert store.get_results("t1", k.hash)[0].config is None
 
 
@@ -258,7 +288,7 @@ def test_persists_across_connections(tmp_path):
     db = str(tmp_path / "e.sqlite3")
     k = key()
     s1 = Store(db)
-    s1.add_result("t1", k, run_id=a_run(s1, k), output="persisted")
+    s1.add_result("t1", run_id=a_run(s1, k), output="persisted")
     s1.close()
     s2 = Store(db)
     assert s2.count_results("t1", k.hash) == 1
@@ -269,8 +299,7 @@ def test_persists_across_connections(tmp_path):
 
 
 def test_grading_upsert_overwrites_same_assertion(store, run_id):
-    k = key()
-    rid = store.add_result_row("t1", k, run_id=run_id, output="Paris")
+    rid = store.add_result_row("t1", run_id=run_id, output="Paris")
     store.set_grading(rid, assertion_key="icontains:Paris", type="icontains", score=1.0, passed=True)
     store.set_grading(rid, assertion_key="icontains:Paris", type="icontains", score=0.0, passed=False)
     gradings = store.get_gradings(rid)
@@ -279,8 +308,7 @@ def test_grading_upsert_overwrites_same_assertion(store, run_id):
 
 
 def test_multiple_assertions_per_result(store, run_id):
-    k = key()
-    rid = store.add_result_row("t1", k, run_id=run_id, output="x")
+    rid = store.add_result_row("t1", run_id=run_id, output="x")
     store.set_grading(rid, "a1", type="contains", score=1.0, passed=True)
     store.set_grading(rid, "a2", type="rubric", score=0.5, passed=False, metric="accuracy")
     assert {g.assertion_key for g in store.get_gradings(rid)} == {"a1", "a2"}
@@ -288,7 +316,7 @@ def test_multiple_assertions_per_result(store, run_id):
 
 def test_iter_graded_results_for_cache_key_joins(store, run_id):
     k = key()
-    rid = store.add_result_row("t1", k, run_id=run_id, output="x")
+    rid = store.add_result_row("t1", run_id=run_id, output="x")
     store.set_grading(rid, "a1", type="rubric", score=0.8, passed=True, metric="accuracy")
     joined = list(store.iter_graded_results(k.hash))
     assert joined[0].test_id == "t1"
@@ -301,7 +329,7 @@ def test_iter_graded_results_can_narrow_to_one_run(store):
     k = key()
     r1, r2 = a_run(store, k), a_run(store, k)
     for rid_, score in ((r1, 0.2), (r2, 0.9)):
-        result_id = store.add_result_row("t1", k, run_id=rid_, output="x")
+        result_id = store.add_result_row("t1", run_id=rid_, output="x")
         store.set_grading(result_id, "a1", type="rubric", score=score, metric="accuracy")
 
     assert [g.score for g in store.iter_graded_results(k.hash)] == [0.2, 0.9]

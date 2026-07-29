@@ -38,7 +38,9 @@ class Completion:
 class Provider(Protocol):
     config: ProviderConfig
 
-    def complete(self, messages: list[dict[str, str]]) -> Completion: ...
+    def complete(
+        self, messages: list[dict[str, str]], timeout: float | None = None
+    ) -> Completion: ...
 
 
 class LiteLLMProvider:
@@ -47,7 +49,19 @@ class LiteLLMProvider:
     def __init__(self, config: ProviderConfig):
         self.config = config
 
-    def complete(self, messages: list[dict[str, str]]) -> Completion:
+    def complete(
+        self, messages: list[dict[str, str]], timeout: float | None = None
+    ) -> Completion:
+        """Call the model. ``timeout`` is seconds for this one call.
+
+        ``None`` means "don't pass one", leaving whatever the config's ``params`` or
+        litellm itself decided — litellm's own default is 6000s, so a caller that wants
+        a real ceiling has to say so. The runner always does.
+
+        The retry layer inside litellm's OpenAI client is switched **off** (see
+        ``max_retries`` below), because llmeval does its own retrying and records each
+        attempt.
+        """
         import litellm  # lazy: only needed for real calls
 
         # litellm._turn_on_debug()  # pylint: disable=protected-access
@@ -61,6 +75,16 @@ class LiteLLMProvider:
             kwargs["api_base"] = self.config.base_url
         if self.config.api_key_env:
             kwargs["api_key"] = os.environ.get(self.config.api_key_env)
+        if timeout is not None:
+            # Set after ``params`` so an explicit per-call timeout wins over one parked
+            # in the config, which would otherwise also be part of the cache key.
+            kwargs["timeout"] = timeout
+        # A timeout is worthless if something underneath retries it: the OpenAI client
+        # litellm wraps retries twice by default *with backoff*, so a 2s ceiling really
+        # took ~7.5s and a 60s one could run for minutes — and those calls never reached
+        # the store. Retry policy belongs to the runner, which stores every attempt.
+        # setdefault, so a config that genuinely wants SDK retries can still ask.
+        kwargs.setdefault("max_retries", 0)
 
         t0 = time.time()
         resp = litellm.completion(**kwargs)
@@ -91,7 +115,13 @@ class EchoProvider:
     def __init__(self, config: ProviderConfig):
         self.config = config
 
-    def complete(self, messages: list[dict[str, str]]) -> Completion:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        timeout: float | None = None,  # pylint: disable=unused-argument
+    ) -> Completion:
+        # Accepted and ignored: no network, so nothing here can hang. The parameter has
+        # to keep its name — the runner passes it by keyword to every provider alike.
         last_user = next(
             (m["content"] for m in reversed(messages) if m.get("role") == "user"), ""
         )

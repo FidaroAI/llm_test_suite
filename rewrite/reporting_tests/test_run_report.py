@@ -70,7 +70,7 @@ def test_metadata_without_a_suite_key_falls_through_to_the_id():
 
 def test_an_ungraded_result_still_yields_one_row(store, key):
     run_id = store.create_run(key, provider_name="p")
-    store.add_result_row("simple_facts-6c3396ab0e", key, run_id=run_id, output="4")
+    store.add_result_row("simple_facts-6c3396ab0e", run_id=run_id, output="4")
 
     rows = run_report.run_rows(store, run_id)
     assert len(rows) == 1
@@ -83,7 +83,7 @@ def test_an_ungraded_result_still_yields_one_row(store, key):
 
 def test_one_row_per_assertion(store, key):
     run_id = store.create_run(key)
-    rid = store.add_result_row("t-0123456789", key, run_id=run_id, output="Paris")
+    rid = store.add_result_row("t-0123456789", run_id=run_id, output="Paris")
     store.set_grading(rid, "icontains:Paris", type="icontains", score=1.0, passed=True)
     store.set_grading(
         rid, "rubric:accurate", type="rubric", metric="accuracy", score=0.8,
@@ -110,9 +110,9 @@ def test_one_row_per_assertion(store, key):
 def test_rows_cover_every_result_in_the_run_only(store, key):
     mine = store.create_run(key)
     theirs = store.create_run(key)
-    store.add_result_row("a-0123456789", key, run_id=mine, output="a")
-    store.add_result_row("b-0123456789", key, run_id=mine, output="b")
-    store.add_result_row("c-0123456789", key, run_id=theirs, output="c")
+    store.add_result_row("a-0123456789", run_id=mine, output="a")
+    store.add_result_row("b-0123456789", run_id=mine, output="b")
+    store.add_result_row("c-0123456789", run_id=theirs, output="c")
 
     assert [r["test_id"] for r in run_report.run_rows(store, mine)] == [
         "a-0123456789",
@@ -122,8 +122,8 @@ def test_rows_cover_every_result_in_the_run_only(store, key):
 
 def test_multiple_attempts_are_separate_rows(store, key):
     run_id = store.create_run(key)
-    store.add_result_row("t-0123456789", key, run_id=run_id, output="first")
-    store.add_result_row("t-0123456789", key, run_id=run_id, output="second")
+    store.add_result_row("t-0123456789", run_id=run_id, output="first")
+    store.add_result_row("t-0123456789", run_id=run_id, output="second")
 
     rows = run_report.run_rows(store, run_id)
     assert [(r["attempt"], r["output"]) for r in rows] == [(0, "first"), (1, "second")]
@@ -131,7 +131,7 @@ def test_multiple_attempts_are_separate_rows(store, key):
 
 def test_error_rows_are_included(store, key):
     run_id = store.create_run(key)
-    store.add_result_row("t-0123456789", key, run_id=run_id, error="502 upstream")
+    store.add_result_row("t-0123456789", run_id=run_id, error="502 upstream")
 
     rows = run_report.run_rows(store, run_id)
     assert rows[0]["error"] == "502 upstream"
@@ -140,7 +140,7 @@ def test_error_rows_are_included(store, key):
 
 def test_every_row_has_exactly_the_declared_columns(store, key):
     run_id = store.create_run(key)
-    store.add_result_row("t-0123456789", key, run_id=run_id, output="x")
+    store.add_result_row("t-0123456789", run_id=run_id, output="x")
     rows = run_report.run_rows(store, run_id)
     assert list(rows[0]) == run_report.run_columns(with_tests=False)
 
@@ -151,7 +151,7 @@ def test_every_row_has_exactly_the_declared_columns(store, key):
 def test_token_usage_is_flattened_into_three_columns(store, key):
     run_id = store.create_run(key)
     store.add_result_row(
-        "t-0123456789", key, run_id=run_id, output="x",
+        "t-0123456789", run_id=run_id, output="x",
         tokens={
             "prompt_tokens": 5664,
             "completion_tokens": 383,
@@ -172,7 +172,7 @@ def test_token_usage_is_flattened_into_three_columns(store, key):
 
 def test_missing_token_usage_is_empty_not_an_error(store, key):
     run_id = store.create_run(key)
-    store.add_result_row("t-0123456789", key, run_id=run_id, output="x")
+    store.add_result_row("t-0123456789", run_id=run_id, output="x")
     assert run_report.run_rows(store, run_id)[0]["total_tokens"] is None
 
 
@@ -181,7 +181,7 @@ def test_leading_blank_lines_are_trimmed_off_text_fields(store, key):
     # in, pre-wrap rendering pushes the answer out of the visible cell.
     run_id = store.create_run(key)
     store.add_result_row(
-        "t-0123456789", key, run_id=run_id,
+        "t-0123456789", run_id=run_id,
         output="\n\nThat is a palindrome.\n", reasoning="\n\nThe user asks...  \n",
     )
     row = run_report.run_rows(store, run_id)[0]
@@ -193,14 +193,14 @@ def test_trimming_preserves_internal_formatting(store, key):
     # Only the ends are touched: markdown lists and paragraph breaks must survive.
     run_id = store.create_run(key)
     store.add_result_row(
-        "t-0123456789", key, run_id=run_id, output="\n\nHeading\n\n* one\n* two\n\n"
+        "t-0123456789", run_id=run_id, output="\n\nHeading\n\n* one\n* two\n\n"
     )
     assert run_report.run_rows(store, run_id)[0]["output"] == "Heading\n\n* one\n* two"
 
 
 def test_trimming_leaves_a_missing_output_as_none(store, key):
     run_id = store.create_run(key)
-    store.add_result_row("t-0123456789", key, run_id=run_id, error="boom")
+    store.add_result_row("t-0123456789", run_id=run_id, error="boom")
     row = run_report.run_rows(store, run_id)[0]
     assert row["output"] is None
     assert row["reasoning"] is None
@@ -209,7 +209,7 @@ def test_trimming_leaves_a_missing_output_as_none(store, key):
 def test_latency_is_rounded_for_readability(store, key):
     run_id = store.create_run(key)
     store.add_result_row(
-        "t-0123456789", key, run_id=run_id, output="x", latency_ms=16531.2008857727
+        "t-0123456789", run_id=run_id, output="x", latency_ms=16531.2008857727
     )
     assert run_report.run_rows(store, run_id)[0]["latency_ms"] == 16531.2
 
@@ -219,7 +219,7 @@ def test_latency_is_rounded_for_readability(store, key):
 
 def test_enrichment_adds_prompt_and_classification(store, key):
     run_id = store.create_run(key)
-    store.add_result_row("simple_facts-6c3396ab0e", key, run_id=run_id, output="4")
+    store.add_result_row("simple_facts-6c3396ab0e", run_id=run_id, output="4")
     cases = {
         "simple_facts-6c3396ab0e": a_case(
             "simple_facts-6c3396ab0e", "What is 2+2?",
@@ -236,7 +236,7 @@ def test_enrichment_adds_prompt_and_classification(store, key):
 
 def test_without_testcases_the_test_columns_are_absent_entirely(store, key):
     run_id = store.create_run(key)
-    store.add_result_row("t-0123456789", key, run_id=run_id, output="x")
+    store.add_result_row("t-0123456789", run_id=run_id, output="x")
     row = run_report.run_rows(store, run_id)[0]
     for column in ("prompt", "request_type", "domain"):
         assert column not in row
@@ -245,7 +245,7 @@ def test_without_testcases_the_test_columns_are_absent_entirely(store, key):
 def test_a_testcase_missing_from_the_files_degrades_to_empty(store, key):
     # Testcases get regenerated; a stale id must not kill the report.
     run_id = store.create_run(key)
-    store.add_result_row("gone-0123456789", key, run_id=run_id, output="x")
+    store.add_result_row("gone-0123456789", run_id=run_id, output="x")
     row = run_report.run_rows(store, run_id, {"other-0123456789": a_case("other-0123456789")})[0]
     assert row["prompt"] is None
     assert row["suite"] == "gone"  # id fallback still applies
@@ -256,8 +256,8 @@ def test_a_testcase_missing_from_the_files_degrades_to_empty(store, key):
 
 def test_subtitle_reports_identity_and_counts(store, key):
     run_id = store.create_run(key, provider_name="fidaro-dev", notes="checking the gateway")
-    store.add_result_row("a-0123456789", key, run_id=run_id, output="ok")
-    store.add_result_row("b-0123456789", key, run_id=run_id, error="boom")
+    store.add_result_row("a-0123456789", run_id=run_id, output="ok")
+    store.add_result_row("b-0123456789", run_id=run_id, error="boom")
     store.finish_run(run_id)
 
     rows = run_report.run_rows(store, run_id)
@@ -272,14 +272,14 @@ def test_subtitle_flags_an_unfinished_run(store, key):
     # finished_at stays NULL when a run crashes or is interrupted — easy to miss, so
     # the report says so out loud.
     run_id = store.create_run(key, provider_name="p")
-    store.add_result_row("a-0123456789", key, run_id=run_id, output="ok")
+    store.add_result_row("a-0123456789", run_id=run_id, output="ok")
     rows = run_report.run_rows(store, run_id)
     assert "UNFINISHED" in run_report.run_subtitle(store.get_run(run_id), rows)
 
 
 def test_subtitle_counts_results_not_rows_when_assertions_multiply(store, key):
     run_id = store.create_run(key)
-    rid = store.add_result_row("a-0123456789", key, run_id=run_id, output="x")
+    rid = store.add_result_row("a-0123456789", run_id=run_id, output="x")
     store.set_grading(rid, "a1", score=1.0)
     store.set_grading(rid, "a2", score=0.0)
     rows = run_report.run_rows(store, run_id)
@@ -296,7 +296,7 @@ def populated_db(tmp_path, key):
     store = Store(db)
     run_id = store.create_run(key, provider_name="fidaro-dev")
     rid = store.add_result_row(
-        "simple_facts-6c3396ab0e", key, run_id=run_id, output="Paris", latency_ms=1234.5
+        "simple_facts-6c3396ab0e", run_id=run_id, output="Paris", latency_ms=1234.5
     )
     store.set_grading(rid, "icontains:Paris", type="icontains", score=1.0, passed=True)
     store.finish_run(run_id)

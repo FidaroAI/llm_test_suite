@@ -137,17 +137,27 @@ Each arrow is an independent CLI subcommand and a library call. Crucially, **gra
 under test again. Editing an assertion or adding a new config to a comparison re-runs
 only what's missing.
 
-Two orthogonal axes run through `results`, and keeping them distinct is what makes the
-rest work:
+Two axes run through `results`, and keeping them distinct is what makes the rest work:
 
-* `cache_key_hash` is **identity** — *what* was under test. Caching, grading and
-  comparison all key on it.
-* `run_id` is **provenance** — *which sitting* produced a row. It never affects caching.
+* **identity** — *what* was under test. This is the cache key, and it is stored once, on
+  `runs`. Caching, grading and comparison all key on it; `results` reaches it by joining
+  `run_id`. (`ResultRow` still exposes `cache_key_hash`, so readers don't notice.)
+* **provenance** — *which sitting* produced a row, i.e. `run_id` itself. It never affects
+  caching.
 
-`attempt` numbers within the identity axis and deliberately keeps counting **across**
-runs, so five attempts accumulated over five invocations are the same best-of-N dataset
-as five from one. A run that crashes is left with `finished_at` NULL rather than being
-marked complete.
+### [DECISION] The cache key lives only on `runs`
+
+A run calls exactly one provider, so every result it produces shares that provider's cache
+key. Copying the key onto each result duplicated it thousands of times and, worse, made a
+disagreement between the two representable with nothing to arbitrate it. Normalising means
+identity lookups pay a join — irrelevant at eval scale, and `results(test_id)` is indexed
+for it.
+
+`attempt` is scoped to `(run_id, test_id)` and restarts at 0 for each test in each run: it
+answers *"which try within this run?"*. The best-of-N pool — every attempt for a cache key,
+however many sittings it took — is an identity question, so it groups by the run's
+`cache_key_hash` and orders by row id (`attempt` can't order a cross-run pool). A run that
+crashes is left with `finished_at` NULL rather than being marked complete.
 
 ---
 
@@ -191,19 +201,55 @@ This gives the requested behaviours for free:
 
 ---
 
-## 5. Running, retries, graceful failure (`RunPolicy`)
+## 5. Running, retries, timeouts, graceful failure (`RunPolicy`)
 
 ```python
-RunPolicy(mode="reuse" | "target_n" | "always", target_n=1, retries=2)
+RunPolicy(mode="reuse" | "target_n" | "always", target_n=1, retries=2,
+          concurrency=1, timeout=60.0)
 ```
 
-- `reuse`: if ≥1 stored result for `(test, key)`, do nothing.
-- `target_n`: ensure up to N results exist (run `N − existing`).
+- `reuse`: if ≥1 stored *successful* result for `(test, key)`, do nothing.
+- `target_n`: ensure up to N successful results exist (run `N − existing`).
 - `always`: append exactly one more.
 
-Per attempt: call provider; retry up to `retries` on exception. If it still fails, store
-an **error result** (not a crash) and continue with other tests. Passed/usable results
-are persisted immediately, so a later rerun never re-does them.
+Per attempt: call the provider with a timeout; retry up to `retries` on any exception
+(`BaseException`, i.e. Ctrl-C, is deliberately not caught). A test case that exhausts its
+retries yields **error results**, not a crash, and the run continues.
+
+### [DECISION] Every attempt is a row, retries included
+
+Storing only the final outcome made retries free to ignore and impossible to audit: a test
+answered on the third call looked identical to one answered on the first, and the time spent
+on the two failures was recorded nowhere. So each attempt is written before the next is
+made, with its own `latency_ms` whether it succeeded or raised. The costs: rows are no
+longer 1:1 with usable results (grading skips error rows, `count_results(success_only=True)`
+drives the caching arithmetic), and a persistently failing test now writes `retries + 1`
+rows per sitting instead of one. Both are worth it — flakiness and latency-under-failure are
+things we actively need to measure.
+
+`RunSummary` therefore counts two different things: `ran`/`errors` are **attempts**, while
+`failed` is **test cases** that gave up. `errors > 0, failed == 0` is a healthy run that
+retried through a flaky provider.
+
+### [DECISION] Inference calls are always given a timeout, defaulting to 60s
+
+litellm's default request timeout is 6000s, so before this a hung gateway looked exactly
+like a slow answer and could stall a run indefinitely. The runner now always passes one.
+
+The override lives on the **test case** (`"timeout"` in its JSON), not the provider,
+because slowness is a property of the *task* — a deep-research prompt needs longer than a
+one-line factual question, whatever model answers it. It also cannot live in a provider's
+`params`, because those feed the cache key: a timeout there would make "same model, longer
+ceiling" a different system under test, silently invalidating cached results. The
+per-call timeout is applied after `params` for exactly this reason, so it wins over a
+stale one parked in a config.
+
+A timeout is only real if nothing underneath quietly retries it, so the provider also
+switches **off** the retry layer in litellm's OpenAI client (`max_retries=0`). That layer
+defaults to two retries *with backoff*: measured against a server that never answers, a
+2s ceiling actually took ~7.5s, and none of the extra calls reached the store. Retry
+policy belongs to the runner, which owns `--retries` and records every attempt. A config
+can opt back in by setting `max_retries` in `params`.
 
 ### [DECISION] Parallel logs are deferred, not interleaved
 

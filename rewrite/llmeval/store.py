@@ -4,8 +4,9 @@ Four tables, deliberately separated so stages stay decoupled:
 
 * ``runs``     — one row per ``llmeval run`` invocation. Gives every result a
   provenance handle that doesn't depend on reading timestamps out of other columns.
-* ``results``  — cached LLM outputs, one row per (test, cache_key, attempt). Reused so
-  expensive calls aren't repeated; topped up to N for best-of-N statistics.
+  The run owns the **cache key**: every result it produced was produced under it.
+* ``results``  — one row per *attempt*, successful or not. Reused so expensive calls
+  aren't repeated; topped up to N for best-of-N statistics.
 * ``gradings`` — assertion scores against a result. Separate from results so you can
   edit/add assertions and re-grade **without re-running the model**.
 * ``verdicts`` — pick-best head-to-head outcomes, also keyed so they replay against
@@ -13,16 +14,22 @@ Four tables, deliberately separated so stages stay decoupled:
 
 Everything analysis needs is a query away (group by ``cache_key_hash``, join gradings).
 
-Two orthogonal axes run through ``results``, and keeping them distinct is what makes
-the rest work:
+Two axes run through ``results``, and keeping them distinct is what makes the rest work:
 
-* ``cache_key_hash`` is *identity* — what was under test.
-* ``run_id`` is *provenance* — which sitting produced this row.
+* *identity* — what was under test. This is the cache key, and it lives on ``runs``.
+  ``results`` reaches it through ``run_id``; storing a second copy per result only
+  created the possibility of the two disagreeing. Readers are unaffected: every result
+  query joins ``runs`` and ``ResultRow`` still carries ``cache_key_hash``.
+* *provenance* — which sitting produced this row, i.e. ``run_id`` itself.
 
-``attempt`` numbers within the identity axis and deliberately keeps counting **across**
-runs, so five attempts accumulated over five invocations are the same dataset as five
-from one. Per-run attempt numbering would conflate the axes and break the top-up
-arithmetic in ``runner._to_run``.
+``attempt`` is scoped to ``(run_id, test_id)`` and restarts at 0 for each test in each
+run: it answers "which try within this run?". Pooling attempts across runs — the
+best-of-N dataset — is a *cache key* question, so it groups by identity instead (see
+:meth:`Store.count_results`, which is what ``runner._to_run`` tops up against).
+
+**Every attempt is stored, including the ones that failed.** A retry that eventually
+succeeded leaves its error rows behind, so the cost of a flaky provider is visible in
+the data rather than only in the log.
 """
 
 from __future__ import annotations
@@ -39,7 +46,7 @@ from llmeval.cache_key import CacheKey
 
 # Bumped whenever the schema changes shape. There is no migration path: a mismatch
 # is a hard error telling the user to delete the file (see ``Store._check_version``).
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _now() -> str:
@@ -88,9 +95,10 @@ class ResultRow:
     id: int
     run_id: str
     test_id: str
+    # Not columns on ``results``: both are read off the row's run (see _RESULT_SELECT).
     cache_key_hash: str
     cache_key_json: str
-    attempt: int
+    attempt: int  # 0-based within (run_id, test_id)
     output: str | None
     raw: Any
     reasoning: str | None
@@ -157,12 +165,11 @@ CREATE TABLE IF NOT EXISTS runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_key ON runs(cache_key_hash);
 
+-- No cache_key columns: the run owns the cache key and results reach it via run_id.
 CREATE TABLE IF NOT EXISTS results (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id TEXT NOT NULL REFERENCES runs(id),
     test_id TEXT NOT NULL,
-    cache_key_hash TEXT NOT NULL,
-    cache_key_json TEXT NOT NULL,
     attempt INTEGER NOT NULL,
     output TEXT,
     raw_json TEXT,
@@ -172,10 +179,12 @@ CREATE TABLE IF NOT EXISTS results (
     error TEXT,
     config_json TEXT,
     created_at TEXT NOT NULL,
-    UNIQUE(test_id, cache_key_hash, attempt)
+    UNIQUE(run_id, test_id, attempt)
 );
-CREATE INDEX IF NOT EXISTS idx_results_key ON results(cache_key_hash);
 CREATE INDEX IF NOT EXISTS idx_results_run ON results(run_id);
+-- Identity lookups start from the test id and join runs for the cache key; the UNIQUE
+-- index above is run-first, so it can't serve them.
+CREATE INDEX IF NOT EXISTS idx_results_test ON results(test_id);
 
 CREATE TABLE IF NOT EXISTS gradings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,6 +211,15 @@ CREATE TABLE IF NOT EXISTS verdicts (
     created_at TEXT NOT NULL,
     UNIQUE(test_id, comparison_key)
 );
+"""
+
+
+# Every result read joins its run to recover the cache key. Normalised in storage,
+# unchanged for readers: ``ResultRow`` still carries ``cache_key_hash``/``cache_key_json``,
+# and the aliases below are what fill them.
+_RESULT_SELECT = """
+    SELECT r.*, ru.cache_key_hash AS cache_key_hash, ru.cache_key_json AS cache_key_json
+    FROM results r JOIN runs ru ON ru.id = r.run_id
 """
 
 
@@ -345,18 +363,18 @@ class Store:
 
     # --- results -----------------------------------------------------------
 
-    def _next_attempt(self, test_id: str, key_hash: str) -> int:
+    def _next_attempt(self, run_id: str, test_id: str) -> int:
+        """The next attempt index for this test *within this run* (0-based)."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM results WHERE test_id=? AND cache_key_hash=?",
-                (test_id, key_hash),
+                "SELECT COUNT(*) FROM results WHERE run_id=? AND test_id=?",
+                (run_id, test_id),
             ).fetchone()
             return int(row[0])
 
     def add_result_row(
         self,
         test_id: str,
-        cache_key: CacheKey,
         *,
         run_id: str,
         output: str | None = None,
@@ -367,26 +385,28 @@ class Store:
         error: str | None = None,
         config: Any = None,
     ) -> int:
-        """Insert a result; return its row id (for attaching gradings).
+        """Insert one attempt; return its row id (for attaching gradings).
 
         ``run_id`` is keyword-only and required: every result must be attributable to
-        a run, so there is no path that produces an orphan row.
+        a run, so there is no path that produces an orphan row. It also supplies the
+        cache key, which is why none is passed here — a result cannot claim identity
+        its run didn't have.
+
+        Pass ``error`` for an attempt that failed. Failed attempts are stored, not
+        dropped, so a retried test case shows what the retries cost.
         """
         # Hold the lock across read-attempt + insert + commit so the attempt index
         # stays consistent when multiple threads write concurrently.
         with self._lock:
-            attempt = self._next_attempt(test_id, cache_key.hash)
+            attempt = self._next_attempt(run_id, test_id)
             cur = self._conn.execute(
                 """INSERT INTO results
-                   (run_id, test_id, cache_key_hash, cache_key_json, attempt, output,
-                    raw_json, reasoning, tokens_json, latency_ms, error, config_json,
-                    created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (run_id, test_id, attempt, output, raw_json, reasoning, tokens_json,
+                    latency_ms, error, config_json, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id,
                     test_id,
-                    cache_key.hash,
-                    cache_key.canonical,
                     attempt,
                     output,
                     json.dumps(raw) if raw is not None else None,
@@ -401,33 +421,47 @@ class Store:
             self._conn.commit()
             return int(cur.lastrowid)
 
-    def add_result(self, test_id: str, cache_key: CacheKey, **kwargs) -> int:
-        """Insert a result; return its 0-based attempt index for (test, key)."""
+    def add_result(self, test_id: str, **kwargs) -> int:
+        """Insert one attempt; return its 0-based attempt index within its run."""
         with self._lock:
-            attempt = self._next_attempt(test_id, cache_key.hash)
-            self.add_result_row(test_id, cache_key, **kwargs)
+            attempt = self._next_attempt(kwargs["run_id"], test_id)
+            self.add_result_row(test_id, **kwargs)
             return attempt
 
     def count_results(self, test_id: str, key_hash: str, success_only: bool = False) -> int:
-        sql = "SELECT COUNT(*) FROM results WHERE test_id=? AND cache_key_hash=?"
+        """Attempts for (test, cache key), pooled across **every** run.
+
+        This is what the runner's top-up arithmetic counts against, so spanning runs is
+        the point: three successes accumulated over three invocations are three usable
+        results. ``success_only`` excludes error rows, which is the count that decides
+        whether a model call is still needed.
+        """
+        sql = """SELECT COUNT(*) FROM results r JOIN runs ru ON ru.id = r.run_id
+                 WHERE r.test_id=? AND ru.cache_key_hash=?"""
         if success_only:
-            sql += " AND error IS NULL"
+            sql += " AND r.error IS NULL"
         with self._lock:
             return int(self._conn.execute(sql, (test_id, key_hash)).fetchone()[0])
 
     def get_results(self, test_id: str, key_hash: str) -> list[ResultRow]:
+        """Every attempt for (test, cache key) across all runs, oldest first.
+
+        Ordered by row id, not ``attempt``: attempt restarts within each run, so it
+        cannot order a pool drawn from several. Row id is insertion order, which for
+        this table is chronological.
+        """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM results WHERE test_id=? AND cache_key_hash=? ORDER BY attempt",
+                _RESULT_SELECT + " WHERE r.test_id=? AND ru.cache_key_hash=? ORDER BY r.id",
                 (test_id, key_hash),
             ).fetchall()
         return [self._result_row(r) for r in rows]
 
     def get_results_for_run(self, run_id: str) -> list[ResultRow]:
-        """Every result one run produced, in insertion order."""
+        """Every attempt one run produced, by test then attempt order."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM results WHERE run_id=? ORDER BY test_id, attempt", (run_id,)
+                _RESULT_SELECT + " WHERE r.run_id=? ORDER BY r.test_id, r.attempt", (run_id,)
             ).fetchall()
         return [self._result_row(r) for r in rows]
 
@@ -520,15 +554,18 @@ class Store:
         Pass ``run_id`` to narrow to a single run; omit it to pool every attempt ever
         recorded for that cache key (the best-of-N view).
         """
-        sql = """SELECT r.id AS result_id, r.run_id, r.test_id, r.cache_key_hash, r.attempt,
+        sql = """SELECT r.id AS result_id, r.run_id, r.test_id, ru.cache_key_hash, r.attempt,
                         r.output, g.assertion_key, g.type, g.metric, g.score, g.passed, g.weight
-                 FROM results r JOIN gradings g ON g.result_id = r.id
-                 WHERE r.cache_key_hash=?"""
+                 FROM results r
+                 JOIN runs ru ON ru.id = r.run_id
+                 JOIN gradings g ON g.result_id = r.id
+                 WHERE ru.cache_key_hash=?"""
         args: list[Any] = [key_hash]
         if run_id is not None:
             sql += " AND r.run_id=?"
             args.append(run_id)
-        sql += " ORDER BY r.test_id, r.attempt, g.assertion_key"
+        # r.id, not r.attempt: attempt restarts per run and cannot order a cross-run pool.
+        sql += " ORDER BY r.test_id, r.id, g.assertion_key"
         with self._lock:
             rows = self._conn.execute(sql, args).fetchall()
         for r in rows:

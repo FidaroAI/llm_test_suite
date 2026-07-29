@@ -43,10 +43,19 @@ class _FakeResponse:
         self.usage = None
 
 
-def _stub_litellm(monkeypatch, response):
-    """Install a fake ``litellm`` module so ``complete`` needs no network."""
+def _stub_litellm(monkeypatch, response, seen=None):
+    """Install a fake ``litellm`` module so ``complete`` needs no network.
+
+    Pass ``seen`` to capture the kwargs the provider handed to ``litellm.completion``.
+    """
+
+    def completion(**kwargs):
+        if seen is not None:
+            seen.update(kwargs)
+        return response
+
     fake = types.ModuleType("litellm")
-    fake.completion = lambda **kwargs: response
+    fake.completion = completion
     fake._turn_on_debug = lambda: None
     monkeypatch.setitem(sys.modules, "litellm", fake)
 
@@ -82,3 +91,71 @@ def test_missing_reasoning_field_yields_none(monkeypatch):
 
     assert comp.output == "Just an answer."
     assert comp.reasoning is None
+
+
+# --- timeouts --------------------------------------------------------------
+
+
+def test_timeout_is_forwarded_to_litellm(monkeypatch):
+    seen: dict = {}
+    _stub_litellm(monkeypatch, _FakeResponse("ok"), seen)
+    LiteLLMProvider(ProviderConfig(name="p", model="openai/auto")).complete([], timeout=45.0)
+
+    assert seen["timeout"] == 45.0
+
+
+def test_no_timeout_leaves_litellm_to_its_own_default(monkeypatch):
+    # The provider must not invent a timeout: an embedder calling complete() directly
+    # keeps whatever litellm (or its own config) decided.
+    seen: dict = {}
+    _stub_litellm(monkeypatch, _FakeResponse("ok"), seen)
+    LiteLLMProvider(ProviderConfig(name="p", model="openai/auto")).complete([])
+
+    assert "timeout" not in seen
+
+
+def test_an_explicit_timeout_overrides_one_in_params(monkeypatch):
+    """The per-call timeout wins over ``params.timeout``.
+
+    ``params`` also feeds the cache key, so a timeout parked there is part of the
+    identity under test; the runner's operational timeout has to be able to override
+    it without anyone editing a config.
+    """
+    seen: dict = {}
+    _stub_litellm(monkeypatch, _FakeResponse("ok"), seen)
+    cfg = ProviderConfig(name="p", model="openai/auto", params={"timeout": 9999})
+    LiteLLMProvider(cfg).complete([], timeout=30.0)
+
+    assert seen["timeout"] == 30.0
+
+
+def test_the_sdk_retry_layer_is_disabled_by_default(monkeypatch):
+    """A timeout is only real if nothing underneath silently retries it.
+
+    The OpenAI client that litellm wraps retries twice by default, with backoff, so a
+    2s ceiling actually took ~7.5s of wall clock (measured) and a 60s ceiling could run
+    for minutes. Those extra calls were invisible to the store, too. llmeval owns retry
+    policy (``RunPolicy.retries``, one stored row per attempt), so the lower layer must
+    not add a second one.
+    """
+    seen: dict = {}
+    _stub_litellm(monkeypatch, _FakeResponse("ok"), seen)
+    LiteLLMProvider(ProviderConfig(name="p", model="openai/auto")).complete([], timeout=5.0)
+
+    assert seen["max_retries"] == 0
+
+
+def test_a_config_can_opt_back_into_sdk_retries(monkeypatch):
+    seen: dict = {}
+    _stub_litellm(monkeypatch, _FakeResponse("ok"), seen)
+    cfg = ProviderConfig(name="p", model="openai/auto", params={"max_retries": 3})
+    LiteLLMProvider(cfg).complete([], timeout=5.0)
+
+    assert seen["max_retries"] == 3
+
+
+def test_echo_provider_accepts_a_timeout(monkeypatch):
+    # Every provider is called the same way by the runner, network or not.
+    cfg = ProviderConfig(name="e", model="echo", extra={"provider_impl": "echo"})
+    out = build_provider(cfg).complete([{"role": "user", "content": "hi"}], timeout=1.0)
+    assert out.output == "hi"

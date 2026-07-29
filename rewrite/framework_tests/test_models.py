@@ -55,6 +55,17 @@ def test_missing_id_is_rejected():
         TestCase.from_dict({"user": "q"})
 
 
+def test_timeout_is_absent_unless_the_test_case_asks_for_one():
+    # None means "use the run's default"; the test case does not have to care.
+    assert TestCase.from_dict({"id": "t5", "user": "q"}).timeout is None
+
+
+def test_timeout_is_read_from_the_test_case_json_as_seconds():
+    # A slow test case (deep research, long tool loops) can buy itself more time
+    # without changing the default for everything else in the suite.
+    assert TestCase.from_dict({"id": "t6", "user": "q", "timeout": 300}).timeout == 300.0
+
+
 def test_provider_config_cache_key_respects_field_selection():
     cfg = ProviderConfig(
         name="fidaro-dev",
