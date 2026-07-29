@@ -11,6 +11,9 @@ __pycache__/
 *.db
 results/
 reports/*.html
+# Generated reports written to the project root (llmeval report / reporting.run_report).
+/*.html
+/*.csv
 
 # Default sqllite
 llmeval.sqlite3
