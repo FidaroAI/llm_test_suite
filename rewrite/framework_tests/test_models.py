@@ -1,6 +1,6 @@
 import pytest
 
-from llmeval.models import AssertionSpec, ProviderConfig, TestCase
+from llmeval.models import AssertionSpec, ProviderConfig, TestCase, last_user_text
 
 
 def test_user_shorthand_becomes_a_user_message():
@@ -48,6 +48,44 @@ def test_user_text_is_last_user_message():
         }
     )
     assert tc.user_text == "second"
+
+
+def test_last_user_text_reads_plain_dicts():
+    """The stored form is plain dicts, not Message objects, and must work the same."""
+    assert (
+        last_user_text(
+            [
+                {"role": "system", "content": "be terse"},
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": "second"},
+            ]
+        )
+        == "second"
+    )
+
+
+def test_last_user_text_falls_back_to_the_final_turn():
+    assert last_user_text([{"role": "assistant", "content": "only turn"}]) == "only turn"
+
+
+def test_last_user_text_of_nothing_is_empty():
+    assert last_user_text([]) == ""
+
+
+def test_user_text_and_last_user_text_agree():
+    """One definition of "the question", used by both the test case and the store."""
+    tc = TestCase.from_dict(
+        {
+            "id": "t5",
+            "messages": [
+                {"role": "user", "content": "first"},
+                {"role": "assistant", "content": "ok"},
+                {"role": "user", "content": "second"},
+            ],
+        }
+    )
+    assert tc.user_text == last_user_text([m.model_dump() for m in tc.messages])
 
 
 def test_missing_id_is_rejected():

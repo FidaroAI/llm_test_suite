@@ -192,7 +192,9 @@ def _fill_one_result(
     for i in range(1, total + 1):
         attempt = _attempt(provider, messages, timeout)
         summary.ran += 1
-        store.add_result_row(testcase.id, run_id=run_id, config=config, **attempt.as_row())
+        store.add_result_row(
+            testcase.id, run_id=run_id, config=config, messages=messages, **attempt.as_row()
+        )
         if attempt.ok:
             logger.info(
                 "%s: ok in %.0fms -> %s",

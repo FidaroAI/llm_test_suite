@@ -7,7 +7,7 @@ the store — that keeps generation, running, and grading decoupled.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -17,6 +17,24 @@ from llmeval.cache_key import CacheKey, compute_cache_key
 class Message(BaseModel):
     role: str
     content: str
+
+
+def last_user_text(messages: Sequence[Mapping[str, Any]]) -> str:
+    """The last user turn — what a judge or a report shows as "the question".
+
+    Takes plain dicts rather than :class:`Message` objects because it has two callers on
+    two sides of the store: :attr:`TestCase.user_text` before a run, and the report after
+    one, reading the messages back out of ``results``. One definition, so the question a
+    judge was asked and the question the report prints cannot drift apart.
+
+    Falls back to the final turn of any role, so a test case ending in an assistant turn
+    still shows something rather than an empty cell.
+    """
+    turns = list(messages)
+    for m in reversed(turns):
+        if m.get("role") == "user":
+            return str(m.get("content", ""))
+    return str(turns[-1].get("content", "")) if turns else ""
 
 
 class AssertionSpec(BaseModel):
@@ -75,10 +93,7 @@ class TestCase(BaseModel):
     @property
     def user_text(self) -> str:
         """The last user message — what a judge or report should show as 'the question'."""
-        for m in reversed(self.messages):
-            if m.role == "user":
-                return m.content
-        return self.messages[-1].content if self.messages else ""
+        return last_user_text([m.model_dump() for m in self.messages])
 
 
 def _coerce_messages(data: dict[str, Any]) -> list[dict[str, str]]:

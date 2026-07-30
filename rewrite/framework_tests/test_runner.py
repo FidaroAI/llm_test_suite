@@ -164,6 +164,43 @@ def test_stored_result_carries_completion_payload(store, run_id):
     assert row.tokens == {"total": 1}
 
 
+def test_stored_result_carries_the_messages_that_were_sent(store, run_id):
+    p = FakeProvider(cfg())
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse"), run_id)
+    row = store.get_results("t1", cfg().cache_key().hash)[0]
+    assert row.messages == [{"role": "user", "content": "hi"}]
+
+
+def test_multi_turn_messages_are_stored_whole(store, run_id):
+    """The report must not have to reconstruct context it never saw."""
+    case = TestCase.from_dict(
+        {
+            "id": "t1",
+            "messages": [
+                {"role": "system", "content": "be terse"},
+                {"role": "user", "content": "I'm planning a trip to Japan."},
+                {"role": "assistant", "content": "When are you going?"},
+                {"role": "user", "content": "Two weeks in spring."},
+            ],
+        }
+    )
+    run_testcase(store, case, FakeProvider(cfg()), RunPolicy(mode="reuse"), run_id)
+    row = store.get_results("t1", cfg().cache_key().hash)[0]
+    assert [m["role"] for m in row.messages] == ["system", "user", "assistant", "user"]
+    assert row.messages[0]["content"] == "be terse"
+
+
+def test_failed_attempts_also_record_what_was_sent(store, run_id):
+    p = FakeProvider(cfg(), fail_times=1)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=1), run_id)
+    rows = store.get_results("t1", cfg().cache_key().hash)
+    assert len(rows) == 2
+    assert rows[0].error is not None
+    # Both the failure and the success carry the prompt; "what did we send when it
+    # timed out?" is the first question asked of an error row.
+    assert all(r.messages == [{"role": "user", "content": "hi"}] for r in rows)
+
+
 def test_stored_result_carries_full_config(store):
     p = FakeProvider(cfg(extra={"backend_version": "v9"}))
     key = p.config.cache_key()

@@ -169,6 +169,39 @@ def test_select_runs_applies_last_n_after_cache_key(store):
     assert [r.id for r in got] == [first, second]
 
 
+# --- the prompt on a result ------------------------------------------------
+
+
+MESSAGES = [
+    {"role": "system", "content": "be terse"},
+    {"role": "user", "content": "What is the capital of France?"},
+]
+
+
+def test_messages_round_trip(store, run_id):
+    rid = store.add_result_row("t1", run_id=run_id, output="Paris", messages=MESSAGES)
+    assert store.get_results_for_run(run_id)[0].messages == MESSAGES
+    assert store.get_gradings(rid) == []  # sanity: the row is otherwise ordinary
+
+
+def test_messages_are_stored_on_an_error_attempt_too(store, run_id):
+    """What was sent is exactly what you want to see when an attempt timed out."""
+    store.add_result_row("t1", run_id=run_id, error="timeout", messages=MESSAGES)
+    assert store.get_results_for_run(run_id)[0].messages == MESSAGES
+
+
+def test_messages_default_to_none(store, run_id):
+    store.add_result_row("t1", run_id=run_id, output="Paris")
+    assert store.get_results_for_run(run_id)[0].messages is None
+
+
+def test_messages_survive_the_cache_key_lookup_path(store, run_id):
+    store.add_result_row("t1", run_id=run_id, output="Paris", messages=MESSAGES)
+    assert store.get_results(  # the other read path onto results
+        "t1", store.get_run(run_id).cache_key_hash
+    )[0].messages == MESSAGES
+
+
 # --- results ---------------------------------------------------------------
 
 

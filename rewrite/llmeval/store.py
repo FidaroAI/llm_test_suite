@@ -30,6 +30,13 @@ best-of-N dataset — is a *cache key* question, so it groups by identity instea
 **Every attempt is stored, including the ones that failed.** A retry that eventually
 succeeded leaves its error rows behind, so the cost of a flaky provider is visible in
 the data rather than only in the log.
+
+Each attempt also records the **messages it sent**. The prompt would otherwise live only
+in ``testcases/``, which is regenerated — so a result could outlive any record of the
+question that produced it, and a report could only recover the prompt by joining against
+files that may since have changed. Storing what was actually sent makes a result
+self-contained, and makes "what did we send when this timed out?" answerable from the
+error row itself.
 """
 
 from __future__ import annotations
@@ -46,7 +53,8 @@ from llmeval.cache_key import CacheKey
 
 # Bumped whenever the schema changes shape. There is no migration path: a mismatch
 # is a hard error telling the user to delete the file (see ``Store._check_version``).
-SCHEMA_VERSION = 2
+# 3: results.messages_json — the prompt as sent, recorded with each attempt.
+SCHEMA_VERSION = 3
 
 
 def _now() -> str:
@@ -107,6 +115,7 @@ class ResultRow:
     error: str | None
     created_at: str
     config: Any = None  # full provider config that produced this result
+    messages: Any = None  # the messages sent to the provider, exactly as sent
 
 
 @dataclass
@@ -178,6 +187,9 @@ CREATE TABLE IF NOT EXISTS results (
     latency_ms REAL,
     error TEXT,
     config_json TEXT,
+    -- The prompt as sent. raw_json is the provider's *response*, so without this the
+    -- question is nowhere in the database and a result cannot be read on its own.
+    messages_json TEXT,
     created_at TEXT NOT NULL,
     UNIQUE(run_id, test_id, attempt)
 );
@@ -450,6 +462,7 @@ class Store:
         latency_ms: float | None = None,
         error: str | None = None,
         config: Any = None,
+        messages: Any = None,
     ) -> int:
         """Insert one attempt; return its row id (for attaching gradings).
 
@@ -459,7 +472,9 @@ class Store:
         its run didn't have.
 
         Pass ``error`` for an attempt that failed. Failed attempts are stored, not
-        dropped, so a retried test case shows what the retries cost.
+        dropped, so a retried test case shows what the retries cost. ``messages`` is
+        recorded either way — the prompt that produced a timeout is worth as much as the
+        prompt that produced an answer.
         """
         # Hold the lock across read-attempt + insert + commit so the attempt index
         # stays consistent when multiple threads write concurrently.
@@ -468,8 +483,8 @@ class Store:
             cur = self._conn.execute(
                 """INSERT INTO results
                    (run_id, test_id, attempt, output, raw_json, reasoning, tokens_json,
-                    latency_ms, error, config_json, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    latency_ms, error, config_json, messages_json, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id,
                     test_id,
@@ -481,6 +496,7 @@ class Store:
                     latency_ms,
                     error,
                     json.dumps(config) if config is not None else None,
+                    json.dumps(messages) if messages is not None else None,
                     _now(),
                 ),
             )
@@ -548,6 +564,7 @@ class Store:
             error=r["error"],
             created_at=r["created_at"],
             config=json.loads(r["config_json"]) if r["config_json"] else None,
+            messages=json.loads(r["messages_json"]) if r["messages_json"] else None,
         )
 
     # --- gradings ----------------------------------------------------------
