@@ -225,6 +225,112 @@ def test_latency_is_rounded_to_one_decimal(store):
     assert result_rows(store, runs_of(store, run))[0]["latency_ms"] == 16531.2
 
 
+# --- the prompt ---------------------------------------------------------
+
+
+def test_prompt_comes_from_the_result_without_testcases(store):
+    """The whole point of storing it: no --testcases needed to see the question."""
+    run = a_run(store, KEY)
+    store.add_result_row(
+        "t-0123456789",
+        run_id=run,
+        output="Paris",
+        messages=[{"role": "user", "content": "What is the capital of France?"}],
+    )
+    row = result_rows(store, runs_of(store, run))[0]
+    assert row["prompt"] == "What is the capital of France?"
+
+
+def test_prompt_is_the_last_user_turn_of_a_conversation(store):
+    run = a_run(store, KEY)
+    store.add_result_row(
+        "t-0123456789",
+        run_id=run,
+        output="x",
+        messages=[
+            {"role": "system", "content": "be terse"},
+            {"role": "user", "content": "I'm planning a trip to Japan."},
+            {"role": "assistant", "content": "When are you going?"},
+            {"role": "user", "content": "Two weeks in spring."},
+        ],
+    )
+    row = result_rows(store, runs_of(store, run))[0]
+    assert row["prompt"] == "Two weeks in spring."
+
+
+def test_full_messages_are_kept_alongside_the_prompt(store):
+    """prompt is the readable view; messages is the complete record behind it."""
+    import json as jsonmod
+
+    run = a_run(store, KEY)
+    sent = [
+        {"role": "system", "content": "be terse"},
+        {"role": "user", "content": "I'm planning a trip to Japan."},
+        {"role": "assistant", "content": "When are you going?"},
+        {"role": "user", "content": "Two weeks in spring."},
+    ]
+    store.add_result_row("t-0123456789", run_id=run, output="x", messages=sent)
+    row = result_rows(store, runs_of(store, run))[0]
+    assert jsonmod.loads(row["messages"]) == sent
+
+
+def test_a_single_turn_prompt_still_gets_a_messages_column(store):
+    import json as jsonmod
+
+    run = a_run(store, KEY)
+    store.add_result_row(
+        "t-0123456789", run_id=run, output="x", messages=[{"role": "user", "content": "hi"}]
+    )
+    row = result_rows(store, runs_of(store, run))[0]
+    assert jsonmod.loads(row["messages"]) == [{"role": "user", "content": "hi"}]
+
+
+def test_an_errored_attempt_still_shows_its_prompt(store):
+    """"What did we send when this timed out?" is the first question about an error row."""
+    run = a_run(store, KEY)
+    store.add_result_row(
+        "t-0123456789",
+        run_id=run,
+        error="timeout",
+        latency_ms=60001.0,
+        messages=[{"role": "user", "content": "Write a full equity research note."}],
+    )
+    row = result_rows(store, runs_of(store, run))[0]
+    assert row["prompt"] == "Write a full equity research note."
+    assert row["error"] == "timeout"
+
+
+def test_a_result_without_stored_messages_leaves_the_prompt_empty(store):
+    run = a_run(store, KEY)
+    store.add_result_row("t-0123456789", run_id=run, output="x")
+    row = result_rows(store, runs_of(store, run))[0]
+    assert row["prompt"] is None
+    assert row["messages"] is None
+
+
+def test_the_stored_prompt_wins_over_the_testcase_file(store):
+    """The file may have been regenerated; only the stored value is what was really sent."""
+    run = a_run(store, KEY)
+    store.add_result_row(
+        "t-0123456789",
+        run_id=run,
+        output="x",
+        messages=[{"role": "user", "content": "the question as sent"}],
+    )
+    cases = {"t-0123456789": a_case("t-0123456789")}  # a_case's prompt is "the prompt"
+    row = result_rows(store, runs_of(store, run), cases)[0]
+    assert row["prompt"] == "the question as sent"
+
+
+def test_the_testcase_supplies_the_prompt_for_rows_predating_the_store_change(store):
+    """A result with no stored messages still shows a prompt when the file has one."""
+    run = a_run(store, KEY)
+    store.add_result_row("t-0123456789", run_id=run, output="x")
+    cases = {"t-0123456789": a_case("t-0123456789")}
+    row = result_rows(store, runs_of(store, run), cases)[0]
+    assert row["prompt"] == "the prompt"
+
+
 # --- testcase enrichment and selection ---------------------------------
 
 
@@ -238,11 +344,14 @@ def test_testcases_add_prompt_and_classification(store):
     assert list(row) == result_columns(with_tests=True)
 
 
-def test_test_columns_are_absent_without_testcases(store):
+def test_classification_columns_are_absent_without_testcases(store):
+    """prompt is not among them any more — it comes from the result itself now."""
     run = a_run(store, KEY)
     store.add_result_row("t-0123456789", run_id=run, output="x")
     row = result_rows(store, runs_of(store, run))[0]
-    assert "prompt" not in row
+    assert "request_type" not in row
+    assert "domain" not in row
+    assert "prompt" in row
     assert list(row) == result_columns(with_tests=False)
 
 

@@ -131,12 +131,23 @@ rows — so "how flaky was this provider?" and "what did the retries cost?" are 
 guesses. `attempt` is 0-based **within a run**; pool across runs by cache key for the
 best-of-N view.
 
+**Each attempt records the prompt it sent**, in `messages_json`. `raw_json` holds the
+provider's *response*, so without this the question would live only in `testcases/` — which
+is regenerated, meaning a result could outlive any record of what produced it. Storing it
+makes a result readable on its own, and makes "what did we send when this timed out?"
+answerable from the error row.
+
 ```sql
 -- what runs exist?
 SELECT id, provider_name, notes, started_at, finished_at FROM runs ORDER BY id DESC;
 
 -- everything one run produced (finished_at NULL => it crashed or is still going)
 SELECT test_id, attempt, error, latency_ms FROM results WHERE run_id = 'run_...';
+
+-- what was actually asked, for the attempts that failed
+SELECT test_id, attempt, error,
+       json_extract(messages_json, '$[#-1].content') AS last_turn
+FROM results WHERE run_id = 'run_...' AND error IS NOT NULL;
 
 -- which tests needed retries, and how much time went on the failures?
 SELECT test_id,
@@ -216,10 +227,25 @@ run2, test x, attempt 0, assertion1, passed=True
 `latency_ms` is filled in for error rows too, which is how "the timeout is too tight" is
 distinguished from "the provider is down".
 
+**The prompt is always there.** Two columns carry it, both read off the result rather than
+the test-case files, so they need no `--testcases`:
+
+| Column | What it holds |
+|---|---|
+| `prompt` | the last user turn — the question, as a human reads it |
+| `messages` | the whole conversation as sent, JSON. The only place a system prompt or an earlier turn survives |
+
+For an ordinary single-turn test the two say the same thing and you can hide `messages` in
+the viewer. For a multi-turn case they don't: `prompt` would be *"Two weeks in spring."* on
+its own, which is why the full record is kept next to it. Where a result predates the store
+recording prompts, `prompt` falls back to the test case if you passed `--testcases` — but the
+stored copy always wins, because `testcases/` is regenerated and only the stored copy is
+evidence of what this result was produced from.
+
 `--provider` is repeatable and optional (default: every provider in the database), so one
 report can span several configs — `provider` and `cache_key_hash` are columns. `--testcases`
-is optional and does two things: it adds the `prompt`, `request_type` and `domain` columns,
-and it **selects** — only tests present in those files appear, which is what makes
+is optional and does two things: it adds the `request_type` and `domain` labels, and it
+**selects** — only tests present in those files appear, which is what makes
 `--filter suite=simple_facts` work.
 
 The statistics report — bootstrap CIs, deltas against a baseline, pick-best win rates — is

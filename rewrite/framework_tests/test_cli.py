@@ -145,16 +145,22 @@ def test_report_writes_a_csv(tmp_path):
     assert rows[0]["assertion_key"].startswith("icontains:")
     assert rows[0]["passed"] == "True"
     assert rows[0]["prompt"] == "What is the capital of France?"
+    assert rows[0]["messages"] != ""
     assert rows[0]["run_id"].startswith("run_")
     assert rows[0]["latency_ms"] != ""
 
 
-def test_report_without_testcases_omits_the_prompt_column(tmp_path):
+def test_report_without_testcases_still_has_the_prompt(tmp_path):
+    """The prompt is stored on the result, so it needs no test-case files."""
     _, prov, db = _echo_setup(tmp_path)
     out = tmp_path / "rows.csv"
     assert main(["report", "--db", db, "--provider", prov, "--out", str(out)]) == 0
-    fieldnames, _ = _read_csv(out)
-    assert "prompt" not in (fieldnames or [])
+    fieldnames, rows = _read_csv(out)
+    assert "prompt" in (fieldnames or [])
+    assert rows[0]["prompt"] == "What is the capital of France?"
+    # The classification labels do still need the files.
+    assert "request_type" not in (fieldnames or [])
+    assert "domain" not in (fieldnames or [])
 
 
 def test_report_on_a_missing_db_is_an_error(tmp_path):

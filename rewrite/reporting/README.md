@@ -70,7 +70,9 @@ python -m reporting.csv_table results.csv -o results.html --title "last 3 runs"
 
 The CSV has one row per (result × assertion), plus one row per **errored** result with the
 grading columns empty. Rows are grouped by run in chronological order and by attempt within
-a test, so a retried test reads as its failures followed by the answer. See
+a test, so a retried test reads as its failures followed by the answer. Every row carries
+the prompt it was produced from (`prompt` for the question, `messages` for the full
+conversation as sent), so the page is readable without cross-referencing anything. See
 [`llmeval/resultrows.py`](../llmeval/resultrows.py) for the column list and the ordering
 guarantee, and the [main README](../README.md#reporting) for the selection flags.
 

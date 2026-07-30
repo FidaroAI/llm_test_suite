@@ -366,8 +366,8 @@ def _add_report_parsers(sub) -> None:
     )
     rp.add_argument(
         "--testcases",
-        help="testcases dir/file; selects which tests appear and adds the prompt, "
-        "request_type and domain columns",
+        help="testcases dir/file; selects which tests appear and adds the request_type "
+        "and domain columns (the prompt is stored on the result, so it is always present)",
     )
     _add_db(rp)
     _add_filters(rp)

@@ -31,11 +31,12 @@ depending on the store's column names.
 from __future__ import annotations
 
 import csv
+import json
 import os
 import re
 from typing import Any, Mapping, Sequence
 
-from llmeval.models import TestCase
+from llmeval.models import TestCase, last_user_text
 from llmeval.store import ResultRow, RunRow, Store
 
 # Test ids are ``<suite>-<sha1(prompt)[:10]>[-<variant>]`` (llmeval/generation/common.py),
@@ -47,8 +48,12 @@ _ID_SUITE = re.compile(r"^(?P<suite>.+?)-[0-9a-f]{10}(?:-.*)?$")
 # Column order is the reading order of the report: where it came from, what was asked, what
 # came back, how it scored, then the provenance you only want when something looks wrong.
 _RUN_COLUMNS = ["run_id", "run_started_at", "provider"]
-_BASE_COLUMNS = ["test_id", "attempt", "suite"]
-_TEST_COLUMNS = ["prompt", "request_type", "domain"]
+# ``prompt`` and ``messages`` come off the result, so they need no test-case files and
+# are always present. ``prompt`` is the readable view (the last user turn); ``messages``
+# is the complete record behind it, which is the only place a system prompt or an earlier
+# turn of a conversation survives.
+_BASE_COLUMNS = ["test_id", "attempt", "suite", "prompt", "messages"]
+_TEST_COLUMNS = ["request_type", "domain"]
 _RESULT_COLUMNS = [
     "output",
     "reasoning",
@@ -117,14 +122,37 @@ def _tokens(result: ResultRow) -> dict[str, Any]:
 def result_columns(with_tests: bool) -> list[str]:
     """The column order for a result-rows report.
 
-    ``with_tests`` follows whether test cases were loaded. The prompt/classification columns
-    are then *absent* rather than empty — an absent column says "you didn't ask for this",
-    an empty one says "there was nothing to show", and they are different answers.
+    ``with_tests`` follows whether test cases were loaded. The classification columns are
+    then *absent* rather than empty — an absent column says "you didn't ask for this", an
+    empty one says "there was nothing to show", and they are different answers.
+
+    ``prompt`` and ``messages`` are **not** conditional: the result carries its own copy of
+    what was sent, so the question is in the report whether or not you passed
+    ``--testcases``.
     """
     cols = list(_RUN_COLUMNS) + list(_BASE_COLUMNS)
     if with_tests:
         cols += _TEST_COLUMNS
     return cols + _RESULT_COLUMNS + _GRADING_COLUMNS + _PROVENANCE_COLUMNS
+
+
+def _prompt_fields(result: ResultRow, case: TestCase | None) -> dict[str, Any]:
+    """The question, from the result's own record of what was sent.
+
+    The **stored** messages win over the test case: ``testcases/`` is regenerated, so the
+    file's current text is not necessarily what this result was produced from, and only
+    the stored copy is evidence. The test case is a fallback for results written before
+    the store recorded prompts (schema 2), which would otherwise show an empty cell.
+
+    ``messages`` is serialised here rather than left as a list because these rows go
+    straight to CSV, where a cell is text either way.
+    """
+    if result.messages:
+        return {
+            "prompt": last_user_text(result.messages),
+            "messages": json.dumps(result.messages, ensure_ascii=False),
+        }
+    return {"prompt": case.user_text if case else None, "messages": None}
 
 
 def _shared_fields(run: RunRow, result: ResultRow, case: TestCase | None) -> dict[str, Any]:
@@ -140,6 +168,7 @@ def _shared_fields(run: RunRow, result: ResultRow, case: TestCase | None) -> dic
         "test_id": result.test_id,
         "attempt": result.attempt,
         "suite": suite_of(result.test_id, case),
+        **_prompt_fields(result, case),
         "output": _text(result.output),
         "reasoning": _text(result.reasoning),
         "error": result.error,
@@ -160,7 +189,8 @@ def result_rows(
     :param cases_by_id: test cases keyed by id. When given it **selects as well as
         enriches** — a result whose test is absent is dropped, which is what makes
         ``--filter k=v`` mean anything and matches how ``run`` and ``grade`` already treat
-        ``--testcases``. Pass ``None`` for every result, unfiltered and unenriched.
+        ``--testcases``. Pass ``None`` for every result, unfiltered and unenriched; the
+        prompt is present either way, since it is stored on the result.
     """
     with_tests = cases_by_id is not None
     columns = result_columns(with_tests)
@@ -173,7 +203,6 @@ def result_rows(
             case = cases_by_id.get(result.test_id) if with_tests else None
             shared = _shared_fields(run, result, case)
             if with_tests:
-                shared["prompt"] = case.user_text if case else None
                 shared["request_type"] = case.metadata.get("request_type") if case else None
                 shared["domain"] = case.metadata.get("domain") if case else None
 
