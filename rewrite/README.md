@@ -128,7 +128,7 @@ to avoid a cached answer masking a freshness miss.
 Fidelity note: this is generation-only — per-test weighted thresholds and the
 multifaceted 1→5 `rubricPrompt` override from the legacy suite are intentionally
 not reproduced (rubrics grade per-assertion via the standard 0–1 template). See
-`docs/superpowers/specs/2026-06-25-rewrite-all-suites-generation-design.md`.
+[the design note](docs/specs/2026-06-25-rewrite-all-suites-generation-design.md).
 
 ## Results
 

@@ -5,6 +5,10 @@ FOR AGENTS:
 * Start with [README.md](README.md) for usage and [DESIGN.md](DESIGN.md) for why it looks
   the way it does. This directory is self-contained and intended to move to its own repo,
   so don't reach up into the legacy promptfoo suite for anything.
+* [docs/](docs/) holds this suite's design history — one spec per feature in
+  [docs/specs/](docs/specs/), the occasional implementation plan in
+  [docs/plans/](docs/plans/). Don't load them by default; reach for one only when you need
+  to know *why* a decision was made and README/DESIGN don't say.
 
 ## The governing rule: `llmeval` is plumbing, not porcelain
 

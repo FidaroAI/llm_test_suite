@@ -7,7 +7,7 @@ for what changed immediately afterwards. **The packaging described below is supe
 
 ## Problem
 
-`llmeval` is deliberately unfriendly. Per [rewrite/CLAUDE.md](../../../rewrite/CLAUDE.md),
+`llmeval` is deliberately unfriendly. Per [CLAUDE.md](../../CLAUDE.md),
 everything must be *possible* with the CLI and nothing needs to be *pleasant*: explicit
 flags, no guessed defaults, no workflow shortcuts. The everyday loop therefore reads:
 

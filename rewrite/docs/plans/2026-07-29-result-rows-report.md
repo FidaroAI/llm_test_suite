@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Design spec: `docs/superpowers/specs/2026-07-29-result-rows-report-design.md`. Read it before starting.
+- Design spec: [`../specs/2026-07-29-result-rows-report-design.md`](../specs/2026-07-29-result-rows-report-design.md). Read it before starting.
 - **All work happens in `rewrite/`.** Run every command from `/Users/badger/fidaro/git/llm_test_suite/.claude/worktrees/llmeval-report-rows/rewrite`.
 - Test command: `.venv/bin/python -m pytest`. Lint command: `.venv/bin/python -m pylint llmeval` — must stay at **10/10**.
 - **No SQLite schema change.** `SCHEMA_VERSION` in `llmeval/store.py` stays at `2`. There is no migration path, so a bump would cost every user their accumulated results.
