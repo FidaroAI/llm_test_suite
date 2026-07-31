@@ -202,6 +202,46 @@ def test_messages_survive_the_cache_key_lookup_path(store, run_id):
     )[0].messages == MESSAGES
 
 
+# --- provider-specific output ----------------------------------------------
+
+
+FIDARO = {"fidaro": {"title": "Capital of France"}}
+
+
+def test_provider_specific_output_round_trips(store, run_id):
+    store.add_result_row("t1", run_id=run_id, output="Paris", provider_specific=FIDARO)
+    assert store.get_results_for_run(run_id)[0].provider_specific == FIDARO
+
+
+def test_provider_specific_output_defaults_to_none(store, run_id):
+    # An ordinary OpenAI response has nothing non-standard, and must leave NULL behind.
+    store.add_result_row("t1", run_id=run_id, output="Paris")
+    assert store.get_results_for_run(run_id)[0].provider_specific is None
+
+
+def test_provider_specific_output_is_stored_on_an_error_attempt_too(store, run_id):
+    """A stream may well have delivered its side-channel data before it stalled."""
+    store.add_result_row(
+        "t1", run_id=run_id, output="partial", error="stream timeout", provider_specific=FIDARO
+    )
+    assert store.get_results_for_run(run_id)[0].provider_specific == FIDARO
+
+
+def test_provider_specific_output_survives_the_cache_key_lookup_path(store, run_id):
+    store.add_result_row("t1", run_id=run_id, output="Paris", provider_specific=FIDARO)
+    assert store.get_results(
+        "t1", store.get_run(run_id).cache_key_hash
+    )[0].provider_specific == FIDARO
+
+
+def test_arbitrary_vendor_data_is_kept_verbatim(store, run_id):
+    """The column stores the envelope whole, with no opinion on what is inside it, so a
+    new key needs no schema change."""
+    payload = {"fidaro": {"title": "T", "compaction": {"turns": 4}, "unknown": [1, 2]}}
+    store.add_result_row("t1", run_id=run_id, output="x", provider_specific=payload)
+    assert store.get_results_for_run(run_id)[0].provider_specific == payload
+
+
 # --- results ---------------------------------------------------------------
 
 

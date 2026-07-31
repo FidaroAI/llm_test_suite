@@ -52,6 +52,25 @@ promptfoo, deep_eval, or inspect_ai. Bending any of them there is more work than
 core. The brief explicitly permits "none at all." We borrow proven *ideas* (epochs +
 reducers from inspect; G-Eval from deep_eval) without the dependency.
 
+#### Exception: the streaming path is hand-rolled
+
+litellm remains the provider layer for non-streaming calls and for the judge. Streaming
+(`"stream": true`, see [§5.1](#51-streaming-and-partial-results)) goes through our own
+SSE reader over `httpx`. Three measured reasons, probed against a local `/v2` mimic on
+litellm 1.94.0:
+
+* Its streaming path **discards the server's `usage`** and substitutes a local tokenizer
+  estimate — the server sent 3/4/7, litellm reported 8/2/10. A streamed row and a
+  non-streamed row would then disagree about the same response.
+* `stream_chunk_builder` **drops non-standard top-level keys**, so the `fidaro` envelope
+  does not survive aggregation.
+* A read timeout **ends iteration silently, with no exception**, making a truncated
+  stream indistinguishable from a complete one.
+
+The third is disqualifying: telling those two apart is the entire purpose of streaming
+here. Roughly 120 lines against a format we control, with a reference implementation to
+match, beats losing the signal.
+
 ### [DECISION] Generation is fully separate from running
 
 - **Generation code** lives in `llmeval/generation/` + `generation_sources/`.
@@ -166,12 +185,14 @@ crashes is left with `finished_at` NULL rather than being marked complete.
 A provider's full identity is a namespace:
 
 ```
-namespace = { "model": <model>, **params, **extra }
+namespace = { "model": <model>, "stream": <bool>, **params, **extra }
 ```
 
 `params` are call params (temperature, max_tokens, top_p…). `extra` is arbitrary
 user metadata that still affects the system under test but isn't an API param — e.g.
-`{"backend_version": "phala-2026-06-01", "system_prompt_id": "v3"}`.
+`{"backend_version": "phala-2026-06-01", "system_prompt_id": "v3"}`. `model` and `stream`
+are structural fields of the config rather than free-form parameters, so they sit in the
+namespace directly and are reserved against being shadowed from `params`/`extra`.
 
 The **cache key** is computed from a user-selected subset:
 
@@ -243,6 +264,54 @@ one-line factual question, whatever model answers it. It also cannot live in a p
 ceiling" a different system under test, silently invalidating cached results. The
 per-call timeout is applied after `params` for exactly this reason, so it wins over a
 stale one parked in a config.
+
+### 5.1 Streaming and partial results
+
+A provider config may set `"stream": true`. The response is then read as OpenAI-compatible
+SSE and accumulated client-side, exactly the way the Fidaro orchestrator accumulates it
+server-side for `stream:false` (`openai_v2/aggregation.py`): content deltas concatenated,
+reasoning deltas concatenated, `usage` from the terminal chunk, the `fidaro` object merged
+across every chunk that carries one. Same stored row either way.
+
+**Why bother, if the row is the same?** Because of what happens when the row *isn't*
+finished. Without streaming, a call that exceeds its timeout is torn down before any body
+is read: the stored result is an error with no output, and there is nothing to look at.
+With streaming, the text that had already arrived is on record.
+
+That converts a whole class of test case from unrunnable to routine. "Is the model stuck
+in a repetitive loop?" times out by construction — the loop never terminates — so the
+evidence needed to answer it is exactly the evidence a non-streaming timeout destroys.
+
+Consequences, each a deliberate choice:
+
+- A timed-out attempt is stored with **both** `output` and `error`. `Completion.error`
+  exists for this: "incomplete but usable" is a third outcome, and the runner otherwise
+  models failure as the *absence* of a completion.
+- Such an attempt is **not retried** (`Attempt.retryable`). The ceiling was the caller's
+  statement of how long the answer was worth waiting for; paying it three times over to
+  learn the same thing is waste, and these tests are meant to time out every time. An
+  attempt that *raised* still retries — an exception may be transient, a timeout is not.
+- It stays an **error row**, so `grade` skips it and `count_results(success_only=True)`
+  ignores it. Partials are captured for inspection now; an assertion that grades them is
+  separate work, and needs grading to stop skipping error rows.
+- `stream` joins the cache-key namespace but is usually left unselected, so switching it
+  on doesn't invalidate existing results — consistent with the claim that the aggregated
+  stream and the non-streamed response are the same data.
+- Streaming is OpenAI-compatible SSE only, and is *refused* rather than ignored for other
+  backends: a config that asks to stream and silently doesn't looks identical in the store
+  right up until a timeout throws the partial away.
+
+### [DECISION] Non-standard response data is stored verbatim, not parsed
+
+`/v2` namespaces everything the OpenAI schema has no home for under one top-level `fidaro`
+object (today: the chat title). It lands whole in `results.provider_specific_output` as
+`{"fidaro": {...}}`, on both the streaming and non-streaming paths.
+
+Enveloped rather than flattened so a second vendor costs no schema change, and unparsed
+because the suite has no opinion on what a backend puts there — a test case that wants to
+assert on a key reads the JSON. Capture is an allowlist of top-level keys
+(`PROVIDER_SPECIFIC_KEYS`), not "everything unrecognised", because litellm decorates its
+own responses with several extra top-level keys that would otherwise be swept in.
 
 A timeout is only real if nothing underneath quietly retries it, so the provider also
 switches **off** the retry layer in litellm's OpenAI client (`max_retries=0`). That layer

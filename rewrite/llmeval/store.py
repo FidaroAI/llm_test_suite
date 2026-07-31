@@ -37,6 +37,12 @@ question that produced it, and a report could only recover the prompt by joining
 files that may since have changed. Storing what was actually sent makes a result
 self-contained, and makes "what did we send when this timed out?" answerable from the
 error row itself.
+
+Each attempt may also record **provider-specific output**: response data with no place
+in the OpenAI schema, kept verbatim under its vendor key (``{"fidaro": {...}}``). It is
+stored rather than parsed because the suite has no opinion on what a backend puts there
+— a test case that wants to assert on it reads the JSON, and a new key needs no schema
+change.
 """
 
 from __future__ import annotations
@@ -54,7 +60,8 @@ from llmeval.cache_key import CacheKey
 # Bumped whenever the schema changes shape. There is no migration path: a mismatch
 # is a hard error telling the user to delete the file (see ``Store._check_version``).
 # 3: results.messages_json — the prompt as sent, recorded with each attempt.
-SCHEMA_VERSION = 3
+# 4: results.provider_specific_output — non-standard response data, verbatim.
+SCHEMA_VERSION = 4
 
 
 def _now() -> str:
@@ -116,6 +123,7 @@ class ResultRow:
     created_at: str
     config: Any = None  # full provider config that produced this result
     messages: Any = None  # the messages sent to the provider, exactly as sent
+    provider_specific: Any = None  # non-standard response data, e.g. {"fidaro": {...}}
 
 
 @dataclass
@@ -190,6 +198,10 @@ CREATE TABLE IF NOT EXISTS results (
     -- The prompt as sent. raw_json is the provider's *response*, so without this the
     -- question is nowhere in the database and a result cannot be read on its own.
     messages_json TEXT,
+    -- Response data with no place in the OpenAI schema, stored under its vendor key:
+    -- {"fidaro": {"title": "..."}}. Enveloped rather than flattened so a second vendor
+    -- costs no schema change.
+    provider_specific_output TEXT,
     created_at TEXT NOT NULL,
     UNIQUE(run_id, test_id, attempt)
 );
@@ -463,6 +475,7 @@ class Store:
         error: str | None = None,
         config: Any = None,
         messages: Any = None,
+        provider_specific: Any = None,
     ) -> int:
         """Insert one attempt; return its row id (for attaching gradings).
 
@@ -474,7 +487,8 @@ class Store:
         Pass ``error`` for an attempt that failed. Failed attempts are stored, not
         dropped, so a retried test case shows what the retries cost. ``messages`` is
         recorded either way — the prompt that produced a timeout is worth as much as the
-        prompt that produced an answer.
+        prompt that produced an answer. So is ``provider_specific``: a stream that timed
+        out may well have delivered its side-channel data before it stalled.
         """
         # Hold the lock across read-attempt + insert + commit so the attempt index
         # stays consistent when multiple threads write concurrently.
@@ -483,8 +497,9 @@ class Store:
             cur = self._conn.execute(
                 """INSERT INTO results
                    (run_id, test_id, attempt, output, raw_json, reasoning, tokens_json,
-                    latency_ms, error, config_json, messages_json, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    latency_ms, error, config_json, messages_json,
+                    provider_specific_output, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id,
                     test_id,
@@ -497,6 +512,7 @@ class Store:
                     error,
                     json.dumps(config) if config is not None else None,
                     json.dumps(messages) if messages is not None else None,
+                    json.dumps(provider_specific) if provider_specific is not None else None,
                     _now(),
                 ),
             )
@@ -565,6 +581,11 @@ class Store:
             created_at=r["created_at"],
             config=json.loads(r["config_json"]) if r["config_json"] else None,
             messages=json.loads(r["messages_json"]) if r["messages_json"] else None,
+            provider_specific=(
+                json.loads(r["provider_specific_output"])
+                if r["provider_specific_output"]
+                else None
+            ),
         )
 
     # --- gradings ----------------------------------------------------------

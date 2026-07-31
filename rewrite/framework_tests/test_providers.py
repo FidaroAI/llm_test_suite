@@ -159,3 +159,42 @@ def test_echo_provider_accepts_a_timeout(monkeypatch):
     cfg = ProviderConfig(name="e", model="echo", extra={"provider_impl": "echo"})
     out = build_provider(cfg).complete([{"role": "user", "content": "hi"}], timeout=1.0)
     assert out.output == "hi"
+
+
+# --- provider-specific output on the non-streaming path ----------------------
+
+
+def test_fidaro_is_captured_without_streaming(monkeypatch):
+    """litellm passes unrecognised top-level keys through untouched on this path.
+
+    That is what makes the two paths comparable: a streamed row and a non-streamed one
+    carry the same side-channel data, so turning streaming on doesn't change what a test
+    case can assert.
+    """
+    response = _FakeResponse("Paris.")
+    response.fidaro = {"title": "Capital of France"}
+    _stub_litellm(monkeypatch, response)
+    comp = LiteLLMProvider(ProviderConfig(name="p", model="openai/auto")).complete([])
+
+    assert comp.provider_specific == {"fidaro": {"title": "Capital of France"}}
+
+
+def test_an_ordinary_response_has_no_provider_specific_output(monkeypatch):
+    _stub_litellm(monkeypatch, _FakeResponse("Paris."))
+    comp = LiteLLMProvider(ProviderConfig(name="p", model="openai/auto")).complete([])
+
+    assert comp.provider_specific is None
+
+
+def test_a_pydantic_fidaro_object_is_stored_as_plain_json(monkeypatch):
+    # litellm hands back pydantic models; the store wants JSON either way.
+    class FidaroModel:
+        def model_dump(self):
+            return {"title": "T"}
+
+    response = _FakeResponse("Paris.")
+    response.fidaro = FidaroModel()
+    _stub_litellm(monkeypatch, response)
+    comp = LiteLLMProvider(ProviderConfig(name="p", model="openai/auto")).complete([])
+
+    assert comp.provider_specific == {"fidaro": {"title": "T"}}

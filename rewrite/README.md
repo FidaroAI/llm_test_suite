@@ -137,6 +137,9 @@ is regenerated, meaning a result could outlive any record of what produced it. S
 makes a result readable on its own, and makes "what did we send when this timed out?"
 answerable from the error row.
 
+**Non-standard response data** goes in `provider_specific_output`, verbatim and under its
+vendor key — see [Provider-specific output](#provider-specific-output).
+
 ```sql
 -- what runs exist?
 SELECT id, provider_name, notes, started_at, finished_at FROM runs ORDER BY id DESC;
@@ -161,6 +164,11 @@ GROUP BY test_id HAVING attempts > 1;
 SELECT r.test_id, r.run_id, r.attempt, r.error, r.latency_ms
 FROM results r JOIN runs ru ON ru.id = r.run_id
 WHERE ru.cache_key_hash = '<hash>' ORDER BY r.test_id, r.id;
+
+-- streamed attempts that timed out, and how much answer they still produced.
+-- Empty before streaming existed: the request died before any body was read.
+SELECT test_id, LENGTH(output) AS chars, error, SUBSTR(output, -120) AS tail
+FROM results WHERE error LIKE 'stream timeout%' ORDER BY chars DESC;
 ```
 
 There is **no migration path**: the store checks `PRAGMA user_version` on open and refuses
@@ -271,6 +279,7 @@ to `.env` and fill in what you use.
   "model": "openai/Qwen/Qwen3-Next-80B-A3B-Thinking-FP8",
   "base_url": "${FIDARO_DEV_BASE_URL}",
   "api_key_env": "FIDARO_API_KEY",
+  "stream": true,
   "params": { "temperature": 0.7, "max_tokens": 100000 },
   "extra": { "backend_version": "phala-dev" },
   "cache_key_fields": ["model", "temperature", "backend_version"]  // max_tokens ignored
@@ -279,6 +288,52 @@ to `.env` and fill in what you use.
 
 Bringing infrastructure up (gateways, sidecars, redeploys) is **out of scope** — point
 `base_url` at something already running.
+
+### Streaming (`"stream": true`)
+
+Consumes the response as SSE and accumulates it client-side instead of waiting for the
+server to do it. The stored row is the same either way — same answer, same reasoning,
+same token counts — with one difference, which is the whole reason to switch it on:
+
+> **A call that hits its timeout keeps what it already received.** Without streaming the
+> request is torn down before any body is read, and the row is an error with no output.
+> With it, the partial answer and partial reasoning are on record.
+
+That is what makes "is the model stuck in a repetitive loop?" a testable question: the
+call still times out, but now the text it was looping over is in the database.
+
+A timed-out attempt is stored with **both** its output and an `error` saying what
+happened and how much arrived (`stream timeout after 60.0s (content: 48213 chars,
+reasoning: 1204 chars)`). It is **not retried** — the timeout was your statement of how
+long the answer was worth waiting for, and these tests are meant to time out. Being an
+error row, it is skipped by `grade` and doesn't count towards `--mode reuse`; read it
+with SQL.
+
+The deadline is the ordinary per-call timeout (`--timeout`, or `timeout` on a test case)
+— there is no separate streaming one.
+
+Two limits. Streaming is **OpenAI-compatible SSE only**: `"stream": true` on a
+non-`openai/` model is refused rather than silently ignored. And for Fidaro it needs an
+**orchestrator `/v2`** base URL — the llm-gateway on 8082/8084 serves `/v1`, which uses
+older plaintext frames and carries no `fidaro` object.
+
+### Provider-specific output
+
+Response data that has no place in the OpenAI schema is kept verbatim in
+`results.provider_specific_output`, under its vendor key. For Fidaro `/v2` that is the
+`fidaro` object, which today carries the chat title:
+
+```json
+{"fidaro": {"title": "Capital of France"}}
+```
+
+Captured on both the streaming and non-streaming paths, so turning streaming on doesn't
+change what a test case can see. Nothing parses it — a new key needs no code change:
+
+```sql
+SELECT test_id, json_extract(provider_specific_output, '$.fidaro.title') AS title
+FROM results WHERE provider_specific_output IS NOT NULL;
+```
 
 ## The three workflows
 

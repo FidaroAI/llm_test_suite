@@ -114,7 +114,20 @@ class ProviderConfig(BaseModel):
 
     ``model`` is a litellm model string (e.g. ``openai/Qwen...``, ``bedrock/...``).
     ``params`` are call params; ``extra`` is non-API identity (backend_version, ...).
-    ``cache_key_fields`` selects which of {model, *params, *extra} define identity.
+    ``cache_key_fields`` selects which of {model, stream, *params, *extra} define
+    identity.
+
+    ``stream`` asks the suite to consume the response as an SSE stream and accumulate it
+    client-side. The stored row is the same either way — same answer, same reasoning,
+    same token counts — with one difference that is the entire reason the flag exists: a
+    call that hits its timeout leaves the partial answer and partial reasoning behind
+    instead of nothing, which is what a test for a model stuck in a repetitive loop needs
+    in order to say so. Streaming is OpenAI-compatible SSE only; see
+    :class:`~llmeval.providers.StreamingOpenAIProvider`.
+
+    There is deliberately no timeout here. A timeout belongs to the *task*, not the
+    provider (see :class:`TestCase`), and one parked in ``params`` would feed the cache
+    key and change the identity under test.
     """
 
     name: str
@@ -124,6 +137,9 @@ class ProviderConfig(BaseModel):
     base_url: str | None = None
     api_key_env: str | None = None
     cache_key_fields: list[str] | None = None
+    stream: bool = False
 
     def cache_key(self) -> CacheKey:
-        return compute_cache_key(self.model, self.params, self.extra, self.cache_key_fields)
+        return compute_cache_key(
+            self.model, self.params, self.extra, self.cache_key_fields, self.stream
+        )

@@ -3,12 +3,10 @@
   "model": "openai/auto",
   "base_url": "${FIDARO_PROD_BASE_URL}",
   "api_key_env": "FIDARO_API_KEY",
+  "stream": true,
   "params": {
     "temperature": 0.7,
-    "max_tokens": 100000,
-    "extra_body": {
-      "stream": false
-    }
+    "max_tokens": 100000
   },
   "extra": {
     "backend_version": "phala-prod"

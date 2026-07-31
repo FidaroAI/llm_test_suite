@@ -131,6 +131,86 @@ def test_summary_counts_a_test_case_that_exhausted_its_retries(store, run_id):
     assert (summary.ran, summary.errors, summary.failed) == (2, 2, 1)
 
 
+# --- partial results ---------------------------------------------------------
+#
+# A streaming provider that hits its deadline comes back with text *and* an error. The
+# runner has to keep both: the text is the evidence a repetitive-loop test grades, and
+# the error is what stops the row being mistaken for an answer.
+
+
+class PartialProvider:
+    """A streaming provider whose call always times out holding half an answer."""
+
+    def __init__(self, config):
+        self.config = config
+        self.calls = 0
+
+    def complete(self, messages, timeout=None):
+        self.calls += 1
+        return Completion(
+            output="again and again and ",
+            reasoning="stuck in a loop",
+            tokens={"total": 9},
+            provider_specific={"fidaro": {"title": "Looping"}},
+            error="stream timeout after 60.0s (content: 20 chars, reasoning: 15 chars)",
+        )
+
+
+def test_a_partial_result_is_stored_with_its_output_and_its_error(store, run_id):
+    p = PartialProvider(cfg())
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=0), run_id)
+
+    row = store.get_results("t1", cfg().cache_key().hash)[0]
+    assert row.output == "again and again and "   # the loop survived the timeout
+    assert row.reasoning == "stuck in a loop"
+    assert row.tokens == {"total": 9}
+    assert row.provider_specific == {"fidaro": {"title": "Looping"}}
+    assert "stream timeout" in row.error
+
+
+def test_a_partial_result_is_not_retried(store, run_id):
+    """The ceiling was the caller's statement of how long the answer was worth waiting
+    for. Paying it three times over to learn the same thing is waste — and these test
+    cases are meant to time out every time."""
+    p = PartialProvider(cfg())
+    summary = run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=2), run_id)
+
+    assert p.calls == 1
+    assert (summary.ran, summary.errors, summary.failed) == (1, 1, 1)
+
+
+def test_a_raised_failure_is_still_retried(store, run_id):
+    # The distinction: an exception may well be transient, a timeout is not.
+    p = FakeProvider(cfg(), always_fail=True)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", retries=2), run_id)
+    assert p.calls == 3
+
+
+def test_a_partial_does_not_count_as_a_usable_cached_result(store, run_id):
+    # error IS NOT NULL, so the top-up arithmetic still sees this test as unanswered.
+    run_testcase(store, tc(), PartialProvider(cfg()), RunPolicy(mode="reuse"), run_id)
+    assert store.count_results("t1", cfg().cache_key().hash, success_only=True) == 0
+    assert store.count_results("t1", cfg().cache_key().hash) == 1
+
+
+def test_provider_specific_output_is_stored_on_a_clean_result(store, run_id):
+    class TitledProvider:
+        def __init__(self, config):
+            self.config = config
+
+        def complete(self, messages, timeout=None):
+            return Completion(output="ok", provider_specific={"fidaro": {"title": "T"}})
+
+    run_testcase(store, tc(), TitledProvider(cfg()), RunPolicy(mode="reuse"), run_id)
+    row = store.get_results("t1", cfg().cache_key().hash)[0]
+    assert row.provider_specific == {"fidaro": {"title": "T"}}
+
+
+def test_a_provider_returning_nothing_special_leaves_the_column_null(store, run_id):
+    run_testcase(store, tc(), FakeProvider(cfg()), RunPolicy(mode="reuse"), run_id)
+    assert store.get_results("t1", cfg().cache_key().hash)[0].provider_specific is None
+
+
 def test_one_failing_testcase_does_not_stop_others(store):
     good = FakeProvider(cfg())
     result = run(store, [tc("a"), tc("b")], good, RunPolicy(mode="reuse"))

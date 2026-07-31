@@ -19,6 +19,11 @@ arithmetic above, which stays keyed on ``(test_id, cache_key)`` alone.
 Every inference call gets a timeout (``RunPolicy.timeout``, overridable per test case),
 because litellm's own default is 6000s: without one, a wedged gateway is indistinguishable
 from a slow answer and a run can hang indefinitely.
+
+A streaming provider turns that timeout into something more useful than a failure. It
+returns what it had accumulated when the deadline passed, so the row carries a partial
+answer *and* an error. Such an attempt is stored in full and then **not retried** — see
+:attr:`Attempt.retryable`.
 """
 
 from __future__ import annotations
@@ -116,7 +121,13 @@ def excerpt(text: str | None, limit: int = LOG_EXCERPT_CHARS) -> str:
 
 @dataclass
 class Attempt:
-    """One provider call: what came back, or why it didn't, and how long it took."""
+    """One provider call: what came back, or why it didn't, and how long it took.
+
+    A call has three outcomes, not two. It can succeed; it can raise; or it can come
+    back **incomplete but usable** — a stream that hit its deadline holding half an
+    answer. The third is why ``completion`` and ``error`` are independent rather than
+    a two-state union: the partial text is the whole reason that call was streamed.
+    """
 
     completion: Completion | None
     error: str | None
@@ -125,6 +136,19 @@ class Attempt:
     @property
     def ok(self) -> bool:
         return self.error is None and self.completion is not None
+
+    @property
+    def retryable(self) -> bool:
+        """Whether calling again could plausibly do better.
+
+        An exception — a refused connection, a 502, a DNS failure — is transient often
+        enough to be worth another go. A completion that came back with an error is not:
+        it timed out, and the ceiling it blew through was the caller's own statement of
+        how long the answer was worth waiting for. Spending three times that to learn
+        the same thing is waste, and the test cases this exists for (a model stuck in a
+        repetitive loop) are *expected* to time out every time.
+        """
+        return self.completion is None
 
     @property
     def stored_latency_ms(self) -> float:
@@ -141,16 +165,19 @@ class Attempt:
     def as_row(self) -> dict[str, Any]:
         """This attempt as ``store.add_result_row`` keyword arguments.
 
-        A failed attempt contributes only its error and its latency: there is no
-        ``Completion`` to take an output, reasoning or token count from.
+        Everything the provider produced is recorded whenever there *is* a completion —
+        not only when the attempt succeeded. A timed-out stream writes its partial output
+        and reasoning alongside its error, which is what makes the row worth having. An
+        attempt that raised has no completion, so it contributes only error and latency.
         """
         row: dict[str, Any] = {"latency_ms": self.stored_latency_ms, "error": self.error}
-        if self.ok:
+        if self.completion is not None:
             row.update(
                 output=self.completion.output,
                 raw=self.completion.raw,
                 reasoning=self.completion.reasoning,
                 tokens=self.completion.tokens,
+                provider_specific=self.completion.provider_specific,
             )
         return row
 
@@ -158,13 +185,17 @@ class Attempt:
 def _attempt(provider: Provider, messages, timeout: float | None) -> Attempt:
     """Make one provider call, timing it whether or not it succeeds.
 
+    A ``Completion`` carrying its own ``error`` is folded into the attempt's error, so
+    ``ok`` stays a single question and a partial counts as a failure everywhere failures
+    are counted — while still handing its text to :meth:`Attempt.as_row`.
+
     ``BaseException`` (Ctrl-C) is deliberately not caught: an interrupt must unwind the
     run, not be filed as a failed attempt.
     """
     started = time.monotonic()
     try:
         completion = provider.complete(messages, timeout=timeout)
-        return Attempt(completion, None, (time.monotonic() - started) * 1000.0)
+        return Attempt(completion, completion.error, (time.monotonic() - started) * 1000.0)
     # graceful: any provider failure is recorded as an error result, not raised
     except Exception as exc:  # pylint: disable=broad-exception-caught
         elapsed_ms = (time.monotonic() - started) * 1000.0
@@ -203,6 +234,17 @@ def _fill_one_result(
             return summary
 
         summary.errors += 1
+        if not attempt.retryable:
+            # A partial result: incomplete, but not a fault a retry could fix. Stored
+            # above with its output intact; stop here rather than paying the timeout
+            # again for the same answer.
+            logger.warning(
+                "%s: attempt %d/%d returned a partial result, not retrying (%s)",
+                testcase.id, i, total, attempt.error,
+            )
+            summary.failed = 1
+            return summary
+
         # Retries were once silent, which made a run that was quietly retrying
         # indistinguishable from one that was merely slow.
         if i < total:

@@ -81,3 +81,28 @@ def test_params_and_extra_must_be_disjoint():
 def test_model_is_reserved():
     with pytest.raises(ValueError):
         compute_cache_key(model="m1", params={"model": "sneaky"})
+
+
+def test_stream_is_reserved():
+    with pytest.raises(ValueError):
+        compute_cache_key(model="m1", extra={"stream": "sneaky"})
+
+
+def test_stream_is_in_the_whole_namespace():
+    assert "stream" in compute_cache_key(model="m1").fields
+
+
+def test_stream_can_be_selected():
+    keyed = compute_cache_key(model="m1", fields=["model", "stream"], stream=True)
+    unkeyed = compute_cache_key(model="m1", fields=["model", "stream"], stream=False)
+    assert keyed.hash != unkeyed.hash
+
+
+def test_stream_is_ignorable_like_any_other_field():
+    """The usual choice. An aggregated stream and a non-streamed response are the same
+    answer, so a config that streams normally wants to share a cache key with one that
+    does not — which is what lets streaming be switched on without discarding results.
+    """
+    streamed = compute_cache_key(model="m1", fields=["model"], stream=True)
+    plain = compute_cache_key(model="m1", fields=["model"], stream=False)
+    assert streamed.hash == plain.hash

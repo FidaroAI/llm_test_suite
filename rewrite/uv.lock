@@ -905,6 +905,7 @@ dev = [
     { name = "pytest" },
 ]
 providers = [
+    { name = "httpx" },
     { name = "litellm" },
 ]
 stocks = [
@@ -913,6 +914,7 @@ stocks = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", marker = "extra == 'providers'", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "litellm", marker = "extra == 'providers'", specifier = ">=1.40" },
     { name = "pydantic", specifier = ">=2.5" },

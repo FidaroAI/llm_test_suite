@@ -3,12 +3,18 @@
 A cache key encapsulates *everything about the system under test* that the user
 decides matters. It is computed from a namespace::
 
-    namespace = {"model": model, **params, **extra}
+    namespace = {"model": model, "stream": stream, **params, **extra}
 
 where ``params`` are call parameters (temperature, max_tokens, ...) and ``extra``
 is arbitrary identity that isn't an API param (backend_version, system_prompt_id).
 The user picks exactly which fields form the key via ``fields``; everything else is
 ignored, so two configs that differ only in an ignored field collide on purpose.
+
+``model`` and ``stream`` are reserved: they are structural fields of a provider config
+rather than free-form parameters, so they are placed in the namespace directly and may
+not be shadowed from ``params`` or ``extra``. ``stream`` is *selectable* but usually not
+selected — an aggregated stream and a non-streamed response are the same answer, so a
+config that streams generally wants to share a key with one that doesn't.
 
 Both the hash (a stable join key) and the selected ``fields`` dict (for grouping and
 human-readable reports) are kept.
@@ -21,7 +27,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-_RESERVED = "model"
+_RESERVED = ("model", "stream")
 
 
 @dataclass(frozen=True)
@@ -39,16 +45,22 @@ def build_namespace(
     model: str,
     params: Mapping[str, Any] | None = None,
     extra: Mapping[str, Any] | None = None,
+    stream: bool = False,
 ) -> dict[str, Any]:
-    """Merge model/params/extra into one flat namespace, rejecting collisions."""
+    """Merge the structural fields, params and extra into one flat namespace.
+
+    Rejects any attempt to shadow a reserved name from ``params``/``extra``, and any
+    key defined in both — either would make the namespace depend on merge order.
+    """
     params = dict(params or {})
     extra = dict(extra or {})
-    if _RESERVED in params or _RESERVED in extra:
-        raise ValueError(f"{_RESERVED!r} is reserved and may not appear in params/extra")
+    shadowed = [r for r in _RESERVED if r in params or r in extra]
+    if shadowed:
+        raise ValueError(f"reserved and may not appear in params/extra: {shadowed}")
     overlap = set(params) & set(extra)
     if overlap:
         raise ValueError(f"params and extra must be disjoint; overlap: {sorted(overlap)}")
-    return {_RESERVED: model, **params, **extra}
+    return {"model": model, "stream": stream, **params, **extra}
 
 
 def compute_cache_key(
@@ -56,6 +68,7 @@ def compute_cache_key(
     params: Mapping[str, Any] | None = None,
     extra: Mapping[str, Any] | None = None,
     fields: Sequence[str] | None = None,
+    stream: bool = False,
 ) -> CacheKey:
     """Compute the cache key for a system under test.
 
@@ -63,7 +76,7 @@ def compute_cache_key(
     contribute; a named field absent from the namespace is an error (the user asked
     to key on something that doesn't exist).
     """
-    namespace = build_namespace(model, params, extra)
+    namespace = build_namespace(model, params, extra, stream)
 
     if fields is None:
         selected = dict(namespace)
