@@ -142,27 +142,34 @@ def test_page_wires_up_column_visibility_and_filtering():
     assert 'id="download"' in html
 
 
-def test_expanded_rows_stay_bounded_by_the_viewport():
-    # Regression: rows must never grow taller than the window, in *either* mode.
+def test_expanded_rows_widen_the_virtual_renderers_buffer():
+    # Regression, verified in a real browser: with the default buffer (one viewport),
+    # scrolling an expanded table snapped back to the top roughly every third wheel tick.
     #
-    # The fixed `height` on the table turns on Tabulator's virtual renderer, which
-    # converts scroll offsets to row indices using a single average row height
-    # (`vDomRowHeight`). Scrolling inside a row taller than 2x the viewport moves
-    # scrollTop past its margin without crossing a row boundary, so `scrollRows` takes
-    # its "jumped too far" branch and re-renders from
-    # `floor(scrollTop / scrollHeight * rowCount)` — a linear pixel-to-index guess. A
-    # giant row spans many pixels but only one index, so the guess lands near the start
-    # of the data and the table snaps back to the top on every scroll gesture.
+    # Tabulator's virtual renderer treats any scrollTop move larger than 2x its buffer as
+    # a jump, and rebuilds the render from `floor(scrollTop / scrollHeight * rowCount)` —
+    # a linear pixel-to-index guess that only holds for uniform row heights. One expanded
+    # row can be several screens tall, so scrolling *within* a single row exceeds the
+    # default threshold, and the guess lands near the start of the data.
     #
-    # Hence: the expanded clamp is load-bearing, not cosmetic. Removing it, or changing
-    # it to a unit that doesn't track the window, brings the jumping back.
+    # The buffer must therefore exceed any plausible expanded row, and must be applied
+    # only while expanded: it is also how much the renderer keeps in the DOM, so in
+    # compact mode the same figure buffers hundreds of rows for nothing.
+    html = csv_table.render_table([{"a": 1}], title="t")
+    assert "var EXPANDED_BUFFER_PX = 20000;" in html
+    assert "renderVerticalBuffer = compact ? 0 : EXPANDED_BUFFER_PX" in html
+
+
+def test_expanded_rows_are_not_clamped():
+    # The tempting "fix" for the jumping above is to cap row height so rows stay under
+    # the renderer's threshold. Don't: it silently redefines what Expand means, and it
+    # gives every long cell its own scrollbar — whose position the renderer resets on the
+    # very same rebuild, so the bug comes back one level down. Only compact mode clamps.
     html = csv_table.render_table([{"a": 1}], title="t")
     expanded = re.search(r"\n \.cellwrap\{([^}]*)\}", html)
     assert expanded, "no expanded-mode .cellwrap rule in the page"
-    assert "max-height:60vh" in expanded.group(1)
-    assert "overflow:auto" in expanded.group(1)   # the room has to be reachable
-    # Compact stays the tighter of the two, so the toggle still visibly does something.
-    assert ".compact .cellwrap{max-height:4.4em" in html
+    assert "max-height" not in expanded.group(1)
+    assert ".compact .cellwrap{max-height:4.4em;overflow:auto}" in html
 
 
 def test_expanding_rows_keeps_your_place_in_the_table():

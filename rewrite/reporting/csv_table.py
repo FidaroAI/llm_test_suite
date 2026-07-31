@@ -228,22 +228,11 @@ _TEMPLATE = """<!doctype html>
  .colgrid label{display:flex;gap:6px;align-items:center;cursor:pointer;
                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  /* Cell text is wrapped in this div by the formatter, which is also what the
-    compact/expanded toggle clamps.
-
-    Both modes clamp; expanded is just far looser. The cap is what keeps a row shorter
-    than the window, and that is load-bearing rather than cosmetic: the fixed `height`
-    below turns on Tabulator's virtual renderer, which converts a scroll offset into a
-    row index using one *average* row height. Scroll inside a row taller than twice the
-    viewport and scrollTop passes its margin without crossing a row boundary, so the
-    renderer decides it has "jumped", throws the render away and rebuilds from
-    `floor(scrollTop / scrollHeight * rowCount)` — a linear pixel-to-index guess. A row
-    that tall spans thousands of pixels but only one index, so the guess lands near the
-    start of the data and the table snaps to the top on every gesture. Unbounded rows
-    and virtual rendering cannot both be had; a row taller than the screen hides the
-    other columns anyway, so the cell scrolls internally instead, exactly as it already
-    does in compact mode. */
- .cellwrap{white-space:pre-wrap;word-break:break-word;line-height:1.35;
-           max-height:60vh;overflow:auto}
+    compact/expanded toggle clamps. Expanded rows are deliberately *unbounded* — see
+    EXPANDED_BUFFER_PX below for what makes that safe. Do not add a max-height here to
+    tame scrolling: capping the row only hides the renderer's real limit, and it gives
+    every long cell its own scrollbar, whose position the renderer then resets. */
+ .cellwrap{white-space:pre-wrap;word-break:break-word;line-height:1.35}
  .compact .cellwrap{max-height:4.4em;overflow:auto}
  .tabulator{font-size:12.5px;background:var(--bg)}
  .tabulator .tabulator-header .tabulator-col{background:#f9fafb}
@@ -283,6 +272,13 @@ _TEMPLATE = """<!doctype html>
   var rows = JSON.parse(document.getElementById("rows").textContent);
   var cols = JSON.parse(document.getElementById("cols").textContent);
   var host = document.getElementById("table");
+
+  // How much the virtual renderer keeps buffered while rows are expanded, in px. Sets the
+  // renderer's "have I jumped?" threshold to twice this, so it has to clear any row an
+  // expanded cell can plausibly reach — a 4KB model response wraps to roughly 5000px in a
+  // 420px column. Raise it if rows taller than 40000px start snapping to the top again;
+  // the cost is DOM nodes, so don't raise it for its own sake. Only applied when expanded.
+  var EXPANDED_BUFFER_PX = 20000;
 
   // Build the cell with textContent rather than any HTML-interpreting path: values are
   // model output. The wrapper div is also the hook the compact/expanded toggle clamps.
@@ -356,11 +352,23 @@ _TEMPLATE = """<!doctype html>
   wrapBtn.addEventListener("click", function () {
     var compact = host.classList.toggle("compact");
     wrapBtn.textContent = compact ? "Expand rows" : "Collapse rows";
+    // Widen the virtual renderer's buffer for as long as rows are unbounded. Tabulator
+    // decides it has "jumped" whenever scrollTop moves more than 2x this buffer, which
+    // defaults to one viewport — so a single row taller than two screens exceeds it
+    // without the scroll ever leaving that row. It then rebuilds the render from
+    // `floor(scrollTop / scrollHeight * rowCount)`, a linear pixel-to-index guess that
+    // only holds for uniform heights: a tall row spans thousands of pixels but one
+    // index, so the guess lands near the start of the data and the table snaps to the
+    // top. A buffer past any plausible row height keeps the incremental path in control.
+    //
+    // Paid only while expanded: the buffer is how much the renderer keeps in the DOM, so
+    // in compact mode (short rows) the same number would buffer hundreds of rows for no
+    // benefit. It is re-read on every redraw, which is what makes this switchable.
+    table.options.renderVerticalBuffer = compact ? 0 : EXPANDED_BUFFER_PX;
     // Save and restore the scroll offset around the redraw: Tabulator's renderTable()
     // does a literal `scrollTop = 0`, so toggling would otherwise throw you back to the
-    // first row every time. Read it before the redraw and put it back after; the offset
-    // no longer means the same row once heights change, but landing near where you were
-    // beats landing at the top.
+    // first row every time. The offset no longer means the same row once heights change,
+    // but landing near where you were beats landing at the top.
     var holder = host.querySelector(".tabulator-tableholder");
     var offset = holder ? holder.scrollTop : 0;
     table.redraw(true);   // row heights changed; make Tabulator re-measure
