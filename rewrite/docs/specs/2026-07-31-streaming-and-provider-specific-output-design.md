@@ -270,6 +270,9 @@ All offline, no credentials, per `rewrite/CLAUDE.md`.
 - The repetitive-loop assertion itself. This is provider support; the assertion
   that consumes a partial is separate work, and needs `grade.py` to stop
   skipping error rows.
-- Any CLI or report surface for `provider_specific_output`. Stored verbatim and
-  reachable by SQL, per the plumbing contract.
+- ~~Any CLI or report surface for `provider_specific_output`. Stored verbatim and
+  reachable by SQL, per the plumbing contract.~~ **Revisited:** it is now a column on
+  `llmeval report` (and so on the rendered page), still the verbatim JSON with nothing
+  parsing it. Requiring SQL to see data that was already on the row turned out to be
+  friction, not a contract.
 - Streaming for non-OpenAI-compatible backends.
