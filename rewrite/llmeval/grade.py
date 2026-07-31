@@ -11,6 +11,11 @@ is itself the finding.
 
 ``run_ids`` narrows which results are considered, so a re-grade can be aimed at one sitting
 instead of the whole history of a cache key. See :mod:`llmeval.runselect`.
+
+``hooks`` lets the owning plugin refresh anything its assertions compare against before any
+grading happens — that is how the stock-price suite grades against live prices rather than a
+reference baked in at generation time. Taken structurally, like the runner's, so this module
+imports no plugin machinery beyond the outcome record it reports back.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from typing import Callable, Collection, Iterable
 
 from llmeval.assertions import GradeContext, grade_assertion
 from llmeval.models import AssertionSpec, TestCase
+from llmeval.plugins.base import GradingOutcome
 from llmeval.store import Store
 
 
@@ -48,6 +54,7 @@ def grade_testcase(
     judge: Callable[[str], str] | None = None,
     regrade: bool = False,
     run_ids: Collection[str] | None = None,
+    hooks=None,
 ) -> None:
     """Grade every cached (non-error) result of ``testcase`` under one cache key.
 
@@ -56,7 +63,13 @@ def grade_testcase(
     :param run_ids: restrict to results produced by these runs. ``None`` means every run
         for the cache key. An **empty** collection means no runs, and so grades nothing —
         the same None-versus-empty distinction :meth:`llmeval.store.Store.select_runs` uses.
+    :param hooks: lifecycle dispatcher. ``after_each_grade`` reports what *this pass*
+        produced across every attempt of the test case, so it is empty on a re-grade that
+        found everything already scored.
     """
+    if hooks is not None:
+        hooks.before_each_grade(testcase)
+    outcomes: list[GradingOutcome] = []
     allowed = None if run_ids is None else set(run_ids)
     for result in store.get_results(testcase.id, cache_key_hash):
         if result.error is not None:
@@ -86,6 +99,10 @@ def grade_testcase(
                 weight=spec.weight,
                 reason=res.reason,
             )
+            outcomes.append(GradingOutcome(assertion_key=akey, spec=spec, result=res))
+
+    if hooks is not None:
+        hooks.after_each_grade(testcase, outcomes)
 
 
 def grade(
@@ -95,8 +112,14 @@ def grade(
     judge: Callable[[str], str] | None = None,
     regrade: bool = False,
     run_ids: Collection[str] | None = None,
+    hooks=None,
 ) -> None:
+    if hooks is not None:
+        hooks.before_grade()
     for testcase in testcases:
         grade_testcase(
-            store, testcase, cache_key_hash, judge=judge, regrade=regrade, run_ids=run_ids
+            store, testcase, cache_key_hash, judge=judge, regrade=regrade,
+            run_ids=run_ids, hooks=hooks,
         )
+    if hooks is not None:
+        hooks.after_grade()

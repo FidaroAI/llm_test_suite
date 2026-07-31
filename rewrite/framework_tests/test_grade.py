@@ -2,7 +2,7 @@ import pytest
 from conftest import a_run
 
 from llmeval.cache_key import compute_cache_key
-from llmeval.grade import assertion_key, grade_testcase
+from llmeval.grade import assertion_key, grade, grade_testcase
 from llmeval.models import AssertionSpec, TestCase
 from llmeval.store import Store
 
@@ -152,3 +152,46 @@ def test_narrowing_does_not_redo_existing_gradings(store):
     grade_testcase(store, t, KEY.hash, judge=j, run_ids=[run])
     grade_testcase(store, t, KEY.hash, judge=j, run_ids=[run])
     assert j.calls == 1
+
+
+class GradeHookSpy:
+    """Records hook calls in order. Stands in for llmeval.plugins.loader.Hooks."""
+
+    def __init__(self):
+        self.calls = []
+
+    def before_grade(self):
+        self.calls.append("before_grade")
+
+    def after_grade(self):
+        self.calls.append("after_grade")
+
+    def before_each_grade(self, testcase):
+        self.calls.append(f"before_each:{testcase.id}")
+
+    def after_each_grade(self, testcase, gradings):
+        self.calls.append((testcase.id, [g.assertion_key for g in gradings]))
+
+
+def test_grade_calls_hooks_and_reports_what_it_graded(store):
+    seed(store)
+    case = tc([{"type": "icontains", "value": "Paris"}])
+
+    spy = GradeHookSpy()
+    grade(store, [case], KEY.hash, hooks=spy)
+    assert spy.calls[0] == "before_grade"
+    assert spy.calls[1] == "before_each:t1"
+    assert spy.calls[-1] == "after_grade"
+    graded = [c for c in spy.calls if isinstance(c, tuple)]
+    assert graded[0][0] == "t1"
+    assert len(graded[0][1]) == 1
+
+
+def test_a_second_pass_fires_the_hooks_but_grades_nothing_new(store):
+    seed(store)
+    case = tc([{"type": "icontains", "value": "Paris"}])
+    grade(store, [case], KEY.hash)
+
+    spy = GradeHookSpy()
+    grade(store, [case], KEY.hash, hooks=spy)
+    assert [c for c in spy.calls if isinstance(c, tuple)][0][1] == []
