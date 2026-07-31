@@ -1,7 +1,7 @@
 import pytest
 
 from llmeval.generation.csv_source import generate_from_csv, parse_expected
-from llmeval.testcases import load_testcases
+from llmeval.testcases import load_all_testcases, load_testcases
 
 
 def write_csv(path, rows, header="user,__expected"):
@@ -71,3 +71,52 @@ def test_load_testcases_filters_by_metadata(tmp_path):
     assert len(load_testcases(str(out))) == 2
     assert len(load_testcases(str(out), filters={"suite": "alpha"})) == 1
     assert len(load_testcases(str(out), filters={"suite": "nope"})) == 0
+
+
+def two_suites(tmp_path):
+    """Two single-case suite files in one directory: alpha.json and beta.json."""
+    out = tmp_path / "out"
+    generate_from_csv(
+        write_csv(tmp_path / "f.csv", ['"Q?","icontains:A"']), suite="alpha", out_dir=str(out)
+    )
+    generate_from_csv(
+        write_csv(tmp_path / "g.csv", ['"R?","icontains:B"']), suite="beta", out_dir=str(out)
+    )
+    return out
+
+
+def test_load_all_testcases_unions_several_paths(tmp_path):
+    out = two_suites(tmp_path)
+    cases = load_all_testcases([str(out / "alpha.json"), str(out / "beta.json")])
+    assert {c.metadata["suite"] for c in cases} == {"alpha", "beta"}
+
+
+def test_load_all_testcases_selects_a_subset_of_files(tmp_path):
+    """The whole point of the repeatable flag: some files, not all of them."""
+    out = two_suites(tmp_path)
+    cases = load_all_testcases([str(out / "alpha.json")])
+    assert [c.metadata["suite"] for c in cases] == ["alpha"]
+
+
+def test_load_all_testcases_dedupes_overlapping_paths(tmp_path):
+    """A directory plus a file inside it is a natural request, not a doubled run."""
+    out = two_suites(tmp_path)
+    cases = load_all_testcases([str(out), str(out / "alpha.json")])
+    assert len(cases) == 2
+    assert len({c.id for c in cases}) == 2
+
+
+def test_load_all_testcases_preserves_path_order(tmp_path):
+    out = two_suites(tmp_path)
+    ordered = load_all_testcases([str(out / "beta.json"), str(out / "alpha.json")])
+    assert [c.metadata["suite"] for c in ordered] == ["beta", "alpha"]
+
+
+def test_load_all_testcases_applies_filters_to_every_path(tmp_path):
+    out = two_suites(tmp_path)
+    paths = [str(out / "alpha.json"), str(out / "beta.json")]
+    assert len(load_all_testcases(paths, filters={"suite": "alpha"})) == 1
+
+
+def test_load_all_testcases_empty_paths_is_empty(tmp_path):
+    assert load_all_testcases([]) == []

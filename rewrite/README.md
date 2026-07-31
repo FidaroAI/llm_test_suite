@@ -45,9 +45,19 @@ Practical upshot: if a workflow here feels like too much typing, that's not a bu
 plumbing — it's a porcelain that hasn't been written yet. Rationale:
 **[DESIGN.md §2](DESIGN.md)**.
 
-The porcelain that exists so far lives in **[reporting/](reporting/README.md)**: a generic
-CSV→HTML table viewer (filter any column, show/hide columns, sort, export) that opens what
-it renders.
+Two porcelains exist so far. **[porcelain/](porcelain/README.md)** is the interactive
+wizard — start here if you just want to run something:
+
+```bash
+./llmevalx.sh
+```
+
+It discovers your test cases, providers, suites and runs, asks a handful of arrow-key
+questions, loads `.env`, then prints and runs the commands. Arrows move, Enter confirms,
+Esc goes back.
+
+**[reporting/](reporting/README.md)** is a generic CSV→HTML table viewer (filter any column,
+show/hide columns, sort, export) that opens what it renders:
 
 ```bash
 uv run llmeval report --run-last-n 3 --testcases testcases/ --out results.csv
@@ -57,8 +67,9 @@ python -m reporting.csv_table results.csv -o results.html
 ## Install
 
 ```bash
-uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
-# 'providers' pulls in litellm (real LLM calls); 'dev' pulls in pytest.
+uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,porcelain,dev]"
+# 'providers' pulls in litellm (real LLM calls); 'porcelain' pulls in questionary for the
+# interactive wizard; 'dev' pulls in pytest.
 ```
 
 ## Quickstart (offline, no API keys — uses the built-in `echo` provider)
@@ -174,6 +185,22 @@ FROM results WHERE error LIKE 'stream timeout%' ORDER BY chars DESC;
 There is **no migration path**: the store checks `PRAGMA user_version` on open and refuses
 a database written by an older build, telling you to delete it.
 
+## Selecting which test cases to read
+
+`--testcases` is **repeatable** on `run`, `grade`, `pickbest` and `report`. A single path is
+either one file or one whole directory, and `--filter` slices by metadata label, so without
+this there is no way to say "these two suite files but not the other three":
+
+```bash
+llmeval run --provider configs/fidaro_dev.json \
+            --testcases testcases/simple_facts.json \
+            --testcases testcases/examples.json
+```
+
+Overlapping paths are fine. Cases are de-duplicated by test id, first occurrence winning, so
+passing a directory *and* a file inside it asks for a set rather than running anything twice.
+Order follows the flags, and files within a directory are read in sorted order.
+
 ## Selecting which runs to read
 
 `grade` and `report` both read stored results, so both take the same four flags. They fall
@@ -252,8 +279,8 @@ evidence of what this result was produced from.
 
 `--provider` is repeatable and optional (default: every provider in the database), so one
 report can span several configs — `provider` and `cache_key_hash` are columns. `--testcases`
-is optional and does two things: it adds the `request_type` and `domain` labels, and it
-**selects** — only tests present in those files appear, which is what makes
+is repeatable and optional, and does two things: it adds the `request_type` and `domain`
+labels, and it **selects** — only tests present in those files appear, which is what makes
 `--filter suite=simple_facts` work.
 
 The statistics report — bootstrap CIs, deltas against a baseline, pick-best win rates — is
@@ -458,6 +485,7 @@ More advanced "which config is best" methods are a documented extension point (D
 
 ```
 llmeval/            the package
+  __main__.py       `python -m llmeval`, the same entry point as the console script
   cache_key.py      user-controlled cache key
   models.py         TestCase, AssertionSpec, ProviderConfig
   store.py          SQLite: runs / results (+ full config) / gradings / verdicts
@@ -478,13 +506,16 @@ testcases/          generated + hand-written test cases (inspectable)
 framework_tests/    unit + integration tests for this framework
 reporting/          porcelain: generic CSV->HTML viewer (not in the wheel)
 reporting_tests/    tests for the porcelain
+porcelain/          porcelain: the llmevalx interactive wizard (not in the wheel)
+porcelain_tests/    tests for the wizard
+llmevalx.sh         starts the wizard
 ```
 
 ## Testing & linting
 
 ```bash
-.venv/bin/python -m pytest          # whole suite runs offline (mock provider + fake judges)
-.venv/bin/python -m pylint llmeval  # lints the package (10/10)
+.venv/bin/python -m pytest                     # offline (mock provider + fake judges)
+.venv/bin/python -m pylint llmeval porcelain   # both at 10/10
 ```
 
 Status and known gaps: **[DESIGN.md §9](DESIGN.md)**.

@@ -1,7 +1,7 @@
 # `llmevalx` — an interactive porcelain for the llmeval suite
 
 **Date:** 2026-07-31
-**Status:** approved, implementing
+**Status:** implemented — see [As built](#as-built) for the three places it diverged
 
 ## Problem
 
@@ -173,3 +173,32 @@ run against the `echo` provider covers it. The plumbing change gets tests in
   the question of whether they should merge. They should not yet: `reporting` is a generic
   CSV renderer usable on any table, and `porcelain` is workflow-specific. If a third appears,
   revisit.
+
+## As built
+
+Three deviations from the design above, all decided during implementation.
+
+**No `llmevalx` console script.** The plan called for one. It cannot work: `porcelain` is
+excluded from the wheel, so an installed script has no way to import it — the same constraint
+that made `reporting/` choose module invocation. `llmevalx.sh` `cd`s to `rewrite/` and runs
+`python -m porcelain`, which gives the friendly name without pretending the package is
+installed.
+
+**No `python-dotenv`.** Replaced by a ~25-line parser in `porcelain/env.py` handling comments,
+blank lines, `export`, and surrounding quotes. One fewer dependency for a file format we fully
+control, and it is directly covered by tests. It deliberately does *not* do interpolation,
+multi-line values or escapes; a `.env` needing those wants a real shell.
+
+**The Esc spike succeeded, so there is no `< Back` fallback.** Binding `escape` with
+`eager=True` is safe because prompt_toolkit's vt100 parser resolves `\x1b[A` into a `Up` key
+*before* bindings are consulted. One thing the spike surfaced that the design had not
+anticipated: questionary's prefilled default sits in the edit buffer with the cursor after it,
+so typing appends (`60.0` + `12.5` = `60.012.5`). An eager `<any>` binding that fires once,
+clears the buffer for printable input and re-feeds anything else via
+`key_processor.feed(..., first=True)` gives real highlighted-default semantics — Enter
+accepts, typing replaces, backspace/Ctrl-U/arrows still edit.
+
+Two things the test harness cannot express, both recorded in the tests rather than worked
+around: Esc as the final keystroke of a *multi-question* sequence (a lone Escape never flushes
+across a prompt_toolkit application boundary, so the pipe-driven test hangs), and a step that
+legitimately re-asks once the queued keys have run out.

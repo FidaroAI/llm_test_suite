@@ -269,3 +269,88 @@ def test_cli_run_limit_runs_only_n(tmp_path):
     conn = sqlite3.connect(db)
     assert conn.execute("select count(*) from results").fetchone()[0] == 2
     conn.close()
+
+
+def _echo_provider(tmp_path):
+    prov = tmp_path / "echo.json"
+    prov.write_text(
+        json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}})
+    )
+    return str(prov)
+
+
+def _two_suite_files(tmp_path):
+    """testcases/alpha.json and testcases/beta.json, one case each."""
+    tc_dir = tmp_path / "tc"
+    for suite, question in (("alpha", "q-alpha?"), ("beta", "q-beta?")):
+        csv = tmp_path / f"{suite}.csv"
+        csv.write_text(f'user,__expected\n"{question}","icontains:x"\n')
+        main(["generate-csv", "--csv", str(csv), "--suite", suite, "--out", str(tc_dir)])
+    return tc_dir
+
+
+def test_cli_testcases_flag_is_repeatable():
+    parser = build_parser()
+    args = parser.parse_args(["run", "--testcases", "a", "--testcases", "b", "--provider", "p"])
+    assert args.testcases == ["a", "b"]
+
+
+def test_cli_single_testcases_flag_still_yields_a_list():
+    parser = build_parser()
+    assert parser.parse_args(["run", "--testcases", "a", "--provider", "p"]).testcases == ["a"]
+
+
+def test_cli_report_testcases_stays_optional():
+    assert build_parser().parse_args(["report", "--out", "o.csv"]).testcases is None
+
+
+def test_cli_run_over_a_subset_of_testcase_files(tmp_path):
+    """Two --testcases flags run both files; one flag runs only that file."""
+    import sqlite3
+
+    tc_dir = _two_suite_files(tmp_path)
+    prov = _echo_provider(tmp_path)
+
+    both_db = str(tmp_path / "both.sqlite3")
+    main([
+        "run", "--provider", prov, "--db", both_db,
+        "--testcases", str(tc_dir / "alpha.json"),
+        "--testcases", str(tc_dir / "beta.json"),
+    ])
+    conn = sqlite3.connect(both_db)
+    assert conn.execute("select count(*) from results").fetchone()[0] == 2
+    conn.close()
+
+    one_db = str(tmp_path / "one.sqlite3")
+    main(["run", "--provider", prov, "--db", one_db, "--testcases", str(tc_dir / "alpha.json")])
+    conn = sqlite3.connect(one_db)
+    assert conn.execute("select count(*) from results").fetchone()[0] == 1
+    conn.close()
+
+
+def test_cli_overlapping_testcases_paths_do_not_double_run(tmp_path):
+    import sqlite3
+
+    tc_dir = _two_suite_files(tmp_path)
+    prov = _echo_provider(tmp_path)
+    db = str(tmp_path / "db.sqlite3")
+    main([
+        "run", "--provider", prov, "--db", db,
+        "--testcases", str(tc_dir), "--testcases", str(tc_dir / "alpha.json"),
+    ])
+    conn = sqlite3.connect(db)
+    assert conn.execute("select count(*) from results").fetchone()[0] == 2
+    conn.close()
+
+
+def test_python_dash_m_llmeval_is_an_entry_point():
+    """The porcelain invokes the CLI as `sys.executable -m llmeval`."""
+    import subprocess
+    import sys
+
+    proc = subprocess.run(
+        [sys.executable, "-m", "llmeval", "--help"],
+        capture_output=True, text=True, check=False,
+    )
+    assert proc.returncode == 0
+    assert "compare-report" in proc.stdout

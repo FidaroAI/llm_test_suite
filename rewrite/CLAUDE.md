@@ -16,7 +16,11 @@ default.
   defaults, no workflow shortcuts. Six flags and a `--db` path is an acceptable interface.
 * **Porcelain is everything friendly, and it lives on top.** Task runners, wrappers that
   encode a whole comparison, infra bring-up (gateways, sidecars, redeploys), dashboards, CI
-  entry points. Built *on* the CLI and the database, outside the `llmeval` package.
+  entry points. Built *on* the CLI and the database, outside the `llmeval` package. Two
+  exist: [reporting/](reporting/README.md) (CSV→HTML viewer) and
+  [porcelain/](porcelain/README.md) (the `llmevalx` interactive wizard). Neither ships in the
+  wheel, which is also why neither has a console-script entry point — an installed script
+  cannot import a package that is deliberately not installed.
 
 ### Where does my change go?
 
@@ -65,9 +69,9 @@ Two consequences to keep in mind:
 ## Working in here
 
 ```bash
-uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
-.venv/bin/python -m pytest          # whole suite runs offline (mock provider + fake judges)
-.venv/bin/python -m pylint llmeval  # keep this at 10/10
+uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,porcelain,dev]"
+.venv/bin/python -m pytest                     # offline (mock provider + fake judges)
+.venv/bin/python -m pylint llmeval porcelain   # keep both at 10/10
 ```
 
 Tests must stay runnable with no API keys and no network — that's why there's an `echo`

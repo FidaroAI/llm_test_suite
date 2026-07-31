@@ -10,6 +10,11 @@
 Stages share a SQLite DB (``--db``, default ./llmeval.sqlite3). run/grade/pickbest/report
 all read cached results — only ``run`` ever calls the model under test.
 
+``--testcases`` is repeatable everywhere it appears, so a subset of files is expressible
+without arranging them into a directory first:
+
+    llmeval run --testcases testcases/simple_facts.json --testcases testcases/examples.json ...
+
 ``grade`` and ``report`` both read stored results, so both take the same run-selection
 flags (``--run-id``, ``--run-after``/``--run-before``, ``--run-last-n``); see
 :mod:`llmeval.runselect`. ``report`` emits **CSV** — rendering it as a page is porcelain,
@@ -46,7 +51,7 @@ from llmeval.resultrows import result_columns, result_rows, write_csv
 from llmeval.runner import RunPolicy, run
 from llmeval.runselect import RunSelectionError, parse_run_selection, resolve_runs
 from llmeval.store import IncompatibleSchema, Store
-from llmeval.testcases import load_testcases, select_testcases
+from llmeval.testcases import load_all_testcases, select_testcases
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +151,7 @@ def cmd_generate(args) -> int:
 
 def cmd_run(args) -> int:
     store = Store(args.db)
-    tcs = load_testcases(args.testcases, _filters(args.filter))
+    tcs = load_all_testcases(args.testcases, _filters(args.filter))
     tcs = select_testcases(tcs, limit=args.limit, randomize=args.randomize, seed=args.seed)
     provider = build_provider(load_provider_config(args.provider))
     policy = RunPolicy(
@@ -173,7 +178,7 @@ def cmd_run(args) -> int:
 def cmd_grade(args) -> int:
     store = Store(args.db)
     try:
-        tcs = load_testcases(args.testcases, _filters(args.filter))
+        tcs = load_all_testcases(args.testcases, _filters(args.filter))
         cfg = load_provider_config(args.provider)
         key_hash = cfg.cache_key().hash
         run_ids = [r.id for r in resolve_runs(store, _run_selection(args), [key_hash])]
@@ -193,7 +198,7 @@ def cmd_grade(args) -> int:
 
 def cmd_pickbest(args) -> int:
     store = Store(args.db)
-    tcs = load_testcases(args.testcases, _filters(args.filter))
+    tcs = load_all_testcases(args.testcases, _filters(args.filter))
     configs = [load_provider_config(p) for p in args.providers]
     logger.info(
         "pick-best over %d config(s), %d test(s), order=%s", len(configs), len(tcs), args.order
@@ -223,7 +228,9 @@ def cmd_report(args) -> int:
         runs = resolve_runs(store, _run_selection(args), _cache_key_hashes(args.provider))
         cases_by_id = None
         if args.testcases:
-            cases_by_id = {c.id: c for c in load_testcases(args.testcases, _filters(args.filter))}
+            cases_by_id = {
+                c.id: c for c in load_all_testcases(args.testcases, _filters(args.filter))
+            }
         rows = result_rows(store, runs, cases_by_id)
         columns = result_columns(cases_by_id is not None)
     finally:
@@ -281,6 +288,20 @@ def _add_db(sp) -> None:
     sp.add_argument("--db", default=DEFAULT_DB, help="SQLite results DB")
 
 
+def _add_testcases(sp, required: bool = True, extra_help: str = "") -> None:
+    """The repeatable ``--testcases`` flag. Shared so the four stages cannot drift apart.
+
+    Repeatable because a *subset* of the testcase files is otherwise inexpressible: a single
+    path is one file or one whole directory, and metadata filters slice by label rather than
+    by file. Overlapping paths de-duplicate by test id (see
+    :func:`llmeval.testcases.load_all_testcases`).
+    """
+    sp.add_argument(
+        "--testcases", action="append", required=required, metavar="PATH",
+        help="testcases dir or file (repeatable)" + extra_help,
+    )
+
+
 def _add_filters(sp) -> None:
     sp.add_argument("--filter", action="append", help="metadata filter k=v (repeatable)")
 
@@ -305,7 +326,7 @@ def _add_run_selection(sp) -> None:
 
 def _add_run_parser(sub) -> None:
     r = sub.add_parser("run", help="run a provider over test cases (cached by cache key)")
-    r.add_argument("--testcases", required=True)
+    _add_testcases(r)
     r.add_argument("--provider", required=True)
     r.add_argument("--mode", default="reuse", choices=["reuse", "target_n", "always"])
     r.add_argument("--target-n", type=int, default=1)
@@ -330,7 +351,7 @@ def _add_run_parser(sub) -> None:
 
 def _add_grade_parser(sub) -> None:
     gr = sub.add_parser("grade", help="grade cached outputs (no model calls)")
-    gr.add_argument("--testcases", required=True)
+    _add_testcases(gr)
     gr.add_argument("--provider", required=True)
     gr.add_argument("--judge", help="judge provider config JSON (default: Bedrock Haiku)")
     gr.add_argument("--regrade", action="store_true")
@@ -342,7 +363,7 @@ def _add_grade_parser(sub) -> None:
 
 def _add_pickbest_parser(sub) -> None:
     pb = sub.add_parser("pickbest", help="direct head-to-head over cached outputs")
-    pb.add_argument("--testcases", required=True)
+    _add_testcases(pb)
     pb.add_argument("--providers", required=True, nargs="+")
     pb.add_argument("--judge")
     pb.add_argument("--order", default="as_is", choices=["as_is", "random", "both"])
@@ -364,10 +385,10 @@ def _add_report_parsers(sub) -> None:
         "--provider", action="append",
         help="provider config JSON (repeatable; default: every provider in the DB)",
     )
-    rp.add_argument(
-        "--testcases",
-        help="testcases dir/file; selects which tests appear and adds the request_type "
-        "and domain columns (the prompt is stored on the result, so it is always present)",
+    _add_testcases(
+        rp, required=False,
+        extra_help="; selects which tests appear and adds the request_type and domain "
+        "columns (the prompt is stored on the result, so it is always present)",
     )
     _add_db(rp)
     _add_filters(rp)
