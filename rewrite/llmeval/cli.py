@@ -46,7 +46,13 @@ from llmeval.resultrows import result_columns, result_rows, write_csv
 from llmeval.runner import RunPolicy, run
 from llmeval.runselect import RunSelectionError, parse_run_selection, resolve_runs
 from llmeval.store import IncompatibleSchema, Store
-from llmeval.testcases import DEFAULT_ROOT, SourceError, load_testcases, select_testcases
+from llmeval.testcases import (
+    DEFAULT_ROOT,
+    SourceError,
+    load_testcases,
+    select_sources,
+    select_testcases,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,8 +112,7 @@ def cmd_generate(args) -> int:
     and one broken download should not deny you the other five suites. The exit code still
     says something went wrong.
     """
-    loaded = load_testcases(names=args.testcases or None)
-    plugins = [s for s in loaded.sources if s.is_plugin]
+    plugins = [s for s in select_sources(args.testcases or None) if s.is_plugin]
     if not plugins:
         logger.warning("no plugins to generate in %s/", DEFAULT_ROOT)
         return 0

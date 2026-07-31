@@ -20,8 +20,8 @@ head-to-head **without re-running the model**.
   define "the system under test" (e.g. key on `model + temperature + backend_version`,
   *ignore* `max_tokens`). Results are stored per `(test, cache_key)`, so a single failing
   test can be re-run alone and nothing is wasted.
-- **Generation ≠ running.** Generators emit plain JSON test cases into `testcases/` that
-  you can read before any run — no opaque `*_gen.py`.
+- **Generation ≠ running.** Plugins in `testcases/` emit plain JSON test cases you can read
+  before any run — no opaque `*_gen.py`.
 - **Compare after the fact.** Running just fills a SQLite database; comparison and
   statistics are separate passes over it.
 
@@ -53,7 +53,7 @@ exists so far, and it is a first-class entry point alongside `llmeval` — same 
 uv run llmevalx          # or ./llmevalx.sh
 ```
 
-It discovers your test cases, providers, suites and runs, asks a handful of arrow-key
+It discovers your test-case sources, providers and runs, asks a handful of arrow-key
 questions, loads `.env`, then prints and runs the commands. Arrows move, Enter confirms,
 Esc goes back.
 
@@ -62,7 +62,7 @@ show/hide columns, sort, export) that opens what it renders. It's a library and 
 rather than an entry point, so it stays out of the wheel:
 
 ```bash
-uv run llmeval report --run-last-n 3 --testcases testcases/ --out results.csv
+uv run llmeval report --run-last-n 3 --out results.csv
 python -m reporting.csv_table results.csv -o results.html
 ```
 
@@ -79,55 +79,60 @@ That installs two commands, `llmeval` and `llmevalx`.
 ## Quickstart (offline, no API keys — uses the built-in `echo` provider)
 
 ```bash
-# 1. Generate standardized, inspectable test cases from a CSV
-uv run llmeval generate-csv --csv generation_sources/simple_facts.csv --suite simple_facts --out testcases/
+# 1. Have the simple_facts plugin build its test cases
+uv run llmeval generate --testcases simple_facts
 
 # 2. Run a provider (echo just returns the prompt — good for plumbing checks)
-uv run --env-file .env llmeval run   --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
+uv run --env-file .env llmeval run   --testcases simple_facts --provider configs/echo.json
 
 # 3. Grade cached outputs (deterministic assertions need no judge)
-uv run llmeval grade --testcases testcases/ --provider configs/echo.json --filter suite=simple_facts
+uv run llmeval grade --testcases simple_facts --provider configs/echo.json
 
 # 4. Emit the result rows, then view them (the second command opens a browser)
-uv run llmeval report --testcases testcases/ --provider configs/echo.json --out results.csv
+uv run llmeval report --testcases simple_facts --provider configs/echo.json --out results.csv
 uv run python -m reporting.csv_table results.csv -o report.html
 ```
 
 Re-run step 2 and you'll see `ran=0 cached=28`: results are reused.
 
-## Generating the standard suites
+## Test-case plugins
 
-Beyond ad-hoc CSVs (`generate-csv`), the `generate` command produces the same
-suites as the legacy `tests/*_gen.py` generators, writing inspectable
-`testcases/<suite>.json`:
+Everything runnable lives in `testcases/`, as either a hand-written `.json` file or a
+**plugin** — a self-contained directory that builds its own test cases and owns its inputs,
+its downloads, its bespoke assertions and its own lifecycle. `llmeval` discovers and loads
+them on every invocation; there is no registry to edit and nothing to import.
 
-| Suite | Source | Assertions |
+| Source | Kind | Assertions |
 |---|---|---|
-| `simple_facts`, `simple_facts_regressions` | CSV (`generation_sources/`) | `icontains` |
-| `agentharm_refusal` | `data/agentharm.json` | one refusal `rubric` (`censorship: true`) |
-| `multifaceted` | `data/multifaceted.json` | per-row `rubric` (1–5 anchors embedded) |
-| `research_rubrics` | `data/researchrubrics.json` | `rubric` **and** `g_eval` variants per row |
-| `stock_prices` | CSV + live Stooq fetch | `stock_price` (within 1%) |
+| `examples.json` | hand-written | the format by example |
+| `simple_facts`, `simple_facts_regressions` | plugin (CSV) | `icontains` |
+| `agentharm_refusal` | plugin (HF download) | one refusal `rubric` (`censorship: true`) |
+| `multifaceted` | plugin (HF download) | per-row `rubric` (1–5 anchors embedded) |
+| `research_rubrics` | plugin (HF download) | `rubric` **and** `g_eval` variants per row |
+| `stock_prices` | plugin (CSV + live fetch) | `stock_prices.stock_price` (within 1%) |
 
 ```bash
-llmeval generate --suite multifaceted --out testcases/   # one suite
-llmeval generate --all --out testcases/                  # all except network suites
-llmeval generate --suite stock_prices --out testcases/   # hits the network; needs the 'stocks' extra
+llmeval generate                              # every plugin
+llmeval generate --testcases multifaceted     # just one
 ```
 
-How many tests each suite emits (and shuffling/stratification) is controlled by a
-suite-generation config (default `suite_generation_config.json`, overridable with
-`--config` or `SUITE_GENERATION_CONFIG_FILE`). A suite absent from the config is
-**off** (emits nothing). Cross-suite `request_type`/`domain` labels are merged
-from `data/classifications/<suite>.json` at generation time. Datasets must be
-downloaded first (`pnpm dataset`); `--all` skips network suites and quietly skips
-any suite whose source isn't present. `stock_prices` bakes the live reference
-into each test at generation time, so run it with `--mode always` (or a fresh DB)
-to avoid a cached answer masking a freshness miss.
+A plugin writes its output to `.testcases.cache/<name>/` (gitignored), so generated test
+cases are inspectable locally but are not tracked — the reviewable artefact is the plugin
+and its CSV. Datasets download themselves on first `generate` and are reused afterwards;
+`pnpm dataset` is not involved. Writing a plugin takes about twenty lines:
+**[testcases/README.md](testcases/README.md)**.
 
-Fidelity note: this is generation-only — per-test weighted thresholds and the
-multifaceted 1→5 `rubricPrompt` override from the legacy suite are intentionally
-not reproduced (rubrics grade per-assertion via the standard 0–1 template). See
+Every test id is `<source>.<local id>`, which is what the report's `suite` column is read
+off. Generation emits **everything** a source can produce — how much of it you actually run
+is `--limit`/`--randomize`/`--filter` at run time, not a generation setting.
+
+`stock_prices` is the one to know about: it fetches live prices in `before_grade`, not at
+generation time, so `grade` needs the network for it and `--regrade` re-fetches. Run it with
+`--mode always` (or a fresh DB) so a cached *answer* cannot mask a freshness miss.
+
+Fidelity note: per-test weighted thresholds and the multifaceted 1→5 `rubricPrompt` override
+from the legacy suite are intentionally not reproduced (rubrics grade per-assertion via the
+standard 0–1 template). See
 [the design note](docs/specs/2026-06-25-rewrite-all-suites-generation-design.md).
 
 ## Results
@@ -191,19 +196,23 @@ a database written by an older build, telling you to delete it.
 
 ## Selecting which test cases to read
 
-`--testcases` is **repeatable** on `run`, `grade`, `pickbest` and `report`. A single path is
-either one file or one whole directory, and `--filter` slices by metadata label, so without
-this there is no way to say "these two suite files but not the other three":
+`--testcases` names a **source** — a plugin directory or a `.json` stem inside `testcases/` —
+and is repeatable on `generate`, `run`, `grade`, `pickbest` and `report`. Omit it for every
+source:
 
 ```bash
 llmeval run --provider configs/fidaro_dev.json \
-            --testcases testcases/simple_facts.json \
-            --testcases testcases/examples.json
+            --testcases simple_facts \
+            --testcases examples
 ```
 
-Overlapping paths are fine. Cases are de-duplicated by test id, first occurrence winning, so
-passing a directory *and* a file inside it asks for a set rather than running anything twice.
-Order follows the flags, and files within a directory are read in sorted order.
+Naming the same source twice asks for a set, not two runs. An unknown name is an error
+rather than an empty run — that is a typo, and quietly doing nothing is the worst possible
+answer to one. There is deliberately no flag for the testcases root: it is always
+`testcases/` relative to the working directory.
+
+`--filter k=v` narrows further, by test metadata. There is no `suite` key to filter on —
+a suite *is* a source, so `--testcases` already covers it.
 
 ## Selecting which runs to read
 
@@ -238,7 +247,7 @@ the selected runs that doesn't have a grading yet, and **skips attempts that err
 there is no output to assert against, and the error row is itself the finding.
 
 ```bash
-llmeval grade --testcases testcases/ --provider configs/fidaro_prod.json --run-last-n 1
+llmeval grade --provider configs/fidaro_prod.json --run-last-n 1
 ```
 
 ## Reporting
@@ -248,7 +257,7 @@ into a page is a workflow, so that's [reporting/](reporting/README.md)'s job.
 
 ```bash
 llmeval report --run-last-n 3 --provider configs/fidaro_prod.json \
-               --testcases testcases/ --db runs.sqlite3 --out results.csv
+               --db runs.sqlite3 --out results.csv
 python -m reporting.csv_table results.csv -o results.html   # opens in a browser
 ```
 
@@ -291,9 +300,10 @@ side-channel data before it stalls.
 
 `--provider` is repeatable and optional (default: every provider in the database), so one
 report can span several configs — `provider` and `cache_key_hash` are columns. `--testcases`
-is repeatable and optional, and does two things: it adds the `request_type` and `domain`
-labels, and it **selects** — only tests present in those files appear, which is what makes
-`--filter suite=simple_facts` work.
+and `--filter` are optional too, and only **select**: they drop rows whose test isn't in the
+chosen sources. Omit both to report every stored result, which is the useful default now
+that a plugin's output is regenerated rather than tracked — a run should outlive its test
+cases. Every column is filled either way, `suite` included: it is the test id's prefix.
 
 The statistics report — bootstrap CIs, deltas against a baseline, pick-best win rates — is
 `compare-report`, unchanged otherwise:
@@ -381,20 +391,20 @@ text, so you can read it without writing SQL.
 
 ```bash
 # Batch-run one provider, then read what actually happened
-llmeval run    --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
-llmeval grade  --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
-llmeval report --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3 \
+llmeval run    --provider configs/fidaro_prod.json --db runs.sqlite3
+llmeval grade  --provider configs/fidaro_prod.json --db runs.sqlite3
+llmeval report --provider configs/fidaro_prod.json --db runs.sqlite3 \
                --run-last-n 1 --out results.csv
 python -m reporting.csv_table results.csv -o results.html
 
 # Indirect comparison (rate each config, compare ratings)
-llmeval grade --testcases testcases/ --provider configs/fidaro_prod.json --db runs.sqlite3
-llmeval grade --testcases testcases/ --provider configs/fidaro_dev.json  --db runs.sqlite3
+llmeval grade --provider configs/fidaro_prod.json --db runs.sqlite3
+llmeval grade --provider configs/fidaro_dev.json  --db runs.sqlite3
 llmeval compare-report --providers configs/fidaro_prod.json configs/fidaro_dev.json \
                --baseline fidaro-prod --metrics accuracy --db runs.sqlite3 --out report.html
 
 # Direct comparison (judge picks the best; both orderings to fight position bias)
-llmeval pickbest --testcases testcases/ --providers configs/fidaro_prod.json configs/venice.json \
+llmeval pickbest --providers configs/fidaro_prod.json configs/venice.json \
                  --order both --db runs.sqlite3
 llmeval compare-report --providers configs/fidaro_prod.json configs/venice.json \
                  --order both --db runs.sqlite3 --out report.html
@@ -442,7 +452,8 @@ cost — which is how you tell "the timeout is too tight" from "the provider is 
 
 **Selecting which tests to run:** `--limit N` runs only N tests; `--randomize` shuffles
 first (so `--randomize --limit N` is a random sample); `--seed` fixes the shuffle (default
-`0`, always reproducible). `--filter k=v` narrows by metadata (e.g. `--filter suite=simple_facts`).
+`0`, always reproducible). `--filter k=v` narrows by metadata (e.g. `--filter censorship=true`);
+`--testcases NAME` narrows by source.
 
 **Concurrency:** `--concurrency N` runs N test cases in parallel (default `5`; `1` =
 sequential). Test cases are independent `(test, cache_key)` units, so they fan out across a
@@ -486,6 +497,8 @@ Two consequences worth knowing:
 - **LLM-graded**: `rubric` (0–1 against a criterion), `g_eval` (chain-of-thought, 1–10
   normalised).
 - **Direct comparison**: `pickbest` (separate command; order control `as_is`/`random`/`both`).
+- **Plugin-provided**: a plugin can register its own, namespaced `<source>.<name>` — e.g.
+  `stock_prices.stock_price`. See [testcases/README.md](testcases/README.md).
 
 Outputs are reasoning-stripped before grading (the `\n\n\n` rule) while the stored raw
 output keeps the reasoning. Hand-write tests as JSON too — see `testcases/examples.json`.
@@ -513,19 +526,20 @@ llmeval/            the plumbing — the `llmeval` command
   assertions/       deterministic + judge (rubric, g_eval)
   grade.py          apply assertions to cached outputs
   comparison/       pickbest, stats, report
-  generation/       CSV -> standardized test cases (separate from running)
-  testcases.py      load + metadata-filter test cases
+  plugins/          the plugin contract + the loader that finds and imports them
+  generation/       shared machinery plugins build on (CSV, HF download, local ids)
+  testcases.py      load test cases; pick a subset to run
 llmevalx/           the interactive wizard — the `llmevalx` command
   app.py            the step machine (navigation only)
   prompts.py        questionary wrappers; every prompt returns a value or BACK
-  discovery.py      what is available to choose from (files, configs, suites, runs)
+  discovery.py      what is available to choose from (sources, configs, runs)
   commands.py       Selection -> argv -> echo -> subprocess
   env.py            .env loading
   paths.py          where things live
 llmevalx.sh         convenience wrapper for `uv run llmevalx`
 configs/            example provider/judge configs
-generation_sources/ raw inputs (e.g. CSV)
-testcases/          generated + hand-written test cases (inspectable)
+testcases/          every test case: plugins and hand-written .json (see its README)
+.testcases.cache/   per-plugin scratch: downloads + generated cases (gitignored)
 framework_tests/    unit + integration tests for the llmeval package
 llmevalx_tests/     tests for the wizard
 reporting/          generic CSV->HTML viewer; a module, not an entry point (not in the wheel)

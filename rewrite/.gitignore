@@ -17,3 +17,6 @@ reports/*.html
 
 # Default sqllite
 llmeval.sqlite3
+
+# Plugin scratch space: downloads and generated test cases (llmeval generate).
+.testcases.cache/

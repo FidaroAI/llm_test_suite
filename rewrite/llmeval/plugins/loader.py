@@ -347,6 +347,19 @@ def _chosen(sources: list[Source], names: Sequence[str]) -> list[Source]:
     return chosen
 
 
+def select_sources(
+    names: Sequence[str] | None = None, root: Path | str = DEFAULT_ROOT
+) -> list[Source]:
+    """The named sources (default: all) under ``root``, without reading any test cases.
+
+    Separate from :func:`load` because ``generate`` wants the plugins and *not* their output
+    — asking a plugin for test cases it has not generated yet would warn about exactly the
+    thing the command is about to fix.
+    """
+    sources = discover(root)
+    return _chosen(sources, names) if names else sources
+
+
 def load(
     names: Sequence[str] | None = None,
     root: Path | str = DEFAULT_ROOT,
@@ -356,10 +369,7 @@ def load(
 
     ``names`` are source names, not paths: a plugin directory name or a ``.json`` stem.
     """
-    sources = discover(root)
-    if names:
-        sources = _chosen(sources, names)
-
+    sources = select_sources(names, root)
     loaded = Loaded(sources=sources)
     for source in sources:
         for raw in namespaced_cases(source):

@@ -12,9 +12,22 @@ from __future__ import annotations
 import random
 from typing import Sequence, TypeVar
 
-from llmeval.plugins.loader import DEFAULT_ROOT, Loaded, SourceError, load as load_testcases
+from llmeval.plugins.loader import (
+    DEFAULT_ROOT,
+    Loaded,
+    SourceError,
+    load as load_testcases,
+    select_sources,
+)
 
-__all__ = ["DEFAULT_ROOT", "Loaded", "SourceError", "load_testcases", "select_testcases"]
+__all__ = [
+    "DEFAULT_ROOT",
+    "Loaded",
+    "SourceError",
+    "load_testcases",
+    "select_sources",
+    "select_testcases",
+]
 
 T = TypeVar("T")
 

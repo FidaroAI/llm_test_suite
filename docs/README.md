@@ -98,6 +98,12 @@ The suite is **off by default** (not in the default suite-generation config), so
 ordinary runs emit zero stock tests; the wrapper enables it via
 [fidaro_stock_prices_config.json](../scripts_test/fidaro_stock_prices_config.json).
 
+> All of the above describes the **legacy promptfoo** suite. The rewrite's version lives in
+> `rewrite/testcases/stock_prices/` as a self-contained plugin, and works the other way
+> round: generation is pure CSV→JSON with no network at all, and the live prices are fetched
+> at *grade* time by the plugin's `before_grade` hook — so there is no baked reference that
+> can go stale, and no preflight script to remember to run.
+
 ## Comparison runs (config-driven)
 
 [run_comparison.py](../scripts_repo/run_comparison.py) drives a whole comparison

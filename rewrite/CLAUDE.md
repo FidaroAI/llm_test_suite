@@ -45,6 +45,11 @@ Ask what kind of thing you're adding:
 * A new **workflow** — "compare prod against dev the way we usually do", "run the nightly
   set and publish the report", "bring the gateway up then run the smoke tests". That's
   porcelain. Do not put it in `llmeval/`.
+* A new **suite** — a dataset, a CSV, a set of prompts, along with whatever bespoke
+  assertion or setup it needs. That is neither: it is a **plugin** under
+  [testcases/](testcases/README.md), and it must not go in `llmeval/`. If a second plugin
+  would want the same machinery, the machinery goes in `llmeval/generation/` and the plugin
+  imports it.
 
 If you catch yourself adding a subcommand whose value is that it saves the user from
 choosing, stop: you're writing porcelain inside the plumbing. Prefer a flag over a
@@ -54,14 +59,20 @@ subcommand, and prefer porcelain over a flag.
 
 Porcelain may depend on exactly these three, so treat changes to them as breaking:
 
-1. **CLI subcommands** — `generate`, `generate-csv`, `run`, `grade`, `pickbest`, `report`,
+1. **CLI subcommands** — `generate`, `run`, `grade`, `pickbest`, `report`,
    `compare-report` (see [llmeval/cli.py](llmeval/cli.py)). `report` emits **CSV** result
    rows — rendering them as a page is porcelain — while `compare-report` is the statistics
    and pick-best HTML. Note that the aggregation/statistics step the docs call "compare" has
    no subcommand of its own: it's [comparison/stats.py](llmeval/comparison/stats.py),
    reached via `compare-report` or as a library call. Exposing it directly would be a
    legitimate plumbing addition.
-2. **Test-case JSON** in `testcases/` (see [llmeval/models.py](llmeval/models.py)).
+2. **Test cases in `testcases/`** — two halves, both breaking surfaces: the **JSON shape**
+   (see [llmeval/models.py](llmeval/models.py)) and the **plugin API**
+   (see [llmeval/plugins/base.py](llmeval/plugins/base.py), documented for authors in
+   [testcases/README.md](testcases/README.md)). Note the consequence: `llmeval` executes
+   code out of `testcases/` on *every* invocation, `report` included. Every load failure is
+   therefore a warning that drops one source, never an exception — one broken directory must
+   not take the others down with it.
 3. **SQLite schema** — `runs` / `results` / `gradings` / `verdicts` (see
    [llmeval/store.py](llmeval/store.py)). Querying it with plain SQL is a supported way to
    consume results, not a workaround.

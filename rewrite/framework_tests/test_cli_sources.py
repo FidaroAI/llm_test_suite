@@ -58,6 +58,14 @@ def test_generate_accepts_a_source_name(tmp_path, monkeypatch):
     assert main(["generate", "--testcases", "facts"]) == 0
 
 
+def test_generate_does_not_warn_about_the_thing_it_is_about_to_fix(tmp_path, monkeypatch, caplog):
+    """`generate` reads the sources, not their output — an empty plugin is not news to it."""
+    make_project(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(["generate"]) == 0
+    assert "produced no test cases" not in caplog.text
+
+
 def test_generate_rejects_an_unknown_source(tmp_path, monkeypatch):
     make_project(tmp_path)
     monkeypatch.chdir(tmp_path)
