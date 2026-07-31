@@ -4,9 +4,9 @@ The steps are driven directly with stub functions rather than through questionar
 tests the navigation rather than the terminal library.
 """
 
-from porcelain import app
-from porcelain.commands import RUNS_ALL, RUNS_LAST, RUNS_SPECIFIC, Selection
-from porcelain.prompts import BACK
+from llmevalx import app
+from llmevalx.commands import RUNS_ALL, RUNS_LAST, RUNS_SPECIFIC, Selection
+from llmevalx.prompts import BACK
 
 
 def recorder(script):

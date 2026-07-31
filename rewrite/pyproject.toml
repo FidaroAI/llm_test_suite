@@ -7,12 +7,15 @@ name = "llmeval"
 version = "0.1.0"
 description = "Cache-key-centric LLM evaluation suite: decoupled generation, running, grading, comparison."
 requires-python = ">=3.10"
-# Core runtime deps are intentionally small. litellm is the provider layer and is
-# lazy-imported, so the core (cache, store, assertions, stats, reports) is usable
-# and testable without it installed.
+# Two first-class entry points ship from this project: `llmeval` (the plumbing) and
+# `llmevalx` (the interactive front end). Their shared deps are therefore core deps —
+# questionary is what `llmevalx` is built out of, so it is not optional. litellm stays
+# optional and lazy-imported, so the core (cache, store, assertions, stats, reports) is
+# usable and testable without it installed.
 dependencies = [
     "pydantic>=2.5",
     "jinja2>=3.1",
+    "questionary>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -21,32 +24,30 @@ dependencies = [
 providers = ["litellm>=1.40", "httpx>=0.27"]
 # Needed only by the stock_prices generator's live Stooq fetch (network).
 stocks = ["requests>=2.28"]
-# Needed only by the interactive wizard in porcelain/ (./llmevalx.sh). Declared here so one
-# venv covers everything, even though porcelain itself is not part of the wheel.
-porcelain = ["questionary>=2.0"]
 dev = ["pytest>=8.0", "pylint>=3.0"]
 
 [project.scripts]
 llmeval = "llmeval.cli:main"
+llmevalx = "llmevalx:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["llmeval*"]
+# Both packages ship. `reporting` does not: it is a generic CSV->HTML renderer invoked as
+# `python -m reporting.csv_table` from the project directory, not an entry point.
+include = ["llmeval*", "llmevalx*"]
 
 [tool.pytest.ini_options]
-# framework_tests covers the llmeval package; reporting_tests and porcelain_tests cover the
-# porcelain in reporting/ and porcelain/, neither of which is part of the installed package.
-testpaths = ["framework_tests", "reporting_tests", "porcelain_tests"]
+testpaths = ["framework_tests", "reporting_tests", "llmevalx_tests"]
 addopts = "-q"
-# `llmeval` is importable via the editable install; `reporting` is not installed (porcelain
-# isn't shipped with the plumbing), so rootdir goes on sys.path. This lives here rather than
-# in a reporting_tests/conftest.py because pytest imports every conftest under the top-level
-# name `conftest`, and a second one would shadow framework_tests/conftest.py's helpers.
+# `llmeval` and `llmevalx` are importable via the editable install; `reporting` is not
+# installed, so rootdir goes on sys.path. This lives here rather than in a
+# reporting_tests/conftest.py because pytest imports every conftest under the top-level name
+# `conftest`, and a second one would shadow framework_tests/conftest.py's helpers.
 pythonpath = ["."]
 
 [tool.pylint.main]
 # The *_tests dirs hold pytest tests; lint the shipped code proper.
-ignore = ["framework_tests", "reporting_tests", "porcelain_tests"]
+ignore = ["framework_tests", "reporting_tests", "llmevalx_tests"]
 
 [tool.pylint.format]
 max-line-length = 100

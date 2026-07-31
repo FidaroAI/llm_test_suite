@@ -12,8 +12,8 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from questionary import Choice
 
-from porcelain import prompts
-from porcelain.prompts import BACK
+from llmevalx import prompts
+from llmevalx.prompts import BACK
 
 ESC = "\x1b"
 CR = "\r"

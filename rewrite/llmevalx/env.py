@@ -2,7 +2,7 @@
 
 The plumbing deliberately does no such thing — `uv run --env-file .env llmeval ...` is the
 documented incantation, and forgetting it is the single most common way a run dies holding a
-missing `FIDARO_API_KEY`. Porcelain exists to remove that class of mistake, so the wizard
+missing `FIDARO_API_KEY`. `llmevalx` exists to remove that class of mistake, so the wizard
 loads the file itself and every subprocess inherits the result.
 
 Variables already set in the environment **win**: an explicit
@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from porcelain.paths import ENV_FILE
+from llmevalx.paths import env_file
 
 
 def load_env(path: Path | None = None) -> Path | None:
@@ -24,7 +24,7 @@ def load_env(path: Path | None = None) -> Path | None:
     A missing file is not an error: the core of the suite (cache, store, grading replay,
     reports, the echo provider) needs no credentials at all.
     """
-    env_path = ENV_FILE if path is None else path
+    env_path = env_file() if path is None else path
     if not env_path.is_file():
         return None
     for key, value in parse_env(env_path.read_text(encoding="utf-8")).items():

@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass, field
 
 from llmeval.cli import DEFAULT_DB
-from porcelain.paths import REPORT_HTML, RESULTS_CSV, TESTCASES_DIR
+from llmevalx.paths import REPORT_HTML, RESULTS_CSV, TESTCASES_DIR
 
 # Run-selection modes offered by the "which runs?" menu.
 RUNS_LAST = "last"

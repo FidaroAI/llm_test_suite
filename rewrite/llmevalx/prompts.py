@@ -2,7 +2,7 @@
 
 Every prompt here returns its value or :data:`BACK`. That single convention is what lets the
 wizard be one flat loop with an index cursor instead of nested calls that cannot be unwound
-(see :mod:`porcelain.app`), so it is worth the key-binding work below.
+(see :mod:`llmevalx.app`), so it is worth the key-binding work below.
 
 Three behaviours are added on top of questionary:
 

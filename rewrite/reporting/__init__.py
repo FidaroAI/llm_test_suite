@@ -12,9 +12,11 @@ must never import ``reporting``.
   standalone HTML page with per-column filtering, column show/hide and sorting, opened in
   a browser when run from the command line.
 
-Tools are run as modules from the ``rewrite/`` directory, e.g.
+Tools are run as modules from the project directory, e.g.
 ``python -m reporting.csv_table results.csv -o results.html``. There is deliberately no
-console-script entry point — that would install porcelain alongside the plumbing.
+console-script entry point: this is a renderer for arbitrary tabular data, not a command
+anybody reaches for by name. (Contrast :mod:`llmevalx`, which *is* a command and does ship —
+being the friendly layer is not what decides whether something is packaged.)
 
 Row *building* lives in the plumbing (:mod:`llmeval.resultrows`), not here: which rows a
 report contains is a capability, while turning them into a page is a workflow. So the

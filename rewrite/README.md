@@ -45,11 +45,12 @@ Practical upshot: if a workflow here feels like too much typing, that's not a bu
 plumbing — it's a porcelain that hasn't been written yet. Rationale:
 **[DESIGN.md §2](DESIGN.md)**.
 
-Two porcelains exist so far. **[porcelain/](porcelain/README.md)** is the interactive
-wizard — start here if you just want to run something:
+Porcelain is an *ethos*, not a place. **[`llmevalx`](llmevalx/README.md)** is the one that
+exists so far, and it is a first-class entry point alongside `llmeval` — same project, same
+`pyproject.toml`, its own console script. Start here if you just want to run something:
 
 ```bash
-./llmevalx.sh
+uv run llmevalx          # or ./llmevalx.sh
 ```
 
 It discovers your test cases, providers, suites and runs, asks a handful of arrow-key
@@ -57,7 +58,8 @@ questions, loads `.env`, then prints and runs the commands. Arrows move, Enter c
 Esc goes back.
 
 **[reporting/](reporting/README.md)** is a generic CSV→HTML table viewer (filter any column,
-show/hide columns, sort, export) that opens what it renders:
+show/hide columns, sort, export) that opens what it renders. It's a library and a module
+rather than an entry point, so it stays out of the wheel:
 
 ```bash
 uv run llmeval report --run-last-n 3 --testcases testcases/ --out results.csv
@@ -67,10 +69,12 @@ python -m reporting.csv_table results.csv -o results.html
 ## Install
 
 ```bash
-uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,porcelain,dev]"
-# 'providers' pulls in litellm (real LLM calls); 'porcelain' pulls in questionary for the
-# interactive wizard; 'dev' pulls in pytest.
+uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
+# 'providers' pulls in litellm (real LLM calls); 'dev' pulls in pytest + pylint.
+# questionary is a core dependency: `llmevalx` is built out of it, so it is not optional.
 ```
+
+That installs two commands, `llmeval` and `llmevalx`.
 
 ## Quickstart (offline, no API keys — uses the built-in `echo` provider)
 
@@ -484,7 +488,7 @@ More advanced "which config is best" methods are a documented extension point (D
 ## Layout
 
 ```
-llmeval/            the package
+llmeval/            the plumbing — the `llmeval` command
   __main__.py       `python -m llmeval`, the same entry point as the console script
   cache_key.py      user-controlled cache key
   models.py         TestCase, AssertionSpec, ProviderConfig
@@ -500,22 +504,28 @@ llmeval/            the package
   comparison/       pickbest, stats, report
   generation/       CSV -> standardized test cases (separate from running)
   testcases.py      load + metadata-filter test cases
+llmevalx/           the interactive wizard — the `llmevalx` command
+  app.py            the step machine (navigation only)
+  prompts.py        questionary wrappers; every prompt returns a value or BACK
+  discovery.py      what is available to choose from (files, configs, suites, runs)
+  commands.py       Selection -> argv -> echo -> subprocess
+  env.py            .env loading
+  paths.py          where things live
+llmevalx.sh         convenience wrapper for `uv run llmevalx`
 configs/            example provider/judge configs
 generation_sources/ raw inputs (e.g. CSV)
 testcases/          generated + hand-written test cases (inspectable)
-framework_tests/    unit + integration tests for this framework
-reporting/          porcelain: generic CSV->HTML viewer (not in the wheel)
-reporting_tests/    tests for the porcelain
-porcelain/          porcelain: the llmevalx interactive wizard (not in the wheel)
-porcelain_tests/    tests for the wizard
-llmevalx.sh         starts the wizard
+framework_tests/    unit + integration tests for the llmeval package
+llmevalx_tests/     tests for the wizard
+reporting/          generic CSV->HTML viewer; a module, not an entry point (not in the wheel)
+reporting_tests/    tests for the viewer
 ```
 
 ## Testing & linting
 
 ```bash
 .venv/bin/python -m pytest                     # offline (mock provider + fake judges)
-.venv/bin/python -m pylint llmeval porcelain   # both at 10/10
+.venv/bin/python -m pylint llmeval llmevalx    # both at 10/10
 ```
 
 Status and known gaps: **[DESIGN.md §9](DESIGN.md)**.

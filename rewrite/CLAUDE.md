@@ -16,11 +16,21 @@ default.
   defaults, no workflow shortcuts. Six flags and a `--db` path is an acceptable interface.
 * **Porcelain is everything friendly, and it lives on top.** Task runners, wrappers that
   encode a whole comparison, infra bring-up (gateways, sidecars, redeploys), dashboards, CI
-  entry points. Built *on* the CLI and the database, outside the `llmeval` package. Two
-  exist: [reporting/](reporting/README.md) (CSV→HTML viewer) and
-  [porcelain/](porcelain/README.md) (the `llmevalx` interactive wizard). Neither ships in the
-  wheel, which is also why neither has a console-script entry point — an installed script
-  cannot import a package that is deliberately not installed.
+  entry points. Built *on* the CLI and the database, outside the `llmeval` package.
+
+**Porcelain is an ethos, not a package name.** Being the friendly layer says nothing about
+being second-class. Two things live on top today, and they are packaged differently because
+they *are* different:
+
+* **[llmevalx/](llmevalx/README.md)** — the interactive wizard. A first-class entry point
+  next to `llmeval`: same project, same `pyproject.toml`, its own console script
+  (`uv run llmevalx`), shipped in the wheel, linted and tested to the same standard. It
+  imports `llmeval` and shares its code; the dependency never runs the other way.
+* **[reporting/](reporting/README.md)** — the generic CSV→HTML viewer. A module and a
+  library (`python -m reporting.csv_table`), not a command, so it stays out of the wheel.
+
+The rule that matters is the *direction* of the dependency, not which directory something
+sits in. Nothing under `llmeval/` may import `llmevalx` or `reporting`.
 
 ### Where does my change go?
 
@@ -69,10 +79,15 @@ Two consequences to keep in mind:
 ## Working in here
 
 ```bash
-uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,porcelain,dev]"
+uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
 .venv/bin/python -m pytest                     # offline (mock provider + fake judges)
-.venv/bin/python -m pylint llmeval porcelain   # keep both at 10/10
+.venv/bin/python -m pylint llmeval llmevalx    # keep both at 10/10
 ```
+
+`questionary` is a **core** dependency, not an extra: `llmevalx` is built out of it and ships
+as a console script, so an install without it produces a broken command rather than a smaller
+one. `litellm` stays optional and lazy-imported, so the core is still usable and testable
+without it.
 
 Tests must stay runnable with no API keys and no network — that's why there's an `echo`
 provider and fake judges. Don't add a test that needs live credentials to pass.

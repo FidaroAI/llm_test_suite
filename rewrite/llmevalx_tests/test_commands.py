@@ -2,7 +2,7 @@
 
 import sys
 
-from porcelain.commands import (
+from llmevalx.commands import (
     RUNS_ALL,
     RUNS_LAST,
     RUNS_SPECIFIC,
@@ -220,7 +220,7 @@ def test_run_commands_stops_at_the_first_failure(monkeypatch):
         calls.append(argv)
         return FakeCompleted(1 if len(calls) == 1 else 0)
 
-    monkeypatch.setattr("porcelain.commands.subprocess.run", fake_run)
+    monkeypatch.setattr("llmevalx.commands.subprocess.run", fake_run)
     sel = Selection(action="report", report_mode="last")
     status = run_commands(commands_for(sel), echo=lambda *_: None)
     assert status == 1
@@ -230,7 +230,7 @@ def test_run_commands_stops_at_the_first_failure(monkeypatch):
 def test_run_commands_runs_every_command_when_all_succeed(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "porcelain.commands.subprocess.run",
+        "llmevalx.commands.subprocess.run",
         lambda argv, check=False: (calls.append(argv), FakeCompleted(0))[1],
     )
     status = run_commands(commands_for(Selection(action="report", report_mode="last")),
@@ -241,7 +241,7 @@ def test_run_commands_runs_every_command_when_all_succeed(monkeypatch):
 
 def test_run_commands_echoes_each_command(monkeypatch):
     monkeypatch.setattr(
-        "porcelain.commands.subprocess.run", lambda argv, check=False: FakeCompleted(0)
+        "llmevalx.commands.subprocess.run", lambda argv, check=False: FakeCompleted(0)
     )
     lines = []
     run_commands(commands_for(Selection(action="report", report_mode="last")), echo=lines.append)

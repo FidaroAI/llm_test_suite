@@ -10,7 +10,7 @@ Navigation is one flat loop over a list of steps, with an index cursor:
 
 Re-deriving the step list each iteration is what makes "Report last run" cost one keypress
 and Esc unwind correctly: choosing it shortens the list to nothing, and backing into the
-choice lengthens it again. Steps mutate the shared :class:`~porcelain.commands.Selection`
+choice lengthens it again. Steps mutate the shared :class:`~llmevalx.commands.Selection`
 and return `BACK` or `None`; none of them execute anything.
 """
 
@@ -22,8 +22,8 @@ from typing import Callable
 
 from questionary import Choice
 
-from porcelain import discovery, env, prompts
-from porcelain.commands import (
+from llmevalx import discovery, env, prompts
+from llmevalx.commands import (
     DEFAULT_CONCURRENCY,
     DEFAULT_LIMIT,
     DEFAULT_TIMEOUT,
@@ -35,8 +35,8 @@ from porcelain.commands import (
     default_db,
     run_commands,
 )
-from porcelain.paths import CONFIGS_DIR, ROOT, TESTCASES_DIR
-from porcelain.prompts import BACK
+from llmevalx.paths import CONFIGS_DIR, TESTCASES_DIR, project_root
+from llmevalx.prompts import BACK
 
 # Sentinels for menu entries that do not map to a real value. They are objects rather than
 # None because questionary's Choice falls back to using the title as the value when value is
@@ -276,14 +276,14 @@ def collect(sel: Selection) -> bool:
     return False
 
 
-def banner(env_file) -> None:
+def banner(root, loaded_env) -> None:
     print("llmevalx — interactive llmeval\n")
-    print(f"  working directory  {ROOT}")
+    print(f"  working directory  {root}")
     print(f"  results database   {default_db()}")
-    if env_file is None:
+    if loaded_env is None:
         print("  environment        no .env found (fine unless a provider needs credentials)")
     else:
-        print(f"  environment        loaded {env_file.name}")
+        print(f"  environment        loaded {loaded_env.name}")
     print()
 
 
@@ -297,8 +297,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # Everything downstream uses relative paths so the echoed commands can be pasted into a
     # shell; that only holds if the shell would be sitting here too.
-    os.chdir(ROOT)
-    banner(env.load_env())
+    root = project_root()
+    os.chdir(root)
+    banner(root, env.load_env())
 
     selection = Selection(action="")
     try:

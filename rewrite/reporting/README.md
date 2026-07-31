@@ -1,14 +1,16 @@
-# `reporting/` — porcelain
+# `reporting/` — the CSV→HTML viewer
 
 Reporting tools built **on** the `llmeval` CLI and SQLite store, not inside them.
 
 `llmeval` is the plumbing: capabilities, exposed explicitly, no workflow shortcuts (see
 [../CLAUDE.md](../CLAUDE.md)). Dashboards are workflows, so they live here. The dependency
-runs one way only — `reporting` imports `llmeval`, never the reverse — and this package is
-excluded from the installed wheel, so porcelain never ships as part of the plumbing.
+runs one way only — `reporting` imports `llmeval`, never the reverse.
 
-Run the tools as modules from the `rewrite/` directory. There is deliberately no
-console-script entry point.
+Run the tools as modules from the project directory. There is deliberately no console-script
+entry point and this package stays out of the wheel — it renders arbitrary tabular data rather
+than being a command anybody reaches for by name. That is a statement about *this* package,
+not about friendly layers in general: [`llmevalx`](../llmevalx/README.md) is every bit as much
+porcelain and does ship, as a first-class command.
 
 ## The generic layer: `csv_table`
 

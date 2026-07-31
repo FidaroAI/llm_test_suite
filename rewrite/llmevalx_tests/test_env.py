@@ -2,7 +2,7 @@
 
 import os
 
-from porcelain.env import load_env, parse_env
+from llmevalx.env import load_env, parse_env
 
 
 def test_parses_plain_assignments():

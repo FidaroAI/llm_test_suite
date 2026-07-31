@@ -1,20 +1,20 @@
-# `porcelain/` — the interactive wizard
+# `llmevalx` — the interactive wizard
 
-`llmevalx`: an arrow-key front end for the `llmeval` CLI.
+An arrow-key front end for the `llmeval` CLI.
 
 ```bash
-./llmevalx.sh
+uv run llmevalx          # or ./llmevalx.sh, or python -m llmevalx
 ```
 
 `llmeval` is the **plumbing** — everything is possible with it, almost nothing is pleasant
 (see [../CLAUDE.md](../CLAUDE.md)). The everyday loop is four commands, a dozen flags and an
-`.env` you have to remember to load. This package is the friendly layer over exactly that.
+`.env` you have to remember to load. `llmevalx` is the friendly layer over exactly that.
 
-Like [`reporting/`](../reporting/README.md), it imports `llmeval` and never the reverse, and
-it is **not** part of the installed wheel. That is also why there is no `llmevalx` console
-script: an installed script could not import a package that is deliberately not installed.
-`llmevalx.sh` `cd`s here and runs `python -m porcelain`, which is the same choice
-`reporting/` made for the same reason.
+Being the friendly layer doesn't make it second-class. It ships from the same project and the
+same `pyproject.toml`, has its own console script, and is linted and tested to the same
+standard. What it does *not* do is reach back: `llmevalx` imports `llmeval` and shares its
+code — constants, the store, the suite registry — and nothing under `llmeval/` may import
+`llmevalx`. That direction is the whole rule.
 
 ## What it does
 
@@ -56,10 +56,18 @@ registry, and runs from the SQLite store.
   `run_commands` is the only thing that spawns anything. That is what makes the interesting
   half of this package testable without a terminal.
 
+## Where it runs
+
+The wizard `chdir`s to the project directory at startup — the one holding `testcases/`,
+`configs/` and `llmeval.sqlite3` — so every path it prints is relative and every command it
+echoes can be pasted straight into a shell. That is the package's parent for a checkout or an
+editable install; for any other install it falls back to the current directory, so
+`cd my-eval-project && llmevalx` works too. See `paths.project_root`.
+
 ## `.env`
 
-Loaded from `../.env` at startup if it exists, so every subprocess inherits it. Variables
-already set in the environment win, so `FIDARO_DEV_BASE_URL=... ./llmevalx.sh` still
+Loaded from the project directory at startup if it exists, so every subprocess inherits it.
+Variables already set in the environment win, so `FIDARO_DEV_BASE_URL=... llmevalx` still
 overrides. The parser is deliberately small (comments, blank lines, `export`, surrounding
 quotes) — it reads one hand-written file, not arbitrary shell.
 
@@ -72,7 +80,7 @@ quotes) — it reads one hand-written file, not arbitrary shell.
 | `discovery.py` | what is available to choose from |
 | `commands.py` | `Selection` → argv → echo → subprocess |
 | `env.py` | `.env` loading |
-| `paths.py` | where things live |
+| `paths.py` | where things live, and which directory to work in |
 
 Navigation is one flat loop with an index cursor, which is the whole reason `BACK` is a
 sentinel rather than an exception:
@@ -90,7 +98,7 @@ and still let Esc restore the questions it skipped.
 
 ## Tests
 
-`../porcelain_tests/`, offline and TTY-free. `test_prompts.py` drives real questionary
+`../llmevalx_tests/`, offline and TTY-free. `test_prompts.py` drives real questionary
 through a `prompt_toolkit` pipe, which is worth it: the Esc and replace-the-default bindings
 are custom bindings against a third-party library and would otherwise break silently on an
 upgrade.

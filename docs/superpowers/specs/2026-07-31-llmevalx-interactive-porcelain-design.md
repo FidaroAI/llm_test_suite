@@ -1,7 +1,9 @@
 # `llmevalx` — an interactive porcelain for the llmeval suite
 
 **Date:** 2026-07-31
-**Status:** implemented — see [As built](#as-built) for the three places it diverged
+**Status:** implemented, then revised — see [As built](#as-built) for where the first cut
+diverged from the design, and [Revision: llmevalx is first-class](#revision-llmevalx-is-first-class)
+for what changed immediately afterwards. **The packaging described below is superseded.**
 
 ## Problem
 
@@ -202,3 +204,48 @@ Two things the test harness cannot express, both recorded in the tests rather th
 around: Esc as the final keystroke of a *multi-question* sequence (a lone Escape never flushes
 across a prompt_toolkit application boundary, so the pipe-driven test hangs), and a step that
 legitimately re-asks once the queued keys have run out.
+
+## Revision: `llmevalx` is first-class
+
+The first cut got the packaging wrong, and it failed on the first real run:
+
+```
+ModuleNotFoundError: No module named 'questionary'
+```
+
+`questionary` sat behind a `porcelain` extra, so installing `.[providers,dev]` — the documented
+line — produced a `porcelain/` package with nothing to run it. Worse, the reasoning that led
+there was itself wrong. It went: porcelain doesn't ship in the wheel, therefore it can't have a
+console script, therefore it's invoked as a module, therefore its dependencies are optional.
+Each step follows from the one before; the first was an assumption inherited from `reporting/`
+rather than anything the design needed.
+
+The correction, in the user's words: *"Porcelain is an architectural ethos, not a name. Both
+`llmeval` and `llmevalx` are first-class citizens. They may even share code."*
+
+So:
+
+* **`porcelain/` → `llmevalx/`**, and `porcelain_tests/` → `llmevalx_tests/`. Naming a
+  directory after the ethos said nothing useful about what was inside it.
+* **One `pyproject.toml`, two console scripts** — `llmeval = "llmeval.cli:main"` and
+  `llmevalx = "llmevalx:main"`. Both packages ship (`include = ["llmeval*", "llmevalx*"]`), so
+  `uv run llmevalx` works exactly the way `uv run llmeval` does.
+* **`questionary` is a core dependency.** An install without it yields a broken command rather
+  than a smaller one, which is precisely the failure above. `litellm` stays optional and
+  lazy-imported, because the core genuinely is usable without it.
+* **`reporting/` stays out of the wheel** with no entry point, but for its *own* reason: it
+  renders arbitrary tabular data and nobody reaches for it by name. That is a fact about that
+  package, not a rule about friendly layers.
+* **`paths.project_root()` replaces the unconditional `chdir(ROOT)`.** A packaged console
+  script can be installed anywhere, and `ROOT` — the package's parent — points into
+  site-packages for a non-editable install. It is now used only when it actually looks like the
+  project (contains `configs/` or `testcases/`), falling back to the cwd, so
+  `cd my-eval-project && llmevalx` works either way.
+
+The rule that survives is about the *direction* of the dependency, not about directories or
+packaging: `llmevalx` imports `llmeval` and shares its constants, its store and its suite
+registry, and nothing under `llmeval/` may import `llmevalx` or `reporting`.
+
+`llmevalx.sh` stays as a convenience. It `cd`s to the project directory and clears
+`VIRTUAL_ENV`, which direnv sets to a different environment at the repo root and which makes
+`uv run` print a mismatch warning on every invocation.
