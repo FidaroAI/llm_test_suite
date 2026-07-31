@@ -228,8 +228,22 @@ _TEMPLATE = """<!doctype html>
  .colgrid label{display:flex;gap:6px;align-items:center;cursor:pointer;
                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  /* Cell text is wrapped in this div by the formatter, which is also what the
-    compact/expanded toggle clamps. */
- .cellwrap{white-space:pre-wrap;word-break:break-word;line-height:1.35}
+    compact/expanded toggle clamps.
+
+    Both modes clamp; expanded is just far looser. The cap is what keeps a row shorter
+    than the window, and that is load-bearing rather than cosmetic: the fixed `height`
+    below turns on Tabulator's virtual renderer, which converts a scroll offset into a
+    row index using one *average* row height. Scroll inside a row taller than twice the
+    viewport and scrollTop passes its margin without crossing a row boundary, so the
+    renderer decides it has "jumped", throws the render away and rebuilds from
+    `floor(scrollTop / scrollHeight * rowCount)` — a linear pixel-to-index guess. A row
+    that tall spans thousands of pixels but only one index, so the guess lands near the
+    start of the data and the table snaps to the top on every gesture. Unbounded rows
+    and virtual rendering cannot both be had; a row taller than the screen hides the
+    other columns anyway, so the cell scrolls internally instead, exactly as it already
+    does in compact mode. */
+ .cellwrap{white-space:pre-wrap;word-break:break-word;line-height:1.35;
+           max-height:60vh;overflow:auto}
  .compact .cellwrap{max-height:4.4em;overflow:auto}
  .tabulator{font-size:12.5px;background:var(--bg)}
  .tabulator .tabulator-header .tabulator-col{background:#f9fafb}
@@ -342,7 +356,15 @@ _TEMPLATE = """<!doctype html>
   wrapBtn.addEventListener("click", function () {
     var compact = host.classList.toggle("compact");
     wrapBtn.textContent = compact ? "Expand rows" : "Collapse rows";
+    // Save and restore the scroll offset around the redraw: Tabulator's renderTable()
+    // does a literal `scrollTop = 0`, so toggling would otherwise throw you back to the
+    // first row every time. Read it before the redraw and put it back after; the offset
+    // no longer means the same row once heights change, but landing near where you were
+    // beats landing at the top.
+    var holder = host.querySelector(".tabulator-tableholder");
+    var offset = holder ? holder.scrollTop : 0;
     table.redraw(true);   // row heights changed; make Tabulator re-measure
+    if (holder) { holder.scrollTop = offset; }
   });
 
   document.getElementById("download").addEventListener("click", function () {

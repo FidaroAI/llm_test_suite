@@ -142,6 +142,49 @@ def test_page_wires_up_column_visibility_and_filtering():
     assert 'id="download"' in html
 
 
+def test_expanded_rows_stay_bounded_by_the_viewport():
+    # Regression: rows must never grow taller than the window, in *either* mode.
+    #
+    # The fixed `height` on the table turns on Tabulator's virtual renderer, which
+    # converts scroll offsets to row indices using a single average row height
+    # (`vDomRowHeight`). Scrolling inside a row taller than 2x the viewport moves
+    # scrollTop past its margin without crossing a row boundary, so `scrollRows` takes
+    # its "jumped too far" branch and re-renders from
+    # `floor(scrollTop / scrollHeight * rowCount)` — a linear pixel-to-index guess. A
+    # giant row spans many pixels but only one index, so the guess lands near the start
+    # of the data and the table snaps back to the top on every scroll gesture.
+    #
+    # Hence: the expanded clamp is load-bearing, not cosmetic. Removing it, or changing
+    # it to a unit that doesn't track the window, brings the jumping back.
+    html = csv_table.render_table([{"a": 1}], title="t")
+    expanded = re.search(r"\n \.cellwrap\{([^}]*)\}", html)
+    assert expanded, "no expanded-mode .cellwrap rule in the page"
+    assert "max-height:60vh" in expanded.group(1)
+    assert "overflow:auto" in expanded.group(1)   # the room has to be reachable
+    # Compact stays the tighter of the two, so the toggle still visibly does something.
+    assert ".compact .cellwrap{max-height:4.4em" in html
+
+
+def test_expanding_rows_keeps_your_place_in_the_table():
+    # Regression: Tabulator's renderTable() does a literal `element.scrollTop = 0`, so
+    # the redraw the toggle needs (row heights changed) would otherwise jump the user to
+    # the top of the table every time they hit Expand. The handler saves the offset
+    # across the redraw.
+    #
+    # Scoped to the handler's own body: "scrollTop" and "tabulator-tableholder" both occur
+    # in the vendored library, so asserting against the whole page would pass no matter
+    # what this handler does.
+    html = csv_table.render_table([{"a": 1}], title="t")
+    handler = re.search(
+        r'wrapBtn\.addEventListener\("click", function \(\) \{(.*?)\n  \}\);', html, re.S
+    )
+    assert handler, "no expand/collapse click handler in the page"
+    body = handler.group(1)
+    assert "table.redraw(true)" in body             # heights changed; must re-measure
+    assert body.count("scrollTop") >= 2             # read before the redraw, written after
+    assert "tabulator-tableholder" in body          # the element that actually scrolls
+
+
 def test_assets_are_inlined_so_the_page_works_offline():
     html = csv_table.render_table([{"a": 1}], title="t")
     assert "Tabulator" in html
