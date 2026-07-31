@@ -33,35 +33,21 @@ def runs_of(store, *ids):
 # --- suite resolution ----------------------------------------------------
 
 
-def test_suite_comes_from_metadata_when_available():
-    assert suite_of("anything-at-all", a_case("x", suite="multifaceted")) == "multifaceted"
+def test_suite_is_the_id_prefix():
+    assert suite_of("simple_facts.6c3396ab0e") == "simple_facts"
 
 
-def test_suite_falls_back_to_the_id_shape():
-    assert suite_of("simple_facts-6c3396ab0e", None) == "simple_facts"
+def test_suite_keeps_a_variant_suffixed_local_id_intact():
+    assert suite_of("research_rubrics.abc1234567-g_eval") == "research_rubrics"
 
 
-def test_suite_fallback_keeps_a_variant_suffixed_id_intact():
-    assert suite_of("research_rubrics-abc1234567-geval", None) == "research_rubrics"
+def test_suite_splits_on_the_first_dot_only():
+    """A plugin may put dots in its own local ids; only the prefix belongs to the loader."""
+    assert suite_of("my_suite.a.b.c") == "my_suite"
 
 
-def test_suite_fallback_keeps_hyphens_in_the_suite_name():
-    assert suite_of("my-suite-0123456789", None) == "my-suite"
-
-
-def test_suite_is_none_for_a_hand_written_id():
-    assert suite_of("hand-written", None) is None
-
-
-def test_metadata_wins_over_the_id_shape():
-    case = a_case("simple_facts-6c3396ab0e", suite="overridden")
-    assert suite_of("simple_facts-6c3396ab0e", case) == "overridden"
-
-
-def test_metadata_without_a_suite_key_falls_through_to_the_id():
-    """A hand-written test case may carry metadata but no suite; don't return None for it."""
-    case = a_case("simple_facts-6c3396ab0e", request_type="coding")
-    assert suite_of("simple_facts-6c3396ab0e", case) == "simple_facts"
+def test_suite_is_none_for_an_unprefixed_id():
+    assert suite_of("legacy-style-id") is None
 
 
 # --- one row per (result, assertion) ------------------------------------
@@ -377,28 +363,18 @@ def test_provider_specific_output_is_not_ascii_escaped(store):
     assert "Café" in result_rows(store, runs_of(store, run))[0]["provider_specific_output"]
 
 
-# --- testcase enrichment and selection ---------------------------------
+# --- testcase selection -------------------------------------------------
 
 
-def test_testcases_add_prompt_and_classification(store):
+def test_the_column_set_is_the_same_with_or_without_testcases(store):
+    """Every column is derivable from the stored result, so nothing is conditional."""
     run = a_run(store, KEY)
-    store.add_result_row("t-0123456789", run_id=run, output="x")
-    cases = {"t-0123456789": a_case("t-0123456789", request_type="coding", domain="science_stem")}
-    row = result_rows(store, runs_of(store, run), cases)[0]
-    assert row["prompt"] == "the prompt"
-    assert (row["request_type"], row["domain"]) == ("coding", "science_stem")
-    assert list(row) == result_columns(with_tests=True)
-
-
-def test_classification_columns_are_absent_without_testcases(store):
-    """prompt is not among them any more — it comes from the result itself now."""
-    run = a_run(store, KEY)
-    store.add_result_row("t-0123456789", run_id=run, output="x")
-    row = result_rows(store, runs_of(store, run))[0]
-    assert "request_type" not in row
-    assert "domain" not in row
-    assert "prompt" in row
-    assert list(row) == result_columns(with_tests=False)
+    store.add_result_row("t.0123456789", run_id=run, output="x")
+    cases = {"t.0123456789": a_case("t.0123456789")}
+    with_cases = result_rows(store, runs_of(store, run), cases)[0]
+    without = result_rows(store, runs_of(store, run))[0]
+    assert list(with_cases) == list(without) == result_columns()
+    assert with_cases["suite"] == without["suite"] == "t"
 
 
 def test_testcases_select_as_well_as_enrich(store):
@@ -428,7 +404,7 @@ def test_write_csv_round_trips(tmp_path, store):
     rid = store.add_result_row("t-0123456789", run_id=run, output="hello")
     store.set_grading(rid, "a1", passed=True, score=1.0)
     rows = result_rows(store, runs_of(store, run))
-    columns = result_columns(with_tests=False)
+    columns = result_columns()
     path = write_csv(rows, columns, str(tmp_path / "out" / "rows.csv"))
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -439,7 +415,7 @@ def test_write_csv_round_trips(tmp_path, store):
 
 
 def test_write_csv_of_no_rows_still_writes_the_header(tmp_path):
-    columns = result_columns(with_tests=False)
+    columns = result_columns()
     path = write_csv([], columns, str(tmp_path / "empty.csv"))
     with open(path, newline="", encoding="utf-8") as f:
         assert csv.DictReader(f).fieldnames == columns
@@ -450,7 +426,7 @@ def test_write_csv_survives_embedded_newlines_and_commas(tmp_path, store):
     run = a_run(store, KEY)
     store.add_result_row("t-0123456789", run_id=run, output='line one\nline, two "quoted"')
     rows = result_rows(store, runs_of(store, run))
-    columns = result_columns(with_tests=False)
+    columns = result_columns()
     path = write_csv(rows, columns, str(tmp_path / "rows.csv"))
     with open(path, newline="", encoding="utf-8") as f:
         got = list(csv.DictReader(f))

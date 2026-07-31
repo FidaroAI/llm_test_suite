@@ -18,7 +18,7 @@ import sys
 from dataclasses import dataclass, field
 
 from llmeval.cli import DEFAULT_DB
-from llmevalx.paths import REPORT_HTML, RESULTS_CSV, TESTCASES_DIR
+from llmevalx.paths import REPORT_HTML, RESULTS_CSV
 
 # Run-selection modes offered by the "which runs?" menu.
 RUNS_LAST = "last"
@@ -53,16 +53,12 @@ class Selection:
     action: str
     # Step 2 (report only): "last" for the one-keypress path, "other" for the full wizard.
     report_mode: str | None = None
-    # Step 3
-    testcases: list[str] = field(default_factory=list)   # [] means "all", i.e. testcases/
-    all_testcases: bool = False
+    # Step 3. `sources` are --testcases names (a plugin dir or a .json stem); [] means every
+    # source, which is the CLI's own default and so contributes no flag at all.
+    sources: list[str] = field(default_factory=list)
     provider: str | None = None                          # config path; None means every one
-    suite: str | None = None                             # --filter suite=<x>
     runs_mode: str | None = None
     run_ids: list[str] = field(default_factory=list)
-    # Step 3 for generate
-    generate_suites: list[str] = field(default_factory=list)
-    generate_all: bool = False
     # Step 4 (run only)
     timeout: str = DEFAULT_TIMEOUT
     concurrency: str = DEFAULT_CONCURRENCY
@@ -101,21 +97,13 @@ def _module(module: str, *args: str) -> Command:
 
 
 def _testcase_flags(sel: Selection) -> list[str]:
-    """`--testcases` once per chosen file, or once for the whole directory.
+    """`--testcases` once per chosen source; nothing at all for "everything".
 
-    "All" collapses to the directory rather than listing every file: it is shorter to read,
-    it is what a person would type, and it keeps picking up files added later.
+    Omitting the flag *is* how the CLI spells "every source", so "all" contributes no flag
+    rather than a longer way of saying the same thing — and it keeps picking up sources added
+    later.
     """
-    if sel.all_testcases or not sel.testcases:
-        return ["--testcases", TESTCASES_DIR]
-    out: list[str] = []
-    for path in sel.testcases:
-        out += ["--testcases", path]
-    return out
-
-
-def _filter_flags(sel: Selection) -> list[str]:
-    return ["--filter", f"suite={sel.suite}"] if sel.suite else []
+    return [flag for name in sel.sources for flag in ("--testcases", name)]
 
 
 def _run_selection_flags(sel: Selection) -> list[str]:
@@ -145,8 +133,7 @@ def _report_title(sel: Selection) -> str:
     bits = []
     if sel.provider:
         bits.append(sel.provider.rsplit("/", 1)[-1].removesuffix(".json"))
-    if sel.suite:
-        bits.append(sel.suite)
+    bits.extend(sel.sources)
     if sel.runs_mode == RUNS_LAST:
         bits.append("last run")
     elif sel.runs_mode == RUNS_SPECIFIC:
@@ -157,16 +144,11 @@ def _report_title(sel: Selection) -> str:
 
 
 def _generate_commands(sel: Selection) -> list[Command]:
-    if sel.generate_all:
-        return [_llmeval("generate", "--all", "--out", TESTCASES_DIR)]
-    args = ["generate"]
-    for suite in sel.generate_suites:
-        args += ["--suite", suite]
-    return [_llmeval(*args, "--out", TESTCASES_DIR)]
+    return [_llmeval("generate", *_testcase_flags(sel))]
 
 
 def _run_commands(sel: Selection) -> list[Command]:
-    args = ["run", *_testcase_flags(sel), *_provider_flags(sel), *_filter_flags(sel)]
+    args = ["run", *_testcase_flags(sel), *_provider_flags(sel)]
     args += ["--timeout", sel.timeout, "--concurrency", sel.concurrency]
     if sel.limit.strip():
         args += ["--limit", sel.limit.strip()]
@@ -182,8 +164,7 @@ def _run_commands(sel: Selection) -> list[Command]:
 def _grade_commands(sel: Selection) -> list[Command]:
     return [
         _llmeval(
-            "grade", *_testcase_flags(sel), *_provider_flags(sel),
-            *_filter_flags(sel), *_run_selection_flags(sel),
+            "grade", *_testcase_flags(sel), *_provider_flags(sel), *_run_selection_flags(sel)
         )
     ]
 
@@ -195,15 +176,14 @@ def _report_commands(sel: Selection) -> list[Command]:
     and emits CSV, `reporting.csv_table` turns any CSV into a page (and opens it by default).
     """
     if sel.report_mode == "last":
-        # The one-keypress path. testcases/ is included so the page carries the
-        # request_type and domain labels; no --provider, so whoever ran last is picked up.
-        select = _llmeval(
-            "report", "--run-last-n", "1", "--testcases", TESTCASES_DIR, "--out", RESULTS_CSV
-        )
+        # The one-keypress path: no --testcases and no --provider, so it picks up whatever
+        # ran last, in full. Every column comes off the stored result, so narrowing by
+        # source would only ever remove rows.
+        select = _llmeval("report", "--run-last-n", "1", "--out", RESULTS_CSV)
     else:
         select = _llmeval(
             "report", *_testcase_flags(sel), *_provider_flags(sel),
-            *_filter_flags(sel), *_run_selection_flags(sel), "--out", RESULTS_CSV,
+            *_run_selection_flags(sel), "--out", RESULTS_CSV,
         )
     render = _module(
         "reporting.csv_table", RESULTS_CSV, "-o", REPORT_HTML, "--title", _report_title(sel)

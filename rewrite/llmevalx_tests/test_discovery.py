@@ -12,68 +12,100 @@ def write_cases(directory, name, cases):
     (directory / name).write_text(json.dumps(cases), encoding="utf-8")
 
 
-def case(test_id, suite):
-    return {"id": test_id, "user": "q?", "metadata": {"suite": suite}}
+def case(test_id):
+    return {"id": test_id, "user": "q?"}
 
 
-# --------------------------------------------------------------------------- test cases
+# --------------------------------------------------------------------------- sources
 
 
-def test_lists_json_files_with_counts_and_suites(tmp_path):
-    write_cases(tmp_path / "tc", "alpha.json", [case("a1", "alpha"), case("a2", "alpha")])
-    write_cases(tmp_path / "tc", "beta.json", [case("b1", "beta")])
-    files = discovery.list_testcase_files(str(tmp_path / "tc"))
-    assert [(f.name, f.count, f.suites) for f in files] == [
-        ("alpha.json", 2, ("alpha",)),
-        ("beta.json", 1, ("beta",)),
-    ]
+PLUGIN = """
+from llmeval.plugins import PluginInterface, TestCasePlugin
+
+
+class P(TestCasePlugin):
+    def __init__(self, cases):
+        self.cases = cases
+
+    def generate_testcases(self):
+        return True
+
+    def get_testcases(self):
+        return self.cases
+
+
+def get_plugin(interface):
+    return P([{"id": "one", "user": "q?"}])
+"""
+
+
+def write_plugin(directory, name, source=PLUGIN):
+    (directory / name).mkdir(parents=True, exist_ok=True)
+    (directory / name / "__init__.py").write_text(source, encoding="utf-8")
+
+
+def test_lists_plugins_and_json_files_with_their_case_counts(tmp_path):
+    root = tmp_path / "tc"
+    write_plugin(root, "facts")
+    write_cases(root, "examples.json", [case("a1"), case("a2")])
+    by_name = {s.name: s for s in discovery.list_sources(str(root))}
+    assert (by_name["facts"].kind, by_name["facts"].count) == ("plugin", 1)
+    assert (by_name["examples"].kind, by_name["examples"].count) == ("json", 2)
 
 
 def test_label_pluralises_case_count(tmp_path):
-    write_cases(tmp_path / "tc", "one.json", [case("x", "s")])
-    write_cases(tmp_path / "tc", "two.json", [case("x", "s"), case("y", "s")])
-    labels = [f.label for f in discovery.list_testcase_files(str(tmp_path / "tc"))]
-    assert "(1 case)" in labels[0] and "(2 cases)" in labels[1]
+    root = tmp_path / "tc"
+    write_cases(root, "one.json", [case("x")])
+    write_cases(root, "two.json", [case("x"), case("y")])
+    labels = {s.name: s.label for s in discovery.list_sources(str(root))}
+    assert "(1 case)" in labels["one"] and "(2 cases)" in labels["two"]
 
 
 def test_a_bare_object_counts_as_one_case(tmp_path):
-    write_cases(tmp_path / "tc", "single.json", case("only", "s"))
-    assert discovery.list_testcase_files(str(tmp_path / "tc"))[0].count == 1
+    write_cases(tmp_path / "tc", "single.json", case("only"))
+    assert discovery.list_sources(str(tmp_path / "tc"))[0].count == 1
+
+
+def test_an_ungenerated_plugin_is_offered_with_a_zero_count(tmp_path):
+    """It is shown, not hidden: "generate this one" is what the user is here for."""
+    root = tmp_path / "tc"
+    write_plugin(root, "empty", source=PLUGIN.replace('[{"id": "one", "user": "q?"}]', "[]"))
+    (source,) = discovery.list_sources(str(root))
+    assert source.count == 0
+    assert "not generated yet" in source.label
 
 
 def test_non_json_files_are_ignored(tmp_path):
     (tmp_path / "tc").mkdir()
     (tmp_path / "tc" / "notes.txt").write_text("hello", encoding="utf-8")
-    assert discovery.list_testcase_files(str(tmp_path / "tc")) == []
+    assert discovery.list_sources(str(tmp_path / "tc")) == []
 
 
 def test_a_broken_file_greys_itself_out_rather_than_the_whole_wizard(tmp_path):
-    write_cases(tmp_path / "tc", "good.json", [case("g", "alpha")])
+    write_cases(tmp_path / "tc", "good.json", [case("g")])
     (tmp_path / "tc" / "bad.json").write_text("{not json", encoding="utf-8")
-    assert [f.name for f in discovery.list_testcase_files(str(tmp_path / "tc"))] == ["good.json"]
+    by_name = {s.name: s.count for s in discovery.list_sources(str(tmp_path / "tc"))}
+    assert by_name == {"good": 1, "bad": 0}
+
+
+def test_a_stem_clashing_with_a_directory_greys_out_the_whole_menu(tmp_path):
+    """Ambiguous layout: better an empty menu than one that silently picks a winner."""
+    root = tmp_path / "tc"
+    write_plugin(root, "facts")
+    write_cases(root, "facts.json", [case("x")])
+    assert discovery.list_sources(str(root)) == []
 
 
 def test_missing_directory_is_empty_not_an_error(tmp_path):
-    assert discovery.list_testcase_files(str(tmp_path / "nope")) == []
+    assert discovery.list_sources(str(tmp_path / "nope")) == []
 
 
-def test_suites_come_from_the_chosen_files_only(tmp_path):
-    write_cases(tmp_path / "tc", "alpha.json", [case("a", "alpha")])
-    write_cases(tmp_path / "tc", "beta.json", [case("b", "beta")])
-    files = discovery.list_testcase_files(str(tmp_path / "tc"))
-    assert discovery.suites_in(files) == ["alpha", "beta"]
-    assert discovery.suites_in([files[0]]) == ["alpha"]
-
-
-def test_one_file_holding_several_suites(tmp_path):
-    write_cases(tmp_path / "tc", "mixed.json", [case("a", "alpha"), case("b", "beta")])
-    assert discovery.list_testcase_files(str(tmp_path / "tc"))[0].suites == ("alpha", "beta")
-
-
-def test_cases_without_a_suite_label_contribute_nothing(tmp_path):
-    write_cases(tmp_path / "tc", "plain.json", [{"id": "x", "user": "q?"}])
-    files = discovery.list_testcase_files(str(tmp_path / "tc"))
-    assert files[0].count == 1 and files[0].suites == ()
+def test_only_plugins_are_generatable(tmp_path):
+    root = tmp_path / "tc"
+    write_plugin(root, "facts")
+    write_cases(root, "examples.json", [case("a")])
+    sources = discovery.list_sources(str(root))
+    assert [s.name for s in discovery.generatable_sources(sources)] == ["facts"]
 
 
 # --------------------------------------------------------------------------- providers
@@ -115,16 +147,6 @@ def test_broken_provider_config_is_skipped(tmp_path):
     (tmp_path / "c").mkdir()
     (tmp_path / "c" / "bad.json").write_text("nope", encoding="utf-8")
     assert discovery.list_provider_configs(str(tmp_path / "c")) == []
-
-
-# --------------------------------------------------------------------------- suites
-
-
-def test_generatable_suites_come_from_the_registry():
-    # The registry is being emptied plugin by plugin; these become source pickers shortly.
-    by_name = {s.name: s for s in discovery.list_generatable_suites()}
-    assert "simple_facts" in by_name
-    assert by_name["simple_facts"].network is False
 
 
 # --------------------------------------------------------------------------- runs

@@ -1,7 +1,60 @@
+"""The CLI end to end, offline.
+
+Every test builds a small project directory — ``testcases/`` plus a provider config — and
+``chdir``s into it, because ``--testcases`` names a source inside ``testcases/`` rather than
+a path. Sources here are hand-written ``.json`` files; the plugin path is covered in
+``test_cli_sources.py``.
+"""
+
+import csv as csvmod
 import json
-import os
+import sqlite3
+
+import pytest
 
 from llmeval.cli import build_parser, load_provider_config, main
+
+ECHO = {"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}}
+
+# The echo provider returns the prompt verbatim, so an assertion has to match a word in the
+# *question* for grading to pass. Asserting on an answer would give a legitimately failing
+# row and make the pass/fail expectations below misleading.
+FACTS = [{"id": "cap", "user": "What is the capital of France?",
+          "assertions": [{"type": "icontains", "value": "capital"}]}]
+
+
+def write_source(root, name, cases):
+    root.mkdir(parents=True, exist_ok=True)
+    (root / f"{name}.json").write_text(json.dumps(cases), encoding="utf-8")
+
+
+def project(tmp_path, monkeypatch, sources=None):
+    """A project directory with test-case sources and an echo provider. Returns the db path."""
+    root = tmp_path / "testcases"
+    for name, cases in (sources or {"facts": FACTS}).items():
+        write_source(root, name, cases)
+    (tmp_path / "echo.json").write_text(json.dumps(ECHO), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    return str(tmp_path / "db.sqlite3")
+
+
+def echoed(tmp_path, monkeypatch, sources=None):
+    """A project whose tests have been run and graded once."""
+    db = project(tmp_path, monkeypatch, sources)
+    main(["run", "--provider", "echo.json", "--db", db])
+    main(["grade", "--provider", "echo.json", "--db", db])
+    return db
+
+
+def read_csv(path):
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csvmod.DictReader(f)
+        return reader.fieldnames, list(reader)
+
+
+def count_results(db):
+    with sqlite3.connect(db) as conn:
+        return conn.execute("select count(*) from results").fetchone()[0]
 
 
 def test_load_provider_config_expands_env(tmp_path, monkeypatch):
@@ -12,335 +65,250 @@ def test_load_provider_config_expands_env(tmp_path, monkeypatch):
     assert cfg.base_url == "http://gw:8082/v1"
 
 
-def test_cli_pipeline_offline(tmp_path):
-    # generate
-    csv = tmp_path / "facts.csv"
-    csv.write_text('user,__expected\n"What is the capital of France?","icontains:Paris"\n')
-    tc_dir = tmp_path / "testcases"
-    assert main(["generate-csv", "--csv", str(csv), "--suite", "facts", "--out", str(tc_dir)]) == 0
-    assert (tc_dir / "facts.json").exists()
-
-    # an echo provider config (no network)
-    prov = tmp_path / "echo.json"
-    prov.write_text(json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}}))
-    db = str(tmp_path / "db.sqlite3")
-
-    # run + grade against cached outputs
-    assert main(["run", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db]) == 0
-    assert main(["grade", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db]) == 0
-
-    # report now emits CSV rows; the statistics HTML moved to compare-report
-    rows_csv = tmp_path / "rows.csv"
-    assert main(["report", "--provider", str(prov), "--db", db, "--out", str(rows_csv)]) == 0
-    assert rows_csv.exists() and rows_csv.read_text().strip() != ""
-
-    out = tmp_path / "r.html"
-    assert main(["compare-report", "--providers", str(prov), "--db", db, "--out", str(out)]) == 0
-    assert out.exists() and out.read_text().strip() != ""
+# --- the pipeline -------------------------------------------------------
 
 
-def test_cli_run_is_idempotent_via_cache(tmp_path, capsys):
-    csv = tmp_path / "f.csv"
-    csv.write_text('user,__expected\n"Q?","icontains:A"\n')
-    tc_dir = tmp_path / "tc"
-    main(["generate-csv", "--csv", str(csv), "--suite", "s", "--out", str(tc_dir)])
-    prov = tmp_path / "echo.json"
-    prov.write_text(json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}}))
-    db = str(tmp_path / "db.sqlite3")
-    main(["run", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db])
-    # second run reuses cache -> 0 new calls
-    main(["run", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db])
-    from llmeval.models import ProviderConfig
-    from llmeval.store import Store
+def test_cli_pipeline_offline(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    assert main(["run", "--provider", "echo.json", "--db", db]) == 0
+    assert main(["grade", "--provider", "echo.json", "--db", db]) == 0
 
-    cfg = ProviderConfig(name="echo", model="echo", extra={"provider_impl": "echo"})
-    s = Store(db)
-    assert s.count_results("s-" + __import__("hashlib").sha1(b"Q?").hexdigest()[:10], cfg.cache_key().hash) == 1
-    s.close()
+    # report emits CSV rows; the statistics HTML is compare-report
+    assert main(["report", "--provider", "echo.json", "--db", db, "--out", "rows.csv"]) == 0
+    assert (tmp_path / "rows.csv").read_text().strip() != ""
+
+    assert main(["compare-report", "--providers", "echo.json", "--db", db, "--out", "r.html"]) == 0
+    assert (tmp_path / "r.html").read_text().strip() != ""
+
+
+def test_cli_run_is_idempotent_via_cache(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    main(["run", "--provider", "echo.json", "--db", db])
+    main(["run", "--provider", "echo.json", "--db", db])
+    assert count_results(db) == 1
+
+
+def test_ids_are_namespaced_by_source(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    main(["run", "--provider", "echo.json", "--db", db])
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("select test_id from results").fetchone()[0] == "facts.cap"
+
+
+# --- flag parsing -------------------------------------------------------
 
 
 def test_cli_run_concurrency_flag_defaults_to_five():
-    parser = build_parser()
-    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p"])
+    args = build_parser().parse_args(["run", "--provider", "p"])
     assert args.concurrency == 5
 
 
 def test_cli_run_concurrency_flag_override():
-    parser = build_parser()
-    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p", "--concurrency", "12"])
+    args = build_parser().parse_args(["run", "--provider", "p", "--concurrency", "12"])
     assert args.concurrency == 12
 
 
 def test_cli_run_timeout_flag_defaults_to_sixty_seconds():
-    parser = build_parser()
-    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p"])
-    assert args.timeout == 60.0
+    assert build_parser().parse_args(["run", "--provider", "p"]).timeout == 60.0
 
 
 def test_cli_run_timeout_flag_override():
-    parser = build_parser()
-    args = parser.parse_args(["run", "--testcases", "tc", "--provider", "p", "--timeout", "300"])
+    args = build_parser().parse_args(["run", "--provider", "p", "--timeout", "300"])
     assert args.timeout == 300.0
 
 
-def test_cli_run_with_concurrency_offline(tmp_path):
-    import sqlite3
-
-    csv = tmp_path / "f.csv"
-    csv.write_text(
-        'user,__expected\n"q1?","icontains:a"\n"q2?","icontains:b"\n"q3?","icontains:c"\n'
+def test_cli_testcases_flag_is_repeatable():
+    args = build_parser().parse_args(
+        ["run", "--testcases", "a", "--testcases", "b", "--provider", "p"]
     )
-    tc_dir = tmp_path / "tc"
-    main(["generate-csv", "--csv", str(csv), "--suite", "s", "--out", str(tc_dir)])
-    prov = tmp_path / "echo.json"
-    prov.write_text(json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}}))
-    db = str(tmp_path / "db.sqlite3")
-    rc = main(
-        ["run", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db, "--concurrency", "3"]
+    assert args.testcases == ["a", "b"]
+
+
+def test_cli_testcases_is_optional_everywhere():
+    """Omitted means every source — on run as well as report."""
+    assert build_parser().parse_args(["run", "--provider", "p"]).testcases is None
+    assert build_parser().parse_args(["report", "--out", "o.csv"]).testcases is None
+    assert build_parser().parse_args(["generate"]).testcases is None
+
+
+def test_run_selection_flags_default_to_none():
+    args = build_parser().parse_args(["report", "--out", "o.csv"])
+    assert (args.run_id, args.run_after, args.run_before, args.run_last_n) == (
+        None, None, None, None,
     )
-    assert rc == 0
-    conn = sqlite3.connect(db)
-    assert conn.execute("select count(*) from results").fetchone()[0] == 3
-    conn.close()
 
 
-def _echo_setup(tmp_path):
-    """Generate one test case, run it with the echo provider, and grade it.
-
-    The echo provider returns the prompt verbatim, so the assertion has to match a word in
-    the *question* for the grading to pass — asserting on the answer would give a
-    legitimately failing row and make the pass/fail expectations below misleading.
-    """
-    csv_src = tmp_path / "facts.csv"
-    csv_src.write_text('user,__expected\n"What is the capital of France?","icontains:capital"\n')
-    tc_dir = tmp_path / "testcases"
-    main(["generate-csv", "--csv", str(csv_src), "--suite", "facts", "--out", str(tc_dir)])
-    prov = tmp_path / "echo.json"
-    prov.write_text(
-        json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}})
-    )
-    db = str(tmp_path / "db.sqlite3")
-    main(["run", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db])
-    main(["grade", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db])
-    return str(tc_dir), str(prov), db
+# --- source selection ---------------------------------------------------
 
 
-def _read_csv(path):
-    import csv as csvmod
-
-    with open(path, newline="", encoding="utf-8") as f:
-        reader = csvmod.DictReader(f)
-        return reader.fieldnames, list(reader)
+TWO_SOURCES = {
+    "alpha": [{"id": "a", "user": "q-alpha?", "assertions": []}],
+    "beta": [{"id": "b", "user": "q-beta?", "assertions": []}],
+}
 
 
-def test_report_writes_a_csv(tmp_path):
-    tc_dir, prov, db = _echo_setup(tmp_path)
-    out = tmp_path / "rows.csv"
-    rc = main(
-        ["report", "--db", db, "--provider", prov, "--testcases", tc_dir, "--out", str(out)]
-    )
-    assert rc == 0
-    _, rows = _read_csv(out)
+def test_omitting_testcases_runs_every_source(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch, TWO_SOURCES)
+    main(["run", "--provider", "echo.json", "--db", db])
+    assert count_results(db) == 2
+
+
+def test_naming_a_source_runs_only_that_one(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch, TWO_SOURCES)
+    main(["run", "--provider", "echo.json", "--db", db, "--testcases", "alpha"])
+    with sqlite3.connect(db) as conn:
+        assert {r[0] for r in conn.execute("select test_id from results")} == {"alpha.a"}
+
+
+def test_repeating_the_flag_unions_the_sources(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch, TWO_SOURCES)
+    main([
+        "run", "--provider", "echo.json", "--db", db,
+        "--testcases", "alpha", "--testcases", "beta",
+    ])
+    assert count_results(db) == 2
+
+
+def test_naming_the_same_source_twice_does_not_double_run(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch, TWO_SOURCES)
+    main([
+        "run", "--provider", "echo.json", "--db", db,
+        "--testcases", "alpha", "--testcases", "alpha",
+    ])
+    assert count_results(db) == 1
+
+
+def test_an_unknown_source_is_an_error_not_an_empty_run(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    assert main(["run", "--provider", "echo.json", "--db", db, "--testcases", "nope"]) == 2
+
+
+def test_cli_run_limit_runs_only_n(tmp_path, monkeypatch):
+    three = {"s": [{"id": f"q{i}", "user": f"q{i}?", "assertions": []} for i in range(3)]}
+    db = project(tmp_path, monkeypatch, three)
+    main(["run", "--provider", "echo.json", "--db", db, "--limit", "2"])
+    assert count_results(db) == 2
+
+
+def test_cli_run_with_concurrency_offline(tmp_path, monkeypatch):
+    three = {"s": [{"id": f"q{i}", "user": f"q{i}?", "assertions": []} for i in range(3)]}
+    db = project(tmp_path, monkeypatch, three)
+    assert main(["run", "--provider", "echo.json", "--db", db, "--concurrency", "3"]) == 0
+    assert count_results(db) == 3
+
+
+# --- report -------------------------------------------------------------
+
+
+def test_report_writes_a_csv(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    assert main(["report", "--db", db, "--provider", "echo.json", "--out", "rows.csv"]) == 0
+    _, rows = read_csv(tmp_path / "rows.csv")
     assert len(rows) == 1
     assert rows[0]["assertion_key"].startswith("icontains:")
     assert rows[0]["passed"] == "True"
     assert rows[0]["prompt"] == "What is the capital of France?"
+    assert rows[0]["suite"] == "facts"
     assert rows[0]["messages"] != ""
     assert rows[0]["run_id"].startswith("run_")
     assert rows[0]["latency_ms"] != ""
 
 
-def test_report_without_testcases_still_has_the_prompt(tmp_path):
-    """The prompt is stored on the result, so it needs no test-case files."""
-    _, prov, db = _echo_setup(tmp_path)
-    out = tmp_path / "rows.csv"
-    assert main(["report", "--db", db, "--provider", prov, "--out", str(out)]) == 0
-    fieldnames, rows = _read_csv(out)
-    assert "prompt" in (fieldnames or [])
+def test_report_needs_no_testcases_at_all(tmp_path, monkeypatch):
+    """Prompt, answer and suite all come off the stored result."""
+    db = echoed(tmp_path, monkeypatch)
+    assert main(["report", "--db", db, "--out", "rows.csv"]) == 0
+    fieldnames, rows = read_csv(tmp_path / "rows.csv")
     assert rows[0]["prompt"] == "What is the capital of France?"
-    # The classification labels do still need the files.
+    assert rows[0]["suite"] == "facts"
+    # Classification is gone from the suite entirely.
     assert "request_type" not in (fieldnames or [])
     assert "domain" not in (fieldnames or [])
 
 
-def test_report_on_a_missing_db_is_an_error(tmp_path):
-    rc = main(
-        ["report", "--db", str(tmp_path / "nope.sqlite3"), "--out", str(tmp_path / "o.csv")]
-    )
+def test_report_narrows_to_a_named_source(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch, TWO_SOURCES)
+    main(["run", "--provider", "echo.json", "--db", db])
+    assert main(["report", "--db", db, "--testcases", "alpha", "--out", "rows.csv"]) == 0
+    _, rows = read_csv(tmp_path / "rows.csv")
+    assert {r["test_id"] for r in rows} == {"alpha.a"}
+
+
+def test_report_on_a_missing_db_is_an_error(tmp_path, monkeypatch):
+    project(tmp_path, monkeypatch)
+    assert main(["report", "--db", "nope.sqlite3", "--out", "o.csv"]) == 2
+
+
+def test_report_with_conflicting_run_selection_is_an_error(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    rc = main([
+        "report", "--db", db, "--out", "o.csv", "--run-last-n", "1", "--run-after", "2026-07-01",
+    ])
     assert rc == 2
 
 
-def test_report_with_conflicting_run_selection_is_an_error(tmp_path):
-    _, _, db = _echo_setup(tmp_path)
-    rc = main(
-        ["report", "--db", db, "--out", str(tmp_path / "o.csv"),
-         "--run-last-n", "1", "--run-after", "2026-07-01"]
-    )
-    assert rc == 2
+def test_report_with_an_unknown_run_id_is_an_error(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    assert main(["report", "--db", db, "--out", "o.csv", "--run-id", "run_1900"]) == 2
 
 
-def test_report_with_an_unknown_run_id_is_an_error(tmp_path):
-    _, _, db = _echo_setup(tmp_path)
-    rc = main(["report", "--db", db, "--out", str(tmp_path / "o.csv"), "--run-id", "run_1900"])
-    assert rc == 2
-
-
-def test_report_with_an_ambiguous_run_prefix_is_an_error(tmp_path):
-    tc_dir, prov, db = _echo_setup(tmp_path)
-    main(["run", "--testcases", tc_dir, "--provider", prov, "--db", db, "--mode", "always"])
+def test_report_with_an_ambiguous_run_prefix_is_an_error(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    main(["run", "--provider", "echo.json", "--db", db, "--mode", "always"])
     # "run_" prefixes every id, so it can never identify one.
-    rc = main(["report", "--db", db, "--out", str(tmp_path / "o.csv"), "--run-id", "run_"])
-    assert rc == 2
+    assert main(["report", "--db", db, "--out", "o.csv", "--run-id", "run_"]) == 2
 
 
-def test_report_run_selection_that_matches_nothing_is_not_an_error(tmp_path):
-    _, _, db = _echo_setup(tmp_path)
-    out = tmp_path / "rows.csv"
-    assert main(["report", "--db", db, "--out", str(out), "--run-after", "2099-01-01"]) == 0
-    fieldnames, rows = _read_csv(out)
+def test_report_run_selection_that_matches_nothing_is_not_an_error(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    assert main(["report", "--db", db, "--out", "rows.csv", "--run-after", "2099-01-01"]) == 0
+    fieldnames, rows = read_csv(tmp_path / "rows.csv")
     assert fieldnames is not None  # header still written
     assert rows == []
 
 
-def test_report_last_n_selects_only_the_newest_run(tmp_path):
-    tc_dir, prov, db = _echo_setup(tmp_path)
+def test_report_last_n_selects_only_the_newest_run(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
     # A second run of the same test: --mode always appends rather than reusing the cache.
-    main(["run", "--testcases", tc_dir, "--provider", prov, "--db", db, "--mode", "always"])
-    out = tmp_path / "rows.csv"
-    assert main(["report", "--db", db, "--out", str(out), "--run-last-n", "1"]) == 0
-    _, rows = _read_csv(out)
+    main(["run", "--provider", "echo.json", "--db", db, "--mode", "always"])
+    assert main(["report", "--db", db, "--out", "rows.csv", "--run-last-n", "1"]) == 0
+    _, rows = read_csv(tmp_path / "rows.csv")
     assert len({r["run_id"] for r in rows}) == 1
 
     # ...and without the flag, both runs appear.
-    both = tmp_path / "both.csv"
-    assert main(["report", "--db", db, "--out", str(both)]) == 0
-    _, all_rows = _read_csv(both)
+    assert main(["report", "--db", db, "--out", "both.csv"]) == 0
+    _, all_rows = read_csv(tmp_path / "both.csv")
     assert len({r["run_id"] for r in all_rows}) == 2
 
 
-def test_compare_report_writes_the_statistics_html(tmp_path):
-    _, prov, db = _echo_setup(tmp_path)
-    out = tmp_path / "compare.html"
-    assert main(["compare-report", "--providers", prov, "--db", db, "--out", str(out)]) == 0
-    assert "llmeval comparison" in out.read_text()
+def test_compare_report_writes_the_statistics_html(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    assert main(["compare-report", "--providers", "echo.json", "--db", db, "--out", "c.html"]) == 0
+    assert "llmeval comparison" in (tmp_path / "c.html").read_text()
 
 
-def test_grade_accepts_run_selection_flags(tmp_path):
-    tc_dir, prov, db = _echo_setup(tmp_path)
-    assert (
-        main(["grade", "--testcases", tc_dir, "--provider", prov, "--db", db, "--run-last-n", "1"])
-        == 0
-    )
+# --- grade --------------------------------------------------------------
 
 
-def test_grade_with_conflicting_run_selection_is_an_error(tmp_path):
-    tc_dir, prov, db = _echo_setup(tmp_path)
-    rc = main(
-        ["grade", "--testcases", tc_dir, "--provider", prov, "--db", db,
-         "--run-id", "run_x", "--run-last-n", "1"]
-    )
+def test_grade_accepts_run_selection_flags(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    assert main(["grade", "--provider", "echo.json", "--db", db, "--run-last-n", "1"]) == 0
+
+
+def test_grade_with_conflicting_run_selection_is_an_error(tmp_path, monkeypatch):
+    db = echoed(tmp_path, monkeypatch)
+    rc = main([
+        "grade", "--provider", "echo.json", "--db", db, "--run-id", "run_x", "--run-last-n", "1",
+    ])
     assert rc == 2
 
 
-def test_run_selection_flags_default_to_none():
-    parser = build_parser()
-    args = parser.parse_args(["report", "--out", "o.csv"])
-    assert (args.run_id, args.run_after, args.run_before, args.run_last_n) == (
-        None,
-        None,
-        None,
-        None,
-    )
+# --- entry points -------------------------------------------------------
 
 
-def test_cli_run_limit_runs_only_n(tmp_path):
-    import sqlite3
-
-    csv = tmp_path / "f.csv"
-    csv.write_text(
-        'user,__expected\n"q1?","icontains:a"\n"q2?","icontains:b"\n"q3?","icontains:c"\n'
-    )
-    tc_dir = tmp_path / "tc"
-    main(["generate-csv", "--csv", str(csv), "--suite", "s", "--out", str(tc_dir)])
-    prov = tmp_path / "echo.json"
-    prov.write_text(json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}}))
-    db = str(tmp_path / "db.sqlite3")
-    main(["run", "--testcases", str(tc_dir), "--provider", str(prov), "--db", db, "--limit", "2"])
-    conn = sqlite3.connect(db)
-    assert conn.execute("select count(*) from results").fetchone()[0] == 2
-    conn.close()
-
-
-def _echo_provider(tmp_path):
-    prov = tmp_path / "echo.json"
-    prov.write_text(
-        json.dumps({"name": "echo", "model": "echo", "extra": {"provider_impl": "echo"}})
-    )
-    return str(prov)
-
-
-def _two_suite_files(tmp_path):
-    """testcases/alpha.json and testcases/beta.json, one case each."""
-    tc_dir = tmp_path / "tc"
-    for suite, question in (("alpha", "q-alpha?"), ("beta", "q-beta?")):
-        csv = tmp_path / f"{suite}.csv"
-        csv.write_text(f'user,__expected\n"{question}","icontains:x"\n')
-        main(["generate-csv", "--csv", str(csv), "--suite", suite, "--out", str(tc_dir)])
-    return tc_dir
-
-
-def test_cli_testcases_flag_is_repeatable():
-    parser = build_parser()
-    args = parser.parse_args(["run", "--testcases", "a", "--testcases", "b", "--provider", "p"])
-    assert args.testcases == ["a", "b"]
-
-
-def test_cli_single_testcases_flag_still_yields_a_list():
-    parser = build_parser()
-    assert parser.parse_args(["run", "--testcases", "a", "--provider", "p"]).testcases == ["a"]
-
-
-def test_cli_report_testcases_stays_optional():
-    assert build_parser().parse_args(["report", "--out", "o.csv"]).testcases is None
-
-
-def test_cli_run_over_a_subset_of_testcase_files(tmp_path):
-    """Two --testcases flags run both files; one flag runs only that file."""
-    import sqlite3
-
-    tc_dir = _two_suite_files(tmp_path)
-    prov = _echo_provider(tmp_path)
-
-    both_db = str(tmp_path / "both.sqlite3")
-    main([
-        "run", "--provider", prov, "--db", both_db,
-        "--testcases", str(tc_dir / "alpha.json"),
-        "--testcases", str(tc_dir / "beta.json"),
-    ])
-    conn = sqlite3.connect(both_db)
-    assert conn.execute("select count(*) from results").fetchone()[0] == 2
-    conn.close()
-
-    one_db = str(tmp_path / "one.sqlite3")
-    main(["run", "--provider", prov, "--db", one_db, "--testcases", str(tc_dir / "alpha.json")])
-    conn = sqlite3.connect(one_db)
-    assert conn.execute("select count(*) from results").fetchone()[0] == 1
-    conn.close()
-
-
-def test_cli_overlapping_testcases_paths_do_not_double_run(tmp_path):
-    import sqlite3
-
-    tc_dir = _two_suite_files(tmp_path)
-    prov = _echo_provider(tmp_path)
-    db = str(tmp_path / "db.sqlite3")
-    main([
-        "run", "--provider", prov, "--db", db,
-        "--testcases", str(tc_dir), "--testcases", str(tc_dir / "alpha.json"),
-    ])
-    conn = sqlite3.connect(db)
-    assert conn.execute("select count(*) from results").fetchone()[0] == 2
-    conn.close()
+def test_generate_csv_subcommand_is_gone():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["generate-csv", "--csv", "x", "--suite", "y", "--out", "z"])
 
 
 def test_python_dash_m_llmeval_is_an_entry_point():
@@ -348,9 +316,8 @@ def test_python_dash_m_llmeval_is_an_entry_point():
     import subprocess
     import sys
 
-    proc = subprocess.run(
-        [sys.executable, "-m", "llmeval", "--help"],
-        capture_output=True, text=True, check=False,
+    out = subprocess.run(
+        [sys.executable, "-m", "llmeval", "--help"], capture_output=True, text=True, check=False
     )
-    assert proc.returncode == 0
-    assert "compare-report" in proc.stdout
+    assert out.returncode == 0
+    assert "usage: llmeval" in out.stdout

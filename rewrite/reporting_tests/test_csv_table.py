@@ -417,7 +417,7 @@ def test_an_llmeval_report_csv_renders_through_this_tool(tmp_path):
         store.set_grading(rid, "icontains:abc123", type="icontains", score=1.0, passed=True)
         store.add_result_row("facts-0123456789", run_id=run, error="timeout")
         rows = result_rows(store, [store.get_run(run)])
-        columns = result_columns(with_tests=False)
+        columns = result_columns()
     finally:
         store.close()
 

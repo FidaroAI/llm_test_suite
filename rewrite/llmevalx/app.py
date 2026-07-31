@@ -47,7 +47,6 @@ from llmevalx.prompts import BACK
 # None because questionary's Choice falls back to using the title as the value when value is
 # None, which would hand back the human label.
 ALL = object()           # the "everything" entry in a multi-select
-NO_FILTER = object()     # "don't filter by suite"
 ANY_PROVIDER = object()  # report only: every provider in the database
 
 Step = Callable[[Selection], object]
@@ -60,7 +59,7 @@ def step_action(sel: Selection) -> object:
     answer = prompts.select(
         "What do you want to do?",
         [
-            Choice("generate   — build test cases from the suite generators", "generate"),
+            Choice("generate   — have each plugin build its test cases", "generate"),
             Choice("run        — call a provider over test cases", "run"),
             Choice("grade       — score cached outputs (no model calls)", "grade"),
             Choice("report      — build the results table and open it", "report"),
@@ -81,7 +80,7 @@ def step_report_mode(sel: Selection) -> object:
         "Which data?",
         [
             Choice("Report last run   — no more questions", "last"),
-            Choice("Report other data — choose test cases, provider, suite, runs", "other"),
+            Choice("Report other data — choose sources, provider, runs", "other"),
         ],
         default=sel.report_mode or None,
     )
@@ -95,21 +94,17 @@ def step_report_mode(sel: Selection) -> object:
 
 
 def step_testcases(sel: Selection) -> object:
-    files = discovery.list_testcase_files(TESTCASES_DIR)
-    if not files:
-        print(f"No test cases in {TESTCASES_DIR}/ — run 'generate' first.")
+    """Which sources — plugin directories and .json files under testcases/."""
+    sources = discovery.list_sources(TESTCASES_DIR)
+    if not sources:
+        print(f"No test-case sources in {TESTCASES_DIR}/.")
         return BACK
-    choices = [Choice("All test cases", ALL)] + [Choice(f.label, f.path) for f in files]
+    choices = [Choice("All sources", ALL)] + [Choice(s.label, s.name) for s in sources]
     answer = prompts.checkbox("Which test cases?", choices)
     if answer is BACK:
         return BACK
-    sel.all_testcases = ALL in answer
-    sel.testcases = [] if sel.all_testcases else [p for p in answer if p is not ALL]
-    # The suite filter is derived from what was chosen here, so a changed selection must not
-    # leave a filter behind that the new files may not even contain.
-    chosen = files if sel.all_testcases else [f for f in files if f.path in sel.testcases]
-    if sel.suite and sel.suite not in discovery.suites_in(chosen):
-        sel.suite = None
+    # "All" is the empty list, because omitting --testcases is how the CLI spells it.
+    sel.sources = [] if ALL in answer else [name for name in answer if name is not ALL]
     return None
 
 
@@ -128,24 +123,6 @@ def step_provider(sel: Selection) -> object:
     if answer is BACK:
         return BACK
     sel.provider = None if answer is ANY_PROVIDER else answer
-    return None
-
-
-def step_suite(sel: Selection) -> object:
-    files = discovery.list_testcase_files(TESTCASES_DIR)
-    if not sel.all_testcases and sel.testcases:
-        files = [f for f in files if f.path in sel.testcases]
-    suites = discovery.suites_in(files)
-    if not suites:
-        sel.suite = None
-        return None
-    choices = [Choice("All suites (no filter)", NO_FILTER)] + [Choice(s, s) for s in suites]
-    answer = prompts.select(
-        "Filter by suite?", choices, default=sel.suite if sel.suite in suites else NO_FILTER
-    )
-    if answer is BACK:
-        return BACK
-    sel.suite = None if answer is NO_FILTER else answer
     return None
 
 
@@ -182,16 +159,17 @@ def step_pick_runs(sel: Selection) -> object:
     return None
 
 
-def step_generate_suites(sel: Selection) -> object:
-    suites = discovery.list_generatable_suites()
-    choices = [Choice("All suites (skips the network ones)", ALL)] + [
-        Choice(s.label, s.name) for s in suites
-    ]
-    answer = prompts.checkbox("Which suites do you want to generate?", choices)
+def step_generate_sources(sel: Selection) -> object:
+    """Which plugins to generate. A .json source has nothing to generate, so it is not offered."""
+    plugins = discovery.generatable_sources(discovery.list_sources(TESTCASES_DIR))
+    if not plugins:
+        print(f"No plugins in {TESTCASES_DIR}/ — nothing to generate.")
+        return BACK
+    choices = [Choice("All plugins", ALL)] + [Choice(s.label, s.name) for s in plugins]
+    answer = prompts.checkbox("Which plugins do you want to generate?", choices)
     if answer is BACK:
         return BACK
-    sel.generate_all = ALL in answer
-    sel.generate_suites = [] if sel.generate_all else [s for s in answer if s is not ALL]
+    sel.sources = [] if ALL in answer else [name for name in answer if name is not ALL]
     return None
 
 
@@ -270,26 +248,22 @@ def steps_for(sel: Selection) -> list[Step]:
     (and how backing into that answer restores what it removed).
     """
     if sel.action == "generate":
-        return [step_action, step_generate_suites]
+        return [step_action, step_generate_sources]
     if sel.action == "run":
         # step_target_n appears and disappears with the mode answer, exactly as the run
         # picker does for "specific runs" — see :func:`_with_run_picker`.
         run_steps: list[Step] = [
-            step_action, step_testcases, step_provider, step_suite, step_run_options,
-            step_run_mode,
+            step_action, step_testcases, step_provider, step_run_options, step_run_mode,
         ]
         return [*run_steps, step_target_n] if sel.mode == MODE_TARGET_N else run_steps
     if sel.action == "grade":
-        steps: list[Step] = [
-            step_action, step_testcases, step_provider, step_suite, step_runs
-        ]
+        steps: list[Step] = [step_action, step_testcases, step_provider, step_runs]
         return _with_run_picker(steps, sel)
     if sel.action == "report":
         if sel.report_mode == "last":
             return [step_action, step_report_mode]
         return _with_run_picker(
-            [step_action, step_report_mode, step_testcases, step_provider, step_suite, step_runs],
-            sel,
+            [step_action, step_report_mode, step_testcases, step_provider, step_runs], sel
         )
     return [step_action]
 

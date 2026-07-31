@@ -1,16 +1,15 @@
-"""Generate standardized test cases from a CSV source.
+"""Parse a CSV source into test-case dicts.
 
 CSV shape (matches the legacy suite): a prompt column (default ``user``), an
 ``__expected`` column holding a deterministic-assertion shorthand (``icontains:Paris``),
 and optional ``__metadata:<key>`` columns carried into test metadata.
+
+Used by :mod:`llmeval.generation.csv_plugin`, which is the whole of a CSV-backed plugin.
 """
 
 from __future__ import annotations
 
 import csv as _csv
-import hashlib
-import json
-import os
 from typing import Any
 
 from llmeval.generation.common import local_id
@@ -69,50 +68,4 @@ def rows_from_csv(
                     "metadata": metadata,
                 }
             )
-    return cases
-
-
-def _stable_id(suite: str, prompt: str) -> str:
-    return f"{suite}-{hashlib.sha1(prompt.strip().encode('utf-8')).hexdigest()[:10]}"
-
-
-def generate_from_csv(
-    csv_path: str,
-    suite: str,
-    out_dir: str | None = None,
-    prompt_col: str = "user",
-    expected_col: str = "__expected",
-    classifications: dict[str, dict[str, str]] | None = None,
-) -> list[dict[str, Any]]:
-    classifications = classifications or {}
-    cases: list[dict[str, Any]] = []
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        for row in _csv.DictReader(f):
-            prompt = row[prompt_col]
-            metadata: dict[str, Any] = {"suite": suite}
-            for col, val in row.items():
-                if col and col.startswith(_METADATA_PREFIX) and val != "":
-                    metadata[col[len(_METADATA_PREFIX):]] = val
-            labels = classifications.get(prompt.strip()) or classifications.get(prompt) or {}
-            metadata.setdefault("request_type", labels.get("request_type", "unclassified"))
-            metadata.setdefault("domain", labels.get("domain", "unclassified"))
-
-            assertions = []
-            expected = row.get(expected_col)
-            if expected:
-                assertions.append(parse_expected(expected).model_dump(exclude_defaults=True))
-
-            cases.append(
-                {
-                    "id": _stable_id(suite, prompt),
-                    "user": prompt,
-                    "assertions": assertions,
-                    "metadata": metadata,
-                }
-            )
-
-    if out_dir:
-        os.makedirs(out_dir, exist_ok=True)
-        with open(os.path.join(out_dir, f"{suite}.json"), "w", encoding="utf-8") as f:
-            json.dump(cases, f, indent=2, ensure_ascii=False)
     return cases

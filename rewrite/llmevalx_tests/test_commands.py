@@ -30,12 +30,12 @@ def only(sel):
 
 def test_llmeval_runs_under_the_current_interpreter():
     """So the wizard drives the plumbing it is installed beside, not whatever is on PATH."""
-    command = only(Selection(action="run", all_testcases=True, provider="configs/echo.json"))
+    command = only(Selection(action="run", provider="configs/echo.json"))
     assert command.argv[:3] == [sys.executable, "-m", "llmeval"]
 
 
 def test_display_is_what_a_person_would_type():
-    command = only(Selection(action="run", all_testcases=True, provider="configs/echo.json"))
+    command = only(Selection(action="run", provider="configs/echo.json"))
     assert command.display.startswith("llmeval run ")
     assert sys.executable not in command.display
 
@@ -49,29 +49,19 @@ def test_unknown_action_is_rejected():
         raise AssertionError("expected ValueError")
 
 
-# --------------------------------------------------------------------------- testcases
+# --------------------------------------------------------------------------- sources
 
 
-def test_all_testcases_collapses_to_the_directory():
-    command = only(Selection(action="run", all_testcases=True, provider="p.json"))
-    assert "--testcases testcases" in command.display
-    assert command.display.count("--testcases") == 1
+def test_all_sources_passes_no_testcases_flag():
+    """Omitting the flag *is* how the CLI spells "every source"."""
+    assert "--testcases" not in only(Selection(action="run", provider="p.json")).display
 
 
-def test_selected_files_become_one_flag_each():
-    sel = Selection(
-        action="run",
-        testcases=["testcases/simple_facts.json", "testcases/examples.json"],
-        provider="p.json",
-    )
+def test_selected_sources_become_one_flag_each():
+    sel = Selection(action="run", sources=["simple_facts", "examples"], provider="p.json")
     argv = only(sel).argv
     assert argv.count("--testcases") == 2
-    assert "testcases/simple_facts.json" in argv and "testcases/examples.json" in argv
-
-
-def test_empty_testcases_falls_back_to_the_directory():
-    """Defensive: an empty list means the same as 'all', never 'no --testcases at all'."""
-    assert "--testcases testcases" in only(Selection(action="run", provider="p.json")).display
+    assert "simple_facts" in argv and "examples" in argv
 
 
 # --------------------------------------------------------------------------- run
@@ -79,7 +69,7 @@ def test_empty_testcases_falls_back_to_the_directory():
 
 def test_run_passes_timeout_and_concurrency():
     command = only(
-        Selection(action="run", all_testcases=True, provider="p.json",
+        Selection(action="run", provider="p.json",
                   timeout="120", concurrency="8")
     )
     assert "--timeout 120" in command.display
@@ -87,32 +77,32 @@ def test_run_passes_timeout_and_concurrency():
 
 
 def test_run_omits_limit_when_blank():
-    command = only(Selection(action="run", all_testcases=True, provider="p.json", limit=""))
+    command = only(Selection(action="run", provider="p.json", limit=""))
     assert "--limit" not in command.display
 
 
 def test_run_includes_limit_when_given():
-    command = only(Selection(action="run", all_testcases=True, provider="p.json", limit="10"))
+    command = only(Selection(action="run", provider="p.json", limit="10"))
     assert "--limit 10" in command.display
 
 
 def test_run_defaults_to_mode_always():
     """The wizard's default, deliberately not the CLI's `reuse`."""
-    command = only(Selection(action="run", all_testcases=True, provider="p.json"))
+    command = only(Selection(action="run", provider="p.json"))
     assert "--mode always" in command.display
 
 
 def test_run_spells_out_the_mode_even_when_it_matches_the_cli_default():
     """It decides whether the model is called at all, so the echoed command must say it."""
     command = only(
-        Selection(action="run", all_testcases=True, provider="p.json", mode=MODE_REUSE)
+        Selection(action="run", provider="p.json", mode=MODE_REUSE)
     )
     assert "--mode reuse" in command.display
 
 
 def test_target_n_mode_passes_the_count():
     command = only(
-        Selection(action="run", all_testcases=True, provider="p.json",
+        Selection(action="run", provider="p.json",
                   mode=MODE_TARGET_N, target_n="3")
     )
     assert "--mode target_n" in command.display
@@ -122,7 +112,7 @@ def test_target_n_mode_passes_the_count():
 def test_other_modes_omit_the_count():
     """`--target-n` is meaningless outside that mode, and a stale answer must not leak in."""
     command = only(
-        Selection(action="run", all_testcases=True, provider="p.json",
+        Selection(action="run", provider="p.json",
                   mode=MODE_ALWAYS, target_n="3")
     )
     assert "--target-n" not in command.display
@@ -131,25 +121,18 @@ def test_other_modes_omit_the_count():
 def test_grade_and_report_never_pass_a_mode():
     """Neither calls a provider, so the run policy is not theirs to have."""
     grade = only(
-        Selection(action="grade", all_testcases=True, provider="p.json", runs_mode=RUNS_LAST)
+        Selection(action="grade", provider="p.json", runs_mode=RUNS_LAST)
     )
     report = commands_for(
-        Selection(action="report", report_mode="other", all_testcases=True, runs_mode=RUNS_ALL)
+        Selection(action="report", report_mode="other", runs_mode=RUNS_ALL)
     )[0]
     assert "--mode" not in grade.display and "--mode" not in report.display
 
 
-def test_suite_becomes_a_metadata_filter():
-    command = only(
-        Selection(action="run", all_testcases=True, provider="p.json", suite="simple_facts")
-    )
-    assert "--filter suite=simple_facts" in command.display
-
-
-def test_no_suite_means_no_filter():
-    assert "--filter" not in only(
-        Selection(action="run", all_testcases=True, provider="p.json")
-    ).display
+def test_no_suite_filter_is_ever_emitted():
+    """A suite *is* a source now, so `--filter suite=` has nothing to filter on."""
+    sel = Selection(action="run", sources=["simple_facts"], provider="p.json")
+    assert "--filter" not in only(sel).display
 
 
 # --------------------------------------------------------------------------- run selection
@@ -157,7 +140,7 @@ def test_no_suite_means_no_filter():
 
 def test_grade_last_run_uses_run_last_n_one():
     command = only(
-        Selection(action="grade", all_testcases=True, provider="p.json", runs_mode=RUNS_LAST)
+        Selection(action="grade", provider="p.json", runs_mode=RUNS_LAST)
     )
     assert "--run-last-n 1" in command.display
 
@@ -165,14 +148,14 @@ def test_grade_last_run_uses_run_last_n_one():
 def test_all_runs_passes_no_run_selection_flag():
     """The CLI's own default; saying it again more verbosely would only be noise."""
     command = only(
-        Selection(action="grade", all_testcases=True, provider="p.json", runs_mode=RUNS_ALL)
+        Selection(action="grade", provider="p.json", runs_mode=RUNS_ALL)
     )
     assert "--run-" not in command.display
 
 
 def test_specific_runs_repeat_the_run_id_flag():
     sel = Selection(
-        action="grade", all_testcases=True, provider="p.json",
+        action="grade", provider="p.json",
         runs_mode=RUNS_SPECIFIC, run_ids=["run_a", "run_b"],
     )
     argv = only(sel).argv
@@ -182,7 +165,7 @@ def test_specific_runs_repeat_the_run_id_flag():
 
 def test_grade_never_passes_run_options():
     command = only(
-        Selection(action="grade", all_testcases=True, provider="p.json", runs_mode=RUNS_LAST)
+        Selection(action="grade", provider="p.json", runs_mode=RUNS_LAST)
     )
     assert "--timeout" not in command.display and "--concurrency" not in command.display
 
@@ -190,22 +173,19 @@ def test_grade_never_passes_run_options():
 # --------------------------------------------------------------------------- generate
 
 
-def test_generate_all_uses_the_all_flag():
-    command = only(Selection(action="generate", generate_all=True))
-    assert "generate --all --out testcases" in command.display
+def test_generate_with_no_sources_generates_everything():
+    assert only(Selection(action="generate")).display == "llmeval generate"
 
 
-def test_generate_named_suites_repeats_the_suite_flag():
-    argv = only(Selection(action="generate", generate_suites=["a", "b"])).argv
-    assert argv.count("--suite") == 2
+def test_generate_named_plugins_repeats_the_testcases_flag():
+    argv = only(Selection(action="generate", sources=["a", "b"])).argv
+    assert argv.count("--testcases") == 2
     assert "a" in argv and "b" in argv
 
 
 def test_generate_ignores_provider_and_runs():
     """generate has neither, so a stale answer from an earlier pass must not leak in."""
-    command = only(
-        Selection(action="generate", generate_all=True, provider="p.json", runs_mode=RUNS_LAST)
-    )
+    command = only(Selection(action="generate", provider="p.json", runs_mode=RUNS_LAST))
     assert "--provider" not in command.display and "--run-" not in command.display
 
 
@@ -213,14 +193,14 @@ def test_generate_ignores_provider_and_runs():
 
 
 def test_report_is_select_then_render():
-    sel = Selection(action="report", report_mode="other", all_testcases=True, runs_mode=RUNS_ALL)
+    sel = Selection(action="report", report_mode="other", runs_mode=RUNS_ALL)
     select, render = commands_for(sel)
     assert select.display.startswith("llmeval report ")
     assert render.display.startswith("python -m reporting.csv_table ")
 
 
 def test_report_renders_the_csv_it_just_wrote():
-    sel = Selection(action="report", report_mode="other", all_testcases=True, runs_mode=RUNS_ALL)
+    sel = Selection(action="report", report_mode="other", runs_mode=RUNS_ALL)
     select, render = commands_for(sel)
     assert "--out results.csv" in select.display
     assert render.argv[3] == "results.csv"
@@ -228,23 +208,23 @@ def test_report_renders_the_csv_it_just_wrote():
 
 
 def test_report_last_run_needs_no_other_answers():
-    """The one-keypress path: last run, all test cases, every provider."""
+    """The one-keypress path: last run, every source, every provider."""
     select, render = commands_for(Selection(action="report", report_mode="last"))
     assert "--run-last-n 1" in select.display
-    assert "--testcases testcases" in select.display
+    assert "--testcases" not in select.display
     assert "--provider" not in select.display
     assert "last run" in render.display
 
 
 def test_report_all_providers_omits_the_provider_flag():
-    sel = Selection(action="report", report_mode="other", all_testcases=True, provider=None)
+    sel = Selection(action="report", report_mode="other", provider=None)
     assert "--provider" not in commands_for(sel)[0].display
 
 
 def test_report_title_names_the_selection():
     sel = Selection(
-        action="report", report_mode="other", all_testcases=True,
-        provider="configs/fidaro_dev.json", suite="simple_facts", runs_mode=RUNS_LAST,
+        action="report", report_mode="other",
+        provider="configs/fidaro_dev.json", sources=["simple_facts"], runs_mode=RUNS_LAST,
     )
     title = commands_for(sel)[1].argv[-1]
     assert "fidaro_dev" in title and "simple_facts" in title and "last run" in title

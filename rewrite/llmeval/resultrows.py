@@ -33,17 +33,11 @@ from __future__ import annotations
 import csv
 import json
 import os
-import re
 from typing import Any, Mapping, Sequence
 
 from llmeval.models import TestCase, last_user_text
+from llmeval.plugins.loader import source_of
 from llmeval.store import ResultRow, RunRow, Store
-
-# Test ids are ``<suite>-<sha1(prompt)[:10]>[-<variant>]`` (llmeval/generation/common.py),
-# so the suite cannot be recovered by splitting on "-": that would turn
-# "research_rubrics-abc1234567-geval" into "research_rubrics-abc1234567". Anchoring on the
-# 10-hex digest is unambiguous. Only a fallback — testcase metadata is authoritative.
-_ID_SUITE = re.compile(r"^(?P<suite>.+?)-[0-9a-f]{10}(?:-.*)?$")
 
 # Column order is the reading order of the report: where it came from, what was asked, what
 # came back, how it scored, then the provenance you only want when something looks wrong.
@@ -53,7 +47,6 @@ _RUN_COLUMNS = ["run_id", "run_started_at", "provider"]
 # is the complete record behind it, which is the only place a system prompt or an earlier
 # turn of a conversation survives.
 _BASE_COLUMNS = ["test_id", "attempt", "suite", "prompt", "messages"]
-_TEST_COLUMNS = ["request_type", "domain"]
 _RESULT_COLUMNS = [
     "output",
     "reasoning",
@@ -77,18 +70,15 @@ _GRADING_COLUMNS = [
 _PROVENANCE_COLUMNS = ["cache_key_hash", "result_id"]
 
 
-def suite_of(test_id: str, case: TestCase | None) -> str | None:
-    """The test's suite: metadata first, id-shape fallback second.
+def suite_of(test_id: str) -> str | None:
+    """The source a test came from, read off its id prefix.
 
-    Every generator writes ``suite`` into metadata, so with test cases loaded this is exact.
-    Without them the id pattern is the only signal available.
+    Ids are ``<source>.<local id>`` (see :mod:`llmeval.plugins.loader`), so the provenance is
+    in the id itself: no metadata lookup, no test-case files, and nothing that can disagree
+    with where the test actually lives. An id with no prefix predates the plugin system and
+    has no source to report.
     """
-    if case is not None:
-        suite = case.metadata.get("suite")
-        if suite is not None:
-            return str(suite)
-    match = _ID_SUITE.match(test_id)
-    return match.group("suite") if match else None
+    return source_of(test_id)
 
 
 def _text(value: str | None) -> str | None:
@@ -137,21 +127,16 @@ def _tokens(result: ResultRow) -> dict[str, Any]:
     }
 
 
-def result_columns(with_tests: bool) -> list[str]:
-    """The column order for a result-rows report.
+def result_columns() -> list[str]:
+    """The column order for a result-rows report. Fixed — nothing here is conditional.
 
-    ``with_tests`` follows whether test cases were loaded. The classification columns are
-    then *absent* rather than empty — an absent column says "you didn't ask for this", an
-    empty one says "there was nothing to show", and they are different answers.
-
-    ``prompt`` and ``messages`` are **not** conditional: the result carries its own copy of
-    what was sent, so the question is in the report whether or not you passed
-    ``--testcases``.
+    Every column is derivable from the stored result, ``suite`` included (it is the test id's
+    prefix), so the report has the same shape whether or not ``--testcases`` narrowed it.
     """
-    cols = list(_RUN_COLUMNS) + list(_BASE_COLUMNS)
-    if with_tests:
-        cols += _TEST_COLUMNS
-    return cols + _RESULT_COLUMNS + _GRADING_COLUMNS + _PROVENANCE_COLUMNS
+    return (
+        list(_RUN_COLUMNS) + list(_BASE_COLUMNS)
+        + _RESULT_COLUMNS + _GRADING_COLUMNS + _PROVENANCE_COLUMNS
+    )
 
 
 def _prompt_fields(result: ResultRow, case: TestCase | None) -> dict[str, Any]:
@@ -185,7 +170,7 @@ def _shared_fields(run: RunRow, result: ResultRow, case: TestCase | None) -> dic
         "provider": run.provider_name,
         "test_id": result.test_id,
         "attempt": result.attempt,
-        "suite": suite_of(result.test_id, case),
+        "suite": suite_of(result.test_id),
         **_prompt_fields(result, case),
         "output": _text(result.output),
         "reasoning": _text(result.reasoning),
@@ -205,14 +190,15 @@ def result_rows(
 ) -> list[dict[str, Any]]:
     """Flatten the given runs into report rows, in the order ``runs`` arrives in.
 
-    :param cases_by_id: test cases keyed by id. When given it **selects as well as
-        enriches** — a result whose test is absent is dropped, which is what makes
-        ``--filter k=v`` mean anything and matches how ``run`` and ``grade`` already treat
-        ``--testcases``. Pass ``None`` for every result, unfiltered and unenriched; the
-        prompt is present either way, since it is stored on the result.
+    :param cases_by_id: test cases keyed by id. When given it **selects**: a result whose
+        test is absent is dropped, which is what makes ``--testcases``/``--filter`` mean
+        anything on a report. Pass ``None`` for every result — the useful default now that
+        plugin output is regenerated rather than tracked, since a run should outlive its
+        test cases. Every column is filled either way; the case is only a fallback for the
+        prompt on results written before the store recorded messages.
     """
     with_tests = cases_by_id is not None
-    columns = result_columns(with_tests)
+    columns = result_columns()
     rows: list[dict[str, Any]] = []
 
     for run in runs:
@@ -221,9 +207,6 @@ def result_rows(
                 continue
             case = cases_by_id.get(result.test_id) if with_tests else None
             shared = _shared_fields(run, result, case)
-            if with_tests:
-                shared["request_type"] = case.metadata.get("request_type") if case else None
-                shared["domain"] = case.metadata.get("domain") if case else None
 
             # An errored attempt is never graded (``grade`` skips error rows), so this is
             # stated rather than discovered: the row exists to show the failure, and

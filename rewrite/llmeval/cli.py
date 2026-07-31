@@ -1,19 +1,22 @@
 """Command-line interface — one subcommand per pipeline stage.
 
-    llmeval generate-csv --csv f.csv --suite facts --out testcases/
-    llmeval run      --testcases testcases/ --provider configs/fidaro_prod.json
-    llmeval grade    --testcases testcases/ --provider configs/fidaro_prod.json --run-last-n 1
-    llmeval pickbest --testcases testcases/ --providers a.json b.json --order both
-    llmeval report   --run-last-n 3 --testcases testcases/ --out results.csv
+    llmeval generate --testcases simple_facts
+    llmeval run      --testcases simple_facts --provider configs/fidaro_prod.json
+    llmeval grade    --testcases simple_facts --provider configs/fidaro_prod.json --run-last-n 1
+    llmeval pickbest --testcases simple_facts --providers a.json b.json --order both
+    llmeval report   --run-last-n 3 --out results.csv
     llmeval compare-report --providers a.json b.json --baseline fidaro-prod --out report.html
 
 Stages share a SQLite DB (``--db``, default ./llmeval.sqlite3). run/grade/pickbest/report
 all read cached results — only ``run`` ever calls the model under test.
 
-``--testcases`` is repeatable everywhere it appears, so a subset of files is expressible
-without arranging them into a directory first:
+``--testcases`` names a **source** — a plugin directory or a ``.json`` stem inside
+``testcases/`` — and is repeatable. Omit it for every source:
 
-    llmeval run --testcases testcases/simple_facts.json --testcases testcases/examples.json ...
+    llmeval run --testcases simple_facts --testcases examples --provider configs/echo.json
+
+Plugins are loaded on every invocation (see :mod:`llmeval.plugins.loader`), so a plugin's
+custom assertions and lifecycle hooks are in play for whichever stage is running.
 
 ``grade`` and ``report`` both read stored results, so both take the same run-selection
 flags (``--run-id``, ``--run-after``/``--run-before``, ``--run-last-n``); see
@@ -35,14 +38,6 @@ import os
 
 from llmeval.comparison.pickbest import DEFAULT_CRITERION, comparison_key, pick_best
 from llmeval.comparison.report import write_report
-from llmeval.generation.csv_source import generate_from_csv
-from llmeval.generation.suites import (
-    GenPaths,
-    SUITES,
-    all_suite_names,
-    default_paths,
-    write_suite,
-)
 from llmeval.grade import grade
 from llmeval.logs import configure_logging
 from llmeval.models import ProviderConfig
@@ -51,7 +46,7 @@ from llmeval.resultrows import result_columns, result_rows, write_csv
 from llmeval.runner import RunPolicy, run
 from llmeval.runselect import RunSelectionError, parse_run_selection, resolve_runs
 from llmeval.store import IncompatibleSchema, Store
-from llmeval.testcases import load_all_testcases, select_testcases
+from llmeval.testcases import DEFAULT_ROOT, SourceError, load_testcases, select_testcases
 
 logger = logging.getLogger(__name__)
 
@@ -104,55 +99,40 @@ def _cache_key_hashes(paths: list[str] | None) -> list[str] | None:
     return [load_provider_config(p).cache_key().hash for p in paths]
 
 
-def cmd_generate_csv(args) -> int:
-    cases = generate_from_csv(
-        args.csv, suite=args.suite, out_dir=args.out,
-        prompt_col=args.prompt_col, expected_col=args.expected_col,
-    )
-    logger.info(
-        "generated %d test case(s) for suite %r -> %s", len(cases), args.suite, args.out
-    )
-    return 0
-
-
 def cmd_generate(args) -> int:
-    if not args.all and not args.suite:
-        logger.error("pass --suite NAME (repeatable) or --all")
-        return 2
-    names = all_suite_names() if args.all else list(args.suite)
-    unknown = [n for n in names if n not in SUITES]
-    if unknown:
-        logger.error("unknown suite(s) %s; known: %s", unknown, sorted(SUITES))
-        return 2
+    """Ask each selected plugin to prepare its test cases.
 
-    base = default_paths(args.config)
-    paths = GenPaths(
-        data_dir=args.data_dir or base.data_dir,
-        classifications_dir=args.classifications_dir or base.classifications_dir,
-        generation_sources_dir=args.sources_dir or base.generation_sources_dir,
-        config_path=args.config or base.config_path,
-    )
+    Every plugin is attempted even if an earlier one failed: generation is per-plugin work
+    and one broken download should not deny you the other five suites. The exit code still
+    says something went wrong.
+    """
+    loaded = load_testcases(names=args.testcases or None)
+    plugins = [s for s in loaded.sources if s.is_plugin]
+    if not plugins:
+        logger.warning("no plugins to generate in %s/", DEFAULT_ROOT)
+        return 0
     rc = 0
-    for name in names:
+    for source in plugins:
         try:
-            count = write_suite(name, args.out, paths)
-        except FileNotFoundError as exc:
-            # --all is lenient (datasets may not be downloaded); explicit --suite
-            # is a hard error so a typo or missing source is not silently ignored.
-            if args.all:
-                logger.warning("skipped suite %r: %s", name, exc)
-                continue
-            logger.error("cannot generate suite %r: %s", name, exc)
+            ok = source.plugin.generate_testcases()
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.error("%s: generation raised (%s)", source.name, exc)
             rc = 1
             continue
-        logger.info("generated %d test case(s) for suite %r -> %s", count, name, args.out)
+        if ok:
+            logger.info("%s: generated", source.name)
+        else:
+            logger.error("%s: generation reported failure", source.name)
+            rc = 1
     return rc
 
 
 def cmd_run(args) -> int:
     store = Store(args.db)
-    tcs = load_all_testcases(args.testcases, _filters(args.filter))
-    tcs = select_testcases(tcs, limit=args.limit, randomize=args.randomize, seed=args.seed)
+    loaded = load_testcases(names=args.testcases or None, filters=_filters(args.filter))
+    tcs = select_testcases(
+        loaded.cases, limit=args.limit, randomize=args.randomize, seed=args.seed
+    )
     provider = build_provider(load_provider_config(args.provider))
     policy = RunPolicy(
         mode=args.mode,
@@ -161,7 +141,9 @@ def cmd_run(args) -> int:
         concurrency=args.concurrency,
         timeout=args.timeout,
     )
-    result = run(store, tcs, provider, policy, notes=args.note)
+    # Hooks are scoped to the cases actually selected, so --limit or a filter that excludes
+    # a plugin entirely also excludes its before_run.
+    result = run(store, tcs, provider, policy, notes=args.note, hooks=loaded.hooks(tcs))
     summary = result.summary
     # The run's headline. Logged at the end as well as the start (see runner.run) because
     # this is the line a human reads to decide whether to look at the store at all.
@@ -178,7 +160,8 @@ def cmd_run(args) -> int:
 def cmd_grade(args) -> int:
     store = Store(args.db)
     try:
-        tcs = load_all_testcases(args.testcases, _filters(args.filter))
+        loaded = load_testcases(names=args.testcases or None, filters=_filters(args.filter))
+        tcs = loaded.cases
         cfg = load_provider_config(args.provider)
         key_hash = cfg.cache_key().hash
         run_ids = [r.id for r in resolve_runs(store, _run_selection(args), [key_hash])]
@@ -189,7 +172,10 @@ def cmd_grade(args) -> int:
             "grading %d test(s) over %d run(s) for %r (regrade=%s)",
             len(tcs), len(run_ids), cfg.name, args.regrade,
         )
-        grade(store, tcs, key_hash, judge=_judge(args), regrade=args.regrade, run_ids=run_ids)
+        grade(
+            store, tcs, key_hash, judge=_judge(args), regrade=args.regrade,
+            run_ids=run_ids, hooks=loaded.hooks(tcs),
+        )
         logger.info("graded %d test(s) for %r", len(tcs), cfg.name)
         return 0
     finally:
@@ -198,7 +184,7 @@ def cmd_grade(args) -> int:
 
 def cmd_pickbest(args) -> int:
     store = Store(args.db)
-    tcs = load_all_testcases(args.testcases, _filters(args.filter))
+    tcs = load_testcases(names=args.testcases or None, filters=_filters(args.filter)).cases
     configs = [load_provider_config(p) for p in args.providers]
     logger.info(
         "pick-best over %d config(s), %d test(s), order=%s", len(configs), len(tcs), args.order
@@ -217,6 +203,10 @@ def cmd_report(args) -> int:
 
         llmeval report --run-last-n 3 --out rows.csv
         python -m reporting.csv_table rows.csv -o rows.html
+
+    ``--testcases``/``--filter`` narrow *which* results appear. Neither is required: the
+    prompt, the answer and the suite all come off the stored result, so a report needs no
+    test-case files at all.
     """
     if not os.path.exists(args.db):
         # sqlite3.connect would happily create an empty database, and the user would get
@@ -226,13 +216,15 @@ def cmd_report(args) -> int:
     store = Store(args.db)
     try:
         runs = resolve_runs(store, _run_selection(args), _cache_key_hashes(args.provider))
+        # Selection stays opt-in. Without --testcases/--filter every stored result is
+        # reported, so a run outlives the regeneration (or removal) of its test cases —
+        # which matters more now that plugin output is not tracked in git.
         cases_by_id = None
-        if args.testcases:
-            cases_by_id = {
-                c.id: c for c in load_all_testcases(args.testcases, _filters(args.filter))
-            }
+        if args.testcases or args.filter:
+            loaded = load_testcases(names=args.testcases or None, filters=_filters(args.filter))
+            cases_by_id = {c.id: c for c in loaded.cases}
         rows = result_rows(store, runs, cases_by_id)
-        columns = result_columns(cases_by_id is not None)
+        columns = result_columns()
     finally:
         store.close()
     write_csv(rows, columns, args.out)
@@ -253,34 +245,10 @@ def cmd_compare_report(args) -> int:
 
 
 def _add_generate_parser(sub) -> None:
-    g = sub.add_parser("generate-csv", help="transform a CSV into standardized test cases")
-    g.add_argument("--csv", required=True)
-    g.add_argument("--suite", required=True)
-    g.add_argument("--out", required=True, help="output directory")
-    g.add_argument("--prompt-col", default="user")
-    g.add_argument("--expected-col", default="__expected")
-    g.set_defaults(func=cmd_generate_csv)
-
     gen = sub.add_parser(
-        "generate",
-        help="generate one or more named suites (simple_facts, agentharm_refusal, "
-        "multifaceted, research_rubrics, stock_prices, ...)",
+        "generate", help="ask each plugin in testcases/ to prepare its test cases"
     )
-    gen.add_argument(
-        "--suite", action="append", default=[],
-        help="suite name (repeatable); see --all for the full set",
-    )
-    gen.add_argument(
-        "--all", action="store_true",
-        help="generate every suite except network ones (stock_prices needs --suite)",
-    )
-    gen.add_argument("--out", default="testcases", help="output directory (default testcases/)")
-    gen.add_argument(
-        "--config", help="suite-generation config JSON (env SUITE_GENERATION_CONFIG_FILE)"
-    )
-    gen.add_argument("--data-dir", help="dir holding dataset JSON (default: repo-root data/)")
-    gen.add_argument("--classifications-dir", help="dir holding <suite>.json label files")
-    gen.add_argument("--sources-dir", help="dir holding CSV sources (default: generation_sources/)")
+    _add_testcases(gen)
     gen.set_defaults(func=cmd_generate)
 
 
@@ -288,17 +256,18 @@ def _add_db(sp) -> None:
     sp.add_argument("--db", default=DEFAULT_DB, help="SQLite results DB")
 
 
-def _add_testcases(sp, required: bool = True, extra_help: str = "") -> None:
-    """The repeatable ``--testcases`` flag. Shared so the four stages cannot drift apart.
+def _add_testcases(sp) -> None:
+    """The repeatable ``--testcases`` flag. Shared so the stages cannot drift apart.
 
-    Repeatable because a *subset* of the testcase files is otherwise inexpressible: a single
-    path is one file or one whole directory, and metadata filters slice by label rather than
-    by file. Overlapping paths de-duplicate by test id (see
-    :func:`llmeval.testcases.load_all_testcases`).
+    A **source name**, not a path: a plugin directory or a ``.json`` stem inside
+    ``testcases/``. Omitted means every source. The root is always ``testcases/`` relative to
+    the working directory — there is deliberately no flag for it, because a project is a
+    directory and moving the test cases out of it is not a thing the CLI should encourage.
     """
     sp.add_argument(
-        "--testcases", action="append", required=required, metavar="PATH",
-        help="testcases dir or file (repeatable)" + extra_help,
+        "--testcases", action="append", metavar="NAME",
+        help="source name — a plugin directory or .json stem in testcases/ "
+             "(repeatable; default: all)",
     )
 
 
@@ -385,11 +354,7 @@ def _add_report_parsers(sub) -> None:
         "--provider", action="append",
         help="provider config JSON (repeatable; default: every provider in the DB)",
     )
-    _add_testcases(
-        rp, required=False,
-        extra_help="; selects which tests appear and adds the request_type and domain "
-        "columns (the prompt is stored on the result, so it is always present)",
-    )
+    _add_testcases(rp)
     _add_db(rp)
     _add_filters(rp)
     _add_run_selection(rp)
@@ -437,7 +402,7 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(getattr(args, "log_level", None))
     try:
         return args.func(args)
-    except (IncompatibleSchema, RunSelectionError) as exc:
+    except (IncompatibleSchema, RunSelectionError, SourceError) as exc:
         # Expected conditions (a DB from an older build, a selection that cannot be
         # satisfied), not bugs — a message, no traceback.
         logger.error("%s", exc)

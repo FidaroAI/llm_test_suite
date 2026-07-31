@@ -1,7 +1,15 @@
-"""Test generation — strictly separate from running.
+"""Shared machinery for test-case plugins — strictly separate from running.
 
-Generators transform a source (CSV, dataset, hand-written) into the standardized
-test-case JSON consumed by the runner. The generated data lives in its own directory
-(e.g. ``testcases/``) so it can be inspected before any run — unlike opaque
-``*_gen.py`` test factories that only materialise at run time.
+Nothing here generates a suite of its own any more. The suites live in ``testcases/`` as
+plugins (see :mod:`llmeval.plugins`); this package is the library they build on, so that
+"parse a CSV" or "page a Hugging Face dataset" is written once rather than per plugin:
+
+* :mod:`~llmeval.generation.common` — stable local test ids
+* :mod:`~llmeval.generation.csv_source` — CSV rows to test-case dicts
+* :mod:`~llmeval.generation.csv_plugin` — a whole CSV-backed plugin
+* :mod:`~llmeval.generation.hf_rows` — the Hugging Face datasets-server paging loop
+* :mod:`~llmeval.generation.dataset_plugin` — a whole dataset-backed plugin
+
+The dependency runs one way: plugins import this, and nothing here knows which plugins
+exist.
 """

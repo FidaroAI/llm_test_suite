@@ -86,9 +86,9 @@ def test_no_steps_completes_immediately():
 # --------------------------------------------------------------------------- step lists
 
 
-def test_generate_asks_only_for_suites():
+def test_generate_asks_only_which_plugins():
     steps = app.steps_for(Selection(action="generate"))
-    assert steps == [app.step_action, app.step_generate_suites]
+    assert steps == [app.step_action, app.step_generate_sources]
 
 
 def test_run_never_asks_about_runs():
@@ -155,7 +155,6 @@ def test_report_other_data_asks_the_unified_questions():
         app.step_report_mode,
         app.step_testcases,
         app.step_provider,
-        app.step_suite,
         app.step_runs,
     ]
 
@@ -169,66 +168,70 @@ def test_switching_report_mode_reshapes_the_remaining_steps():
     sel = Selection(action="report", report_mode="last")
     assert len(app.steps_for(sel)) == 2
     sel.report_mode = "other"
-    assert len(app.steps_for(sel)) == 6
+    assert len(app.steps_for(sel)) == 5
 
 
 # --------------------------------------------------------------------------- steps
 
 
-def test_choosing_fewer_testcases_drops_a_now_impossible_suite_filter(tmp_path, monkeypatch):
-    """A filter left over from a wider selection could match nothing at all."""
+def source_tree(tmp_path, monkeypatch, *names):
     import json
 
     tc = tmp_path / "testcases"
     tc.mkdir()
-    (tc / "alpha.json").write_text(
-        json.dumps([{"id": "a", "user": "q?", "metadata": {"suite": "alpha"}}]), encoding="utf-8"
-    )
-    (tc / "beta.json").write_text(
-        json.dumps([{"id": "b", "user": "q?", "metadata": {"suite": "beta"}}]), encoding="utf-8"
-    )
+    for name in names:
+        (tc / f"{name}.json").write_text(
+            json.dumps([{"id": "x", "user": "q?"}]), encoding="utf-8"
+        )
     monkeypatch.setattr(app, "TESTCASES_DIR", str(tc))
-    monkeypatch.setattr(app.prompts, "checkbox", lambda *_a, **_k: [str(tc / "alpha.json")])
-
-    sel = Selection(action="run", suite="beta")
-    assert app.step_testcases(sel) is None
-    assert sel.suite is None
+    return tc
 
 
-def test_keeping_a_still_valid_suite_filter(tmp_path, monkeypatch):
-    import json
-
-    tc = tmp_path / "testcases"
-    tc.mkdir()
-    (tc / "alpha.json").write_text(
-        json.dumps([{"id": "a", "user": "q?", "metadata": {"suite": "alpha"}}]), encoding="utf-8"
-    )
-    monkeypatch.setattr(app, "TESTCASES_DIR", str(tc))
-    monkeypatch.setattr(app.prompts, "checkbox", lambda *_a, **_k: [str(tc / "alpha.json")])
-
-    sel = Selection(action="run", suite="alpha")
-    app.step_testcases(sel)
-    assert sel.suite == "alpha"
-
-
-def test_all_testcases_sets_the_flag_not_a_file_list(tmp_path, monkeypatch):
-    import json
-
-    tc = tmp_path / "testcases"
-    tc.mkdir()
-    (tc / "alpha.json").write_text(json.dumps([{"id": "a", "user": "q?"}]), encoding="utf-8")
-    monkeypatch.setattr(app, "TESTCASES_DIR", str(tc))
-    monkeypatch.setattr(app.prompts, "checkbox", lambda *_a, **_k: [app.ALL])
+def test_choosing_sources_records_their_names_not_paths(tmp_path, monkeypatch):
+    source_tree(tmp_path, monkeypatch, "alpha", "beta")
+    monkeypatch.setattr(app.prompts, "checkbox", lambda *_a, **_k: ["alpha"])
 
     sel = Selection(action="run")
+    assert app.step_testcases(sel) is None
+    assert sel.sources == ["alpha"]
+
+
+def test_all_sources_is_the_empty_list(tmp_path, monkeypatch):
+    """Because omitting --testcases is how the CLI spells "every source"."""
+    source_tree(tmp_path, monkeypatch, "alpha")
+    monkeypatch.setattr(app.prompts, "checkbox", lambda *_a, **_k: [app.ALL])
+
+    sel = Selection(action="run", sources=["stale"])
     app.step_testcases(sel)
-    assert sel.all_testcases is True and sel.testcases == []
+    assert sel.sources == []
+
+
+def test_generate_offers_plugins_only(tmp_path, monkeypatch):
+    """A .json source is already made; there is nothing to generate for it."""
+    tc = source_tree(tmp_path, monkeypatch, "handwritten")
+    (tc / "facts").mkdir()
+    (tc / "facts" / "__init__.py").write_text(
+        "from llmeval.plugins import TestCasePlugin\n"
+        "class P(TestCasePlugin):\n"
+        "    def generate_testcases(self): return True\n"
+        "    def get_testcases(self): return []\n"
+        "def get_plugin(i): return P()\n",
+        encoding="utf-8",
+    )
+    offered = {}
+    monkeypatch.setattr(
+        app.prompts, "checkbox",
+        lambda _m, choices: offered.setdefault("values", [c.value for c in choices]) or [app.ALL],
+    )
+    app.step_generate_sources(Selection(action="generate"))
+    assert "facts" in offered["values"]
+    assert "handwritten" not in offered["values"]
 
 
 def test_no_testcases_on_disk_backs_out(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(app, "TESTCASES_DIR", str(tmp_path / "empty"))
     assert app.step_testcases(Selection(action="run")) is BACK
-    assert "generate" in capsys.readouterr().out
+    assert "No test-case sources" in capsys.readouterr().out
 
 
 def test_all_providers_becomes_no_provider_flag(tmp_path, monkeypatch):

@@ -1,11 +1,11 @@
 """What is available to choose from — read off disk and out of the store, never hardcoded.
 
-Every menu in the wizard is populated from here, so adding a suite file or a provider config
-makes it appear without touching this package. Four sources:
+Every menu in the wizard is populated from here, so adding a plugin or a provider config
+makes it appear without touching this package. Three sources:
 
-* `testcases/*.json` — the test-case files, with their case counts and suite labels
+* `testcases/` — the sources, via the loader, so a menu entry cannot drift from what
+  `--testcases` will actually accept
 * `configs/*.json` — the provider configs
-* :data:`llmeval.generation.suites.SUITES` — what `generate` can produce
 * the SQLite store — the runs available to grade or report on
 
 Reading the store directly is supported: the schema is one of the plumbing's three public
@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Sequence
+from pathlib import Path
+from typing import Any, Sequence
 
-from llmeval.generation.suites import SUITES
+from llmeval.plugins.loader import SourceError, discover
 from llmeval.store import IncompatibleSchema, RunRow, Store
 
 # A provider config whose ``name`` is this grades other providers' output; it is never the
@@ -28,16 +29,18 @@ JUDGE_CONFIG_NAME = "judge"
 
 
 @dataclass(frozen=True)
-class TestcaseFile:
-    path: str          # relative, e.g. "testcases/simple_facts.json"
-    name: str          # "simple_facts.json"
-    count: int
-    suites: tuple[str, ...]
+class SourceChoice:
+    """One thing `--testcases` can name: a plugin directory or a top-level .json file."""
+
+    name: str
+    kind: str          # "plugin" | "json"
+    count: int         # test cases it currently yields; 0 for an ungenerated plugin
 
     @property
     def label(self) -> str:
         cases = "case" if self.count == 1 else "cases"
-        return f"{self.name}  ({self.count} {cases})"
+        suffix = "  (not generated yet)" if self.kind == "plugin" and not self.count else ""
+        return f"{self.name}  [{self.kind}]  ({self.count} {cases}){suffix}"
 
 
 @dataclass(frozen=True)
@@ -49,16 +52,6 @@ class ProviderConfigFile:
     @property
     def label(self) -> str:
         return f"{self.name}  [{self.model}]  {self.path}"
-
-
-@dataclass(frozen=True)
-class SuiteChoice:
-    name: str
-    network: bool
-
-    @property
-    def label(self) -> str:
-        return f"{self.name}  (needs network)" if self.network else self.name
 
 
 @dataclass
@@ -83,9 +76,8 @@ class RunChoice:
 class Available:
     """Everything the wizard can offer, gathered in one pass."""
 
-    testcase_files: list[TestcaseFile] = field(default_factory=list)
+    sources: list[SourceChoice] = field(default_factory=list)
     providers: list[ProviderConfigFile] = field(default_factory=list)
-    suites: list[SuiteChoice] = field(default_factory=list)
 
 
 def _read_json(path: str) -> Any:
@@ -93,35 +85,31 @@ def _read_json(path: str) -> Any:
         return json.load(fh)
 
 
-def list_testcase_files(directory: str) -> list[TestcaseFile]:
-    """The `.json` files in `directory`, with case counts and the suites inside each.
+def list_sources(directory: str) -> list[SourceChoice]:
+    """Every source under `directory`, via the loader, so the menu matches the CLI exactly.
 
-    Reads the raw JSON rather than building `TestCase` objects: the menu only needs a count
-    and the `suite` labels, and a half-written file should grey out one entry rather than
-    stop the whole wizard from starting.
+    A plugin that has not generated yet shows a count of 0 rather than being hidden:
+    "generate this one" is precisely what someone looking at this menu is about to want.
+    A source that cannot be read at all contributes 0 too — one broken entry should grey
+    itself out, not stop the wizard from starting.
     """
-    if not os.path.isdir(directory):
+    try:
+        sources = discover(Path(directory))
+    except SourceError:
         return []
-    out: list[TestcaseFile] = []
-    for name in sorted(os.listdir(directory)):
-        if not name.endswith(".json"):
-            continue
-        path = os.path.join(directory, name)
+    out: list[SourceChoice] = []
+    for source in sources:
         try:
-            doc = _read_json(path)
-        except (OSError, json.JSONDecodeError):
-            continue
-        cases = doc if isinstance(doc, list) else [doc]
-        suites = sorted(
-            {
-                str(suite)
-                for case in cases
-                if isinstance(case, dict)
-                for suite in [(case.get("metadata") or {}).get("suite")]
-                if suite
-            }
+            count = len(source.raw_testcases())
+        except Exception:  # pylint: disable=broad-exception-caught
+            count = 0
+        out.append(
+            SourceChoice(
+                name=source.name,
+                kind="plugin" if source.is_plugin else "json",
+                count=count,
+            )
         )
-        out.append(TestcaseFile(path=path, name=name, count=len(cases), suites=tuple(suites)))
     return out
 
 
@@ -153,18 +141,9 @@ def list_provider_configs(directory: str) -> list[ProviderConfigFile]:
     return out
 
 
-def list_generatable_suites() -> list[SuiteChoice]:
-    """What `llmeval generate` knows how to produce, straight from the suite registry."""
-    return [SuiteChoice(name=spec.name, network=spec.network) for spec in SUITES.values()]
-
-
-def suites_in(files: Iterable[TestcaseFile]) -> list[str]:
-    """The suite labels present across the chosen files — the `--filter suite=` options.
-
-    Derived from the selection rather than from every file on disk, so the filter menu can
-    never offer a suite that the chosen test cases do not contain.
-    """
-    return sorted({suite for f in files for suite in f.suites})
+def generatable_sources(sources: Sequence[SourceChoice]) -> list[SourceChoice]:
+    """The sources `llmeval generate` can act on — the plugins. A .json file is already made."""
+    return [s for s in sources if s.kind == "plugin"]
 
 
 def _format_started(started_at: str) -> str:
@@ -208,7 +187,6 @@ def list_runs(db_path: str, limit: int | None = 50) -> list[RunChoice]:
 
 def gather(testcases_dir: str, configs_dir: str) -> Available:
     return Available(
-        testcase_files=list_testcase_files(testcases_dir),
+        sources=list_sources(testcases_dir),
         providers=list_provider_configs(configs_dir),
-        suites=list_generatable_suites(),
     )
