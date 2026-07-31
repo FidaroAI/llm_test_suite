@@ -331,6 +331,52 @@ def test_the_testcase_supplies_the_prompt_for_rows_predating_the_store_change(st
     assert row["prompt"] == "the prompt"
 
 
+# --- provider-specific output -------------------------------------------
+
+
+def test_provider_specific_output_is_serialised_verbatim(store):
+    """The whole object, unparsed: a new vendor key must need no change here."""
+    import json as jsonmod
+
+    run = a_run(store, KEY)
+    sent = {"fidaro": {"title": "Capital of France", "something_new": [1, 2]}}
+    store.add_result_row("t-0123456789", run_id=run, output="x", provider_specific=sent)
+    row = result_rows(store, runs_of(store, run))[0]
+    assert jsonmod.loads(row["provider_specific_output"]) == sent
+
+
+def test_provider_specific_output_is_empty_when_the_provider_sent_none(store):
+    """Most providers send nothing; that must be an empty cell, not the string "None"."""
+    run = a_run(store, KEY)
+    store.add_result_row("t-0123456789", run_id=run, output="x")
+    assert result_rows(store, runs_of(store, run))[0]["provider_specific_output"] is None
+
+
+def test_provider_specific_output_is_on_an_error_row_too(store):
+    """A stream that timed out may have delivered its side-channel data before it stalled."""
+    import json as jsonmod
+
+    run = a_run(store, KEY)
+    store.add_result_row(
+        "t-0123456789",
+        run_id=run,
+        output="partial",
+        error="stream timeout after 60.0s",
+        provider_specific={"fidaro": {"title": "Half an answer"}},
+    )
+    row = result_rows(store, runs_of(store, run))[0]
+    assert jsonmod.loads(row["provider_specific_output"]) == {"fidaro": {"title": "Half an answer"}}
+
+
+def test_provider_specific_output_is_not_ascii_escaped(store):
+    """Titles are model-written prose, so they carry non-ASCII; keep it readable in the CSV."""
+    run = a_run(store, KEY)
+    store.add_result_row(
+        "t-0123456789", run_id=run, output="x", provider_specific={"fidaro": {"title": "Café"}}
+    )
+    assert "Café" in result_rows(store, runs_of(store, run))[0]["provider_specific_output"]
+
+
 # --- testcase enrichment and selection ---------------------------------
 
 

@@ -281,6 +281,14 @@ recording prompts, `prompt` falls back to the test case if you passed `--testcas
 stored copy always wins, because `testcases/` is regenerated and only the stored copy is
 evidence of what this result was produced from.
 
+**Non-standard response data comes through verbatim.** `provider_specific_output` carries
+whatever the provider sent outside the OpenAI schema, as JSON under its vendor key — for
+Fidaro `/v2` that is `{"fidaro": {"title": "Capital of France"}}` (see
+[Provider-specific output](#provider-specific-output)). Nothing parses it on the way to the
+report, so a provider growing a new key needs no change here; it is empty for the providers
+that send nothing, and filled in on error rows too, because a stream can deliver its
+side-channel data before it stalls.
+
 `--provider` is repeatable and optional (default: every provider in the database), so one
 report can span several configs — `provider` and `cache_key_hash` are columns. `--testcases`
 is repeatable and optional, and does two things: it adds the `request_type` and `domain`
@@ -365,6 +373,9 @@ change what a test case can see. Nothing parses it — a new key needs no code c
 SELECT test_id, json_extract(provider_specific_output, '$.fidaro.title') AS title
 FROM results WHERE provider_specific_output IS NOT NULL;
 ```
+
+It is also a `provider_specific_output` column on the [report](#reporting), the same JSON
+text, so you can read it without writing SQL.
 
 ## The three workflows
 

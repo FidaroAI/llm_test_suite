@@ -57,6 +57,7 @@ _TEST_COLUMNS = ["request_type", "domain"]
 _RESULT_COLUMNS = [
     "output",
     "reasoning",
+    "provider_specific_output",
     "error",
     "latency_ms",
     "prompt_tokens",
@@ -102,6 +103,23 @@ def _text(value: str | None) -> str | None:
     between paragraphs — survives. The store keeps the untouched value either way.
     """
     return value.strip() if isinstance(value, str) else value
+
+
+def _provider_specific(result: ResultRow) -> str | None:
+    """The provider's non-standard response data as one verbatim JSON cell.
+
+    Deliberately *unparsed*. The store keeps whatever the provider sent under its vendor key
+    (``{"fidaro": {"title": ...}}``), and the value of that arrangement is that a new key
+    appears in the report without a code change here. Flattening it into
+    ``fidaro_title``-style columns would trade that away for sortability, and put vendor key
+    names in the row shape.
+
+    ``None`` rather than ``"null"`` when the provider sent nothing, which is the usual case:
+    an absent value should read as an empty cell.
+    """
+    if result.provider_specific is None:
+        return None
+    return json.dumps(result.provider_specific, ensure_ascii=False)
 
 
 def _tokens(result: ResultRow) -> dict[str, Any]:
@@ -171,6 +189,7 @@ def _shared_fields(run: RunRow, result: ResultRow, case: TestCase | None) -> dic
         **_prompt_fields(result, case),
         "output": _text(result.output),
         "reasoning": _text(result.reasoning),
+        "provider_specific_output": _provider_specific(result),
         "error": result.error,
         "latency_ms": round(result.latency_ms, 1) if result.latency_ms is not None else None,
         **_tokens(result),
