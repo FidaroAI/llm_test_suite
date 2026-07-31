@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 import llmeval
-from llmeval.generation import agentharm, multifaceted, research_rubrics, stock_prices
+from llmeval.generation import agentharm, multifaceted, research_rubrics
 from llmeval.generation.classification import load_classifications, stamp
 from llmeval.generation.config import CONFIG_ENV_VAR, load_suite_config
 from llmeval.generation.csv_source import generate_from_csv
@@ -65,15 +65,6 @@ def _dataset_suite(module) -> Callable[[GenPaths], list[dict]]:
     return gen
 
 
-def _stock_prices_suite() -> Callable[[GenPaths], list[dict]]:
-    def gen(paths: GenPaths) -> list[dict]:
-        return stock_prices.load_and_generate(
-            paths.classifications_dir, paths.config_path, paths.generation_sources_dir
-        )
-
-    return gen
-
-
 SUITES: dict[str, SuiteSpec] = {
     s.name: s
     for s in [
@@ -85,7 +76,6 @@ SUITES: dict[str, SuiteSpec] = {
         SuiteSpec("agentharm_refusal", _dataset_suite(agentharm)),
         SuiteSpec("multifaceted", _dataset_suite(multifaceted)),
         SuiteSpec("research_rubrics", _dataset_suite(research_rubrics)),
-        SuiteSpec("stock_prices", _stock_prices_suite(), network=True),
     ]
 }
 

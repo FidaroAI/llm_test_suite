@@ -9,10 +9,11 @@ from llmeval.generation.suites import (
 )
 
 
-def test_all_six_suites_registered():
+def test_remaining_suites_registered():
+    # stock_prices has already moved to testcases/stock_prices/; the rest follow.
     assert set(suite_names()) == {
         "simple_facts", "simple_facts_regressions", "agentharm_refusal",
-        "multifaceted", "research_rubrics", "stock_prices",
+        "multifaceted", "research_rubrics",
     }
 
 

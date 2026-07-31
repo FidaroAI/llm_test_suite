@@ -1,4 +1,4 @@
-"""Live stock-price reference data from Stooq — ported from ``tests/stock_prices_ref.py``.
+"""Live stock-price reference data from Stooq. Private to the ``stock_prices`` plugin.
 
 The single place that talks to the price source. **Source: Stooq** (free, no API
 key, one-line CSV per symbol; chosen over Yahoo, which rate-limits unauthenticated
@@ -7,8 +7,11 @@ clients). Stooq symbols differ from the common ticker (``arm.us``, ``hsba.uk``,
 in the suite CSV, along with each row's quote currency (Stooq does not report it;
 UK listings are quoted in pence, ``GBp``).
 
+Called from the plugin's ``before_grade`` — at **grade** time, not generation time, so the
+reference cannot be stale by the time an answer is compared against it.
+
 ``requests`` is imported lazily so the core package has no network dependency;
-install the ``stocks`` extra to use the default fetch.
+install the ``network`` extra to use the default fetch.
 """
 
 from __future__ import annotations

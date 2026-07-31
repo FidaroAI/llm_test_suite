@@ -121,16 +121,10 @@ def test_broken_provider_config_is_skipped(tmp_path):
 
 
 def test_generatable_suites_come_from_the_registry():
-    suites = discovery.list_generatable_suites()
-    by_name = {s.name: s for s in suites}
+    # The registry is being emptied plugin by plugin; these become source pickers shortly.
+    by_name = {s.name: s for s in discovery.list_generatable_suites()}
     assert "simple_facts" in by_name
-    assert by_name["stock_prices"].network is True
     assert by_name["simple_facts"].network is False
-
-
-def test_network_suites_are_labelled():
-    label = {s.name: s.label for s in discovery.list_generatable_suites()}["stock_prices"]
-    assert "network" in label
 
 
 # --------------------------------------------------------------------------- runs
