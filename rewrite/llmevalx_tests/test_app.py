@@ -4,8 +4,18 @@ The steps are driven directly with stub functions rather than through questionar
 tests the navigation rather than the terminal library.
 """
 
+from llmeval.runner import VALID_MODES
+
 from llmevalx import app
-from llmevalx.commands import RUNS_ALL, RUNS_LAST, RUNS_SPECIFIC, Selection
+from llmevalx.commands import (
+    MODE_ALWAYS,
+    MODE_REUSE,
+    MODE_TARGET_N,
+    RUNS_ALL,
+    RUNS_LAST,
+    RUNS_SPECIFIC,
+    Selection,
+)
 from llmevalx.prompts import BACK
 
 
@@ -86,6 +96,33 @@ def test_run_never_asks_about_runs():
     steps = app.steps_for(Selection(action="run"))
     assert app.step_runs not in steps and app.step_pick_runs not in steps
     assert app.step_run_options in steps
+
+
+def test_run_asks_about_mode_last():
+    steps = app.steps_for(Selection(action="run"))
+    assert steps[-1] is app.step_run_mode
+    assert steps.index(app.step_run_options) < steps.index(app.step_run_mode)
+
+
+def test_target_n_prompt_appears_only_for_that_mode():
+    assert app.step_target_n not in app.steps_for(Selection(action="run", mode=MODE_ALWAYS))
+    assert app.step_target_n not in app.steps_for(Selection(action="run", mode=MODE_REUSE))
+    assert app.steps_for(Selection(action="run", mode=MODE_TARGET_N))[-1] is app.step_target_n
+
+
+def test_the_mode_menu_offers_every_mode_the_runner_knows(monkeypatch):
+    """A mode added to the runner should show up here, not be silently unreachable."""
+    seen = {}
+
+    def fake_select(_message, choices, default=None):
+        seen["values"] = [c.value for c in choices]
+        seen["default"] = default
+        return MODE_ALWAYS
+
+    monkeypatch.setattr(app.prompts, "select", fake_select)
+    app.step_run_mode(Selection(action="run"))
+    assert set(seen["values"]) == set(VALID_MODES)
+    assert seen["default"] == MODE_ALWAYS
 
 
 def test_grade_asks_about_runs_but_has_no_run_options():
@@ -251,3 +288,32 @@ def test_blank_limit_is_allowed(monkeypatch):
 def test_esc_in_run_options_backs_out(monkeypatch):
     monkeypatch.setattr(app.prompts, "text", lambda *_a, **_k: BACK)
     assert app.step_run_options(Selection(action="run")) is BACK
+
+
+def test_the_mode_defaults_to_always(monkeypatch):
+    """Not the CLI's `reuse` — a second pass over the same tests would do nothing at all."""
+    monkeypatch.setattr(app.prompts, "select", lambda _m, _c, default=None: default)
+    sel = Selection(action="run")
+    assert app.step_run_mode(sel) is None
+    assert sel.mode == MODE_ALWAYS
+
+
+def test_choosing_a_mode_records_it(monkeypatch):
+    monkeypatch.setattr(app.prompts, "select", lambda *_a, **_k: MODE_TARGET_N)
+    sel = Selection(action="run")
+    app.step_run_mode(sel)
+    assert sel.mode == MODE_TARGET_N
+
+
+def test_esc_in_the_mode_menu_backs_out(monkeypatch):
+    monkeypatch.setattr(app.prompts, "select", lambda *_a, **_k: BACK)
+    assert app.step_run_mode(Selection(action="run")) is BACK
+
+
+def test_target_n_takes_a_positive_number(monkeypatch, capsys):
+    answers = iter(["0", "3"])
+    monkeypatch.setattr(app.prompts, "text", lambda _m, default="": next(answers, default))
+    sel = Selection(action="run", mode=MODE_TARGET_N)
+    assert app.step_target_n(sel) is None
+    assert sel.target_n == "3"
+    assert "not a positive number" in capsys.readouterr().out

@@ -26,7 +26,12 @@ from llmevalx import discovery, env, prompts
 from llmevalx.commands import (
     DEFAULT_CONCURRENCY,
     DEFAULT_LIMIT,
+    DEFAULT_MODE,
+    DEFAULT_TARGET_N,
     DEFAULT_TIMEOUT,
+    MODE_ALWAYS,
+    MODE_REUSE,
+    MODE_TARGET_N,
     RUNS_ALL,
     RUNS_LAST,
     RUNS_SPECIFIC,
@@ -228,6 +233,33 @@ def step_run_options(sel: Selection) -> object:
     return None
 
 
+def step_run_mode(sel: Selection) -> object:
+    """Which caching mode the run uses — the last of the run options.
+
+    Defaults to `always`, not the CLI's `reuse`: see `commands.DEFAULT_MODE`.
+    """
+    answer = prompts.select(
+        "Which mode?",
+        [
+            Choice("always     — call the model again, keeping what is already there", MODE_ALWAYS),
+            Choice("reuse      — skip any test that already has a usable result", MODE_REUSE),
+            Choice("target_n   — top every test up to N usable results", MODE_TARGET_N),
+        ],
+        default=sel.mode or DEFAULT_MODE,
+    )
+    if answer is BACK:
+        return BACK
+    sel.mode = answer
+    return None
+
+
+def step_target_n(sel: Selection) -> object:
+    """Only reached when `target_n` was chosen — see :func:`steps_for`."""
+    return _number(
+        sel, "target_n", "How many usable results per test case?", DEFAULT_TARGET_N, False
+    )
+
+
 # --------------------------------------------------------------------------- assembly
 
 
@@ -240,7 +272,13 @@ def steps_for(sel: Selection) -> list[Step]:
     if sel.action == "generate":
         return [step_action, step_generate_suites]
     if sel.action == "run":
-        return [step_action, step_testcases, step_provider, step_suite, step_run_options]
+        # step_target_n appears and disappears with the mode answer, exactly as the run
+        # picker does for "specific runs" — see :func:`_with_run_picker`.
+        run_steps: list[Step] = [
+            step_action, step_testcases, step_provider, step_suite, step_run_options,
+            step_run_mode,
+        ]
+        return [*run_steps, step_target_n] if sel.mode == MODE_TARGET_N else run_steps
     if sel.action == "grade":
         steps: list[Step] = [
             step_action, step_testcases, step_provider, step_suite, step_runs

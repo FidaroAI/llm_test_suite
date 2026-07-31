@@ -3,6 +3,9 @@
 import sys
 
 from llmevalx.commands import (
+    MODE_ALWAYS,
+    MODE_REUSE,
+    MODE_TARGET_N,
     RUNS_ALL,
     RUNS_LAST,
     RUNS_SPECIFIC,
@@ -91,6 +94,49 @@ def test_run_omits_limit_when_blank():
 def test_run_includes_limit_when_given():
     command = only(Selection(action="run", all_testcases=True, provider="p.json", limit="10"))
     assert "--limit 10" in command.display
+
+
+def test_run_defaults_to_mode_always():
+    """The wizard's default, deliberately not the CLI's `reuse`."""
+    command = only(Selection(action="run", all_testcases=True, provider="p.json"))
+    assert "--mode always" in command.display
+
+
+def test_run_spells_out_the_mode_even_when_it_matches_the_cli_default():
+    """It decides whether the model is called at all, so the echoed command must say it."""
+    command = only(
+        Selection(action="run", all_testcases=True, provider="p.json", mode=MODE_REUSE)
+    )
+    assert "--mode reuse" in command.display
+
+
+def test_target_n_mode_passes_the_count():
+    command = only(
+        Selection(action="run", all_testcases=True, provider="p.json",
+                  mode=MODE_TARGET_N, target_n="3")
+    )
+    assert "--mode target_n" in command.display
+    assert "--target-n 3" in command.display
+
+
+def test_other_modes_omit_the_count():
+    """`--target-n` is meaningless outside that mode, and a stale answer must not leak in."""
+    command = only(
+        Selection(action="run", all_testcases=True, provider="p.json",
+                  mode=MODE_ALWAYS, target_n="3")
+    )
+    assert "--target-n" not in command.display
+
+
+def test_grade_and_report_never_pass_a_mode():
+    """Neither calls a provider, so the run policy is not theirs to have."""
+    grade = only(
+        Selection(action="grade", all_testcases=True, provider="p.json", runs_mode=RUNS_LAST)
+    )
+    report = commands_for(
+        Selection(action="report", report_mode="other", all_testcases=True, runs_mode=RUNS_ALL)
+    )[0]
+    assert "--mode" not in grade.display and "--mode" not in report.display
 
 
 def test_suite_becomes_a_metadata_filter():

@@ -23,10 +23,16 @@ code — constants, the store, the suite registry — and nothing under `llmeval
 | 1 | **generate** / **run** / **grade** / **report** |
 | 2 | *report only* — "last run" (no further questions) or "other data" |
 | 3 | test-case files (multi-select, or all) · provider · suite filter · which runs |
-| 4 | *run only* — timeout, concurrency, limit, pre-filled with llmeval's own defaults |
+| 4 | *run only* — timeout, concurrency, limit, then the caching mode |
 
 Then it prints the command and runs it. `report` writes the CSV, renders it with
 `reporting.csv_table` and opens the page.
+
+Step 4 is pre-filled with llmeval's own defaults, with one deliberate exception: the mode
+defaults to **`always`** rather than the CLI's `reuse`. Someone who has just picked a
+provider and a set of tests on purpose wants fresh answers; `reuse` would quietly do nothing
+on a second pass and look like a broken run. `target_n` asks for its N as an extra question,
+which appears and disappears with the answer above it.
 
 `generate` skips step 3 — there is no provider and the test cases do not exist yet — and
 asks which suites to build instead.
