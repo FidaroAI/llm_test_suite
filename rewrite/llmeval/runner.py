@@ -269,20 +269,26 @@ def run_testcase(
     run_id: str,
     *,
     defer_logs: bool = False,
+    hooks=None,
 ) -> RunSummary:
     """Bring one test case up to its target number of stored results.
 
     ``defer_logs`` buffers this call's log records and emits them as one contiguous
     block on return (see :mod:`llmeval.logs`). ``run`` sets it on the parallel path
     only — a sequential caller has nothing to interleave with, so it streams live.
+
+    The per-test-case hooks fire *inside* that buffer, so anything a plugin logs is
+    grouped with its test case rather than scattered across other workers' output.
     """
     with deferred_logs(defer_logs):
-        return _run_testcase(store, testcase, provider, policy, run_id)
+        return _run_testcase(store, testcase, provider, policy, run_id, hooks)
 
 
 def _run_testcase(
-    store: Store, testcase, provider: Provider, policy: RunPolicy, run_id: str
+    store: Store, testcase, provider: Provider, policy: RunPolicy, run_id: str, hooks=None
 ) -> RunSummary:
+    if hooks is not None:
+        hooks.before_each_run(testcase)
     key = provider.config.cache_key()
     config = provider.config.model_dump()  # full config stored alongside every result
     existing = store.count_results(testcase.id, key.hash, success_only=True)
@@ -303,6 +309,8 @@ def _run_testcase(
     total = RunSummary(cached=existing)
     for _ in range(n):
         total += _fill_one_result(store, testcase, provider, policy, run_id, config)
+    if hooks is not None:
+        hooks.after_each_run(testcase, total)
     return total
 
 
@@ -312,6 +320,7 @@ def run(
     provider: Provider,
     policy: RunPolicy,
     notes: str | None = None,
+    hooks=None,
 ) -> RunResult:
     """Run a provider over every test case, optionally in parallel.
 
@@ -329,6 +338,11 @@ def run(
     On the parallel path each test case's log records are deferred and flushed as one
     block, so concurrent test cases interleave between blocks rather than line by line.
     See :mod:`llmeval.logs`.
+
+    ``hooks`` is an optional lifecycle dispatcher (see :class:`llmeval.plugins.loader.Hooks`).
+    It is taken *structurally* rather than imported, so the runner goes on knowing nothing
+    about plugins. ``before_run``/``after_run`` fire once on the calling thread; the
+    per-test-case hooks fire on the worker thread handling that case, and so may overlap.
     """
     cases = list(testcases)
     concurrency = max(1, policy.concurrency)
@@ -347,15 +361,21 @@ def run(
         run_id, len(cases), provider.config.name, policy.mode, concurrency,
     )
 
+    if hooks is not None:
+        hooks.before_run()
+
     total = RunSummary()
     sequential = concurrency == 1 or len(cases) <= 1
     if sequential:
         for testcase in cases:
-            total += run_testcase(store, testcase, provider, policy, run_id)
+            total += run_testcase(store, testcase, provider, policy, run_id, hooks=hooks)
     else:
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = [
-                pool.submit(run_testcase, store, tc, provider, policy, run_id, defer_logs=True)
+                pool.submit(
+                    run_testcase, store, tc, provider, policy, run_id,
+                    defer_logs=True, hooks=hooks,
+                )
                 for tc in cases
             ]
             # as_completed yields on the calling thread, so accumulation stays
@@ -368,5 +388,7 @@ def run(
                 # not submission order, hence a plain counter rather than a test id.
                 logger.info("run %s: %d/%d test case(s) complete", run_id, done, len(cases))
 
+    if hooks is not None:
+        hooks.after_run()
     store.finish_run(run_id)
     return RunResult(run_id=run_id, summary=total)

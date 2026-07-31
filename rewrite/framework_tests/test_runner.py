@@ -604,3 +604,45 @@ def test_excerpt_flattens_and_caps(text, expected):
 
 def test_excerpt_truncates_with_an_ellipsis():
     assert excerpt("x" * 200, limit=10) == "x" * 10 + "..."
+
+
+class HookSpy:
+    """Records hook calls in order. Stands in for llmeval.plugins.loader.Hooks."""
+
+    def __init__(self):
+        self.calls = []
+
+    def before_run(self):
+        self.calls.append("before_run")
+
+    def after_run(self):
+        self.calls.append("after_run")
+
+    def before_each_run(self, testcase):
+        self.calls.append(f"before_each:{testcase.id}")
+
+    def after_each_run(self, testcase, summary):
+        self.calls.append(f"after_each:{testcase.id}:{summary.ran}")
+
+
+def test_run_calls_hooks_around_the_whole_run_and_each_case(store):
+    spy = HookSpy()
+    cases = [tc("s.a"), tc("s.b")]
+    run(store, cases, FakeProvider(cfg()), RunPolicy(concurrency=1), hooks=spy)
+    assert spy.calls[0] == "before_run"
+    assert spy.calls[-1] == "after_run"
+    assert "before_each:s.a" in spy.calls
+    assert "after_each:s.a:1" in spy.calls
+
+
+def test_per_case_hooks_bracket_that_case_only(store):
+    spy = HookSpy()
+    run(store, [tc("s.a")], FakeProvider(cfg()), RunPolicy(concurrency=1), hooks=spy)
+    assert spy.calls == [
+        "before_run", "before_each:s.a", "after_each:s.a:1", "after_run",
+    ]
+
+
+def test_run_without_hooks_is_unchanged(store):
+    result = run(store, [tc("s.a")], FakeProvider(cfg()), RunPolicy())
+    assert result.summary.ran == 1
