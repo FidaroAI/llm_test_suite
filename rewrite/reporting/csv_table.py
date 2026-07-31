@@ -228,16 +228,15 @@ _TEMPLATE = """<!doctype html>
  .colgrid label{display:flex;gap:6px;align-items:center;cursor:pointer;
                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  /* Cell text is wrapped in this div by the formatter, which is also what the
-    compact/expanded toggle clamps. Expanded rows are deliberately *unbounded* — see
-    EXPANDED_BUFFER_PX below for what makes that safe. Do not add a max-height here to
-    tame scrolling: capping the row only hides the renderer's real limit, and it gives
-    every long cell its own scrollbar, whose position the renderer then resets. */
+    compact/expanded toggle clamps. Compact scrolls inside the cell; expanded rows are
+    deliberately unbounded. Both rely on rows not being rebuilt under the reader — see
+    renderVertical below. */
  .cellwrap{white-space:pre-wrap;word-break:break-word;line-height:1.35}
  .compact .cellwrap{max-height:4.4em;overflow:auto}
  .tabulator{font-size:12.5px;background:var(--bg)}
  .tabulator .tabulator-header .tabulator-col{background:#f9fafb}
- /* The container is sized to the viewport for virtual scrolling, so with few rows the
-    theme's grey tableholder shows below the data. Keep it the page colour. */
+ /* The container is sized to the viewport, so with few rows the theme's grey tableholder
+    shows below the data. Keep it the page colour. */
  .tabulator .tabulator-tableholder{background:var(--bg)}
 </style></head><body>
 
@@ -273,13 +272,6 @@ _TEMPLATE = """<!doctype html>
   var cols = JSON.parse(document.getElementById("cols").textContent);
   var host = document.getElementById("table");
 
-  // How much the virtual renderer keeps buffered while rows are expanded, in px. Sets the
-  // renderer's "have I jumped?" threshold to twice this, so it has to clear any row an
-  // expanded cell can plausibly reach — a 4KB model response wraps to roughly 5000px in a
-  // 420px column. Raise it if rows taller than 40000px start snapping to the top again;
-  // the cost is DOM nodes, so don't raise it for its own sake. Only applied when expanded.
-  var EXPANDED_BUFFER_PX = 20000;
-
   // Build the cell with textContent rather than any HTML-interpreting path: values are
   // model output. The wrapper div is also the hook the compact/expanded toggle clamps.
   function textCell(cell) {
@@ -305,8 +297,25 @@ _TEMPLATE = """<!doctype html>
     // Column names come from arbitrary CSV headers, which may contain dots. Without
     // this, Tabulator would read "a.b" as a nested lookup and every cell would be empty.
     nestedFieldSeparator: false,
-    // A fixed height turns on virtual rendering, so wide runs stay responsive.
+    // The fixed height makes the table its own scroll container rather than growing the
+    // page, which is what keeps the header and the toolbar in view.
     height: "calc(100vh - 165px)",
+    // Every row in the DOM, rather than Tabulator's default virtual window.
+    //
+    // The virtual renderer rebuilds rows as you scroll, and it positions them by dividing
+    // the scroll offset by a single average row height. Neither assumption holds here:
+    // cells hold arbitrary model output, so heights vary by two orders of magnitude, and
+    // each cell owns scroll state of its own (compact clamps to 4.4em and scrolls inside;
+    // long values are read by scrolling that). Rebuilding a row silently discards its
+    // cells' scroll offsets, and a mis-estimated position snaps the table to the top —
+    // both of which this page hit repeatedly. Buffer tuning only moved the threshold.
+    //
+    // The cost is DOM size, paid at load: a 3000-row report takes ~4.6s to render and
+    // ~8.9s to expand, against ~0.2s virtual. A report is a page you read rather than a
+    // feed you stream, and these are tens to hundreds of rows, so correctness wins. If
+    // that ever stops being true, make this conditional on the row count rather than
+    // reaching for renderVerticalBuffer again.
+    renderVertical: "basic",
     layout: "fitData",
     placeholder: "No rows",
     columnDefaults: { minWidth: 60, headerSortTristate: true },
@@ -352,19 +361,6 @@ _TEMPLATE = """<!doctype html>
   wrapBtn.addEventListener("click", function () {
     var compact = host.classList.toggle("compact");
     wrapBtn.textContent = compact ? "Expand rows" : "Collapse rows";
-    // Widen the virtual renderer's buffer for as long as rows are unbounded. Tabulator
-    // decides it has "jumped" whenever scrollTop moves more than 2x this buffer, which
-    // defaults to one viewport — so a single row taller than two screens exceeds it
-    // without the scroll ever leaving that row. It then rebuilds the render from
-    // `floor(scrollTop / scrollHeight * rowCount)`, a linear pixel-to-index guess that
-    // only holds for uniform heights: a tall row spans thousands of pixels but one
-    // index, so the guess lands near the start of the data and the table snaps to the
-    // top. A buffer past any plausible row height keeps the incremental path in control.
-    //
-    // Paid only while expanded: the buffer is how much the renderer keeps in the DOM, so
-    // in compact mode (short rows) the same number would buffer hundreds of rows for no
-    // benefit. It is re-read on every redraw, which is what makes this switchable.
-    table.options.renderVerticalBuffer = compact ? 0 : EXPANDED_BUFFER_PX;
     // Save and restore the scroll offset around the redraw: Tabulator's renderTable()
     // does a literal `scrollTop = 0`, so toggling would otherwise throw you back to the
     // first row every time. The offset no longer means the same row once heights change,

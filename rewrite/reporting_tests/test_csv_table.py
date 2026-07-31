@@ -142,29 +142,33 @@ def test_page_wires_up_column_visibility_and_filtering():
     assert 'id="download"' in html
 
 
-def test_expanded_rows_widen_the_virtual_renderers_buffer():
-    # Regression, verified in a real browser: with the default buffer (one viewport),
-    # scrolling an expanded table snapped back to the top roughly every third wheel tick.
+def test_rows_are_not_virtualised():
+    # Regression, verified in a real browser. Tabulator's default virtual renderer rebuilds
+    # rows as you scroll and positions them from a single average row height. This page
+    # breaks both assumptions: cell values are arbitrary model output, so heights vary
+    # enormously, and each cell owns scroll state (compact clamps to 4.4em and scrolls
+    # inside it). The observed failures were the table snapping to the top mid-scroll, and
+    # a cell's own scroll offset resetting whenever its row was rebuilt.
     #
-    # Tabulator's virtual renderer treats any scrollTop move larger than 2x its buffer as
-    # a jump, and rebuilds the render from `floor(scrollTop / scrollHeight * rowCount)` —
-    # a linear pixel-to-index guess that only holds for uniform row heights. One expanded
-    # row can be several screens tall, so scrolling *within* a single row exceeds the
-    # default threshold, and the guess lands near the start of the data.
-    #
-    # The buffer must therefore exceed any plausible expanded row, and must be applied
-    # only while expanded: it is also how much the renderer keeps in the DOM, so in
-    # compact mode the same figure buffers hundreds of rows for nothing.
+    # Three narrower fixes were tried and each moved the problem rather than removing it:
+    # clamping row height, widening renderVerticalBuffer, and remembering cell offsets to
+    # restore after a rebuild. Turning virtualisation off removes the rebuild, which is the
+    # thing all of them were working around.
     html = csv_table.render_table([{"a": 1}], title="t")
-    assert "var EXPANDED_BUFFER_PX = 20000;" in html
-    assert "renderVerticalBuffer = compact ? 0 : EXPANDED_BUFFER_PX" in html
+    assert 'renderVertical: "basic"' in html
+    # The buffer knob is the tempting near-miss: it only widens the window in which the
+    # renderer's position estimate is wrong, so it must not creep back in as *code*.
+    # Scoped to our own script block, since Tabulator's own defaults mention it, and
+    # matching the assignment rather than the name, since the comment above it does too.
+    ours = html.split("<script>")[-1]
+    assert "renderVerticalBuffer =" not in ours
+    assert "renderVerticalBuffer:" not in ours
 
 
-def test_expanded_rows_are_not_clamped():
-    # The tempting "fix" for the jumping above is to cap row height so rows stay under
-    # the renderer's threshold. Don't: it silently redefines what Expand means, and it
-    # gives every long cell its own scrollbar — whose position the renderer resets on the
-    # very same rebuild, so the bug comes back one level down. Only compact mode clamps.
+def test_compact_clamps_and_scrolls_but_expanded_is_unbounded():
+    # The toggle's whole job. Compact gives every cell the same 4.4em and scrolls inside
+    # it; expanded lets rows grow to their content. Capping expanded rows looks like a
+    # scrolling fix but silently redefines what Expand means.
     html = csv_table.render_table([{"a": 1}], title="t")
     expanded = re.search(r"\n \.cellwrap\{([^}]*)\}", html)
     assert expanded, "no expanded-mode .cellwrap rule in the page"
