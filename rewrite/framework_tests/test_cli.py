@@ -245,6 +245,39 @@ def test_cli_run_limit_runs_only_n(tmp_path, monkeypatch):
     assert count_results(db) == 2
 
 
+def test_cli_grade_limit_grades_only_n_test_cases(tmp_path, monkeypatch):
+    """The limit is a *test case* count — every attempt and assertion of the first N."""
+    three = {"s": [
+        {"id": f"q{i}", "user": f"q{i}?", "assertions": [{"type": "icontains", "value": "q"}]}
+        for i in range(3)
+    ]}
+    db = project(tmp_path, monkeypatch, three)
+    main(["run", "--provider", "echo.json", "--db", db])
+    assert main(["grade", "--provider", "echo.json", "--db", db, "--limit", "2"]) == 0
+    with sqlite3.connect(db) as conn:
+        graded = {r[0] for r in conn.execute(
+            "select test_id from results join gradings on gradings.result_id = results.id"
+        )}
+    assert graded == {"s.q0", "s.q1"}
+
+
+def test_cli_grade_limit_covers_every_attempt_of_the_cases_it_picks(tmp_path, monkeypatch):
+    """A limited grade is still per-result: --repeat 3 leaves three graded attempts."""
+    two = {"s": [
+        {"id": f"q{i}", "user": f"q{i}?", "assertions": [{"type": "icontains", "value": "q"}]}
+        for i in range(2)
+    ]}
+    db = project(tmp_path, monkeypatch, two)
+    main(["run", "--provider", "echo.json", "--db", db, "--repeat", "3"])
+    main(["grade", "--provider", "echo.json", "--db", db, "--limit", "1"])
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("select count(*) from gradings").fetchone()[0] == 3
+
+
+def test_cli_grade_limit_defaults_to_every_test_case():
+    assert build_parser().parse_args(["grade", "--provider", "p"]).limit is None
+
+
 def test_cli_run_with_concurrency_offline(tmp_path, monkeypatch):
     three = {"s": [{"id": f"q{i}", "user": f"q{i}?", "assertions": []} for i in range(3)]}
     db = project(tmp_path, monkeypatch, three)

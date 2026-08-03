@@ -260,6 +260,19 @@ there is no output to assert against, and the error row is itself the finding.
 llmeval grade --provider configs/fidaro_prod.json --run-last-n 1
 ```
 
+`--limit N` stops after the first N **test cases**, the same unit `run --limit` counts —
+each one graded in full, every stored attempt and every assertion. It is how you try a new
+assertion or a new judge on a handful of cases before paying for the whole set:
+
+```bash
+llmeval grade --provider configs/fidaro_prod.json --run-last-n 1 --regrade --limit 5
+```
+
+Like `run`, the limit also scopes the lifecycle hooks: a plugin whose test cases all fall
+outside it never runs its `before_grade`, so a five-case trial won't go and fetch live stock
+prices. Ordering is the load order — there is no `--randomize` here, because grading is
+resumable (re-running without `--limit` fills in the rest) in a way a sample isn't.
+
 ## Reporting
 
 `report` writes the selected result rows as **CSV**. It renders nothing: turning a table
