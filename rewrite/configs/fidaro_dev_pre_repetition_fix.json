@@ -1,0 +1,23 @@
+{
+  "name": "fidaro-dev-pre-repetition-fix",
+  "model": "openai/auto",
+  "base_url": "${FIDARO_DEV_BASE_URL}",
+  "api_key_env": "FIDARO_API_KEY",
+  "stream": true,
+  "params": {
+    "top_p": 1.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "top_k": 0
+  },
+  "extra": {
+    "backend_version": "phala-dev"
+  },
+  "cache_key_fields": [
+    "model",
+    "top_p",
+    "presence_penalty",
+    "repetition_penalty",
+    "backend_version"
+  ]
+}
