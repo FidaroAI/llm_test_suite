@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from llmeval.generation.common import drop_duplicate_ids
 from llmeval.generation.csv_source import rows_from_csv
 from llmeval.plugins import PluginInterface, TestCasePlugin
 
@@ -40,6 +41,8 @@ class CsvTestCasePlugin(TestCasePlugin):
         except (OSError, ValueError) as exc:
             logger.error("%s: cannot read %s (%s)", self.interface.name, self.csv_path, exc)
             return False
+        # Two rows with the same question hash to the same id; keep the first.
+        cases = drop_duplicate_ids(cases, self.interface.name)
         self.output_path.write_text(
             json.dumps(cases, indent=2, ensure_ascii=False), encoding="utf-8"
         )

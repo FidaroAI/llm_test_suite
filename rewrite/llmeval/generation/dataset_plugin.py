@@ -16,6 +16,7 @@ import json
 import logging
 from typing import Any, Callable
 
+from llmeval.generation.common import drop_duplicate_ids
 from llmeval.generation.hf_rows import cached_rows
 from llmeval.plugins import PluginInterface, TestCasePlugin
 
@@ -69,7 +70,9 @@ class HfDatasetPlugin(TestCasePlugin):
             # somebody the other five suites.
             logger.error("%s: download failed (%s)", self.interface.name, exc)
             return False
-        cases = self.transform(rows)
+        # Datasets repeat prompts, and a repeated prompt is a repeated id. Drop them here
+        # rather than let the loader refuse the whole source at run time.
+        cases = drop_duplicate_ids(self.transform(rows), self.interface.name)
         self.output_path.write_text(
             json.dumps(cases, indent=2, ensure_ascii=False), encoding="utf-8"
         )

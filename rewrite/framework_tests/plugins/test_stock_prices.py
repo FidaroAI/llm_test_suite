@@ -1,6 +1,8 @@
 """The stock_prices plugin: generation is offline, grading fetches live quotes."""
 
 import json
+import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -53,6 +55,26 @@ def test_generation_is_offline_and_bakes_no_price(plugin):
     (assertion,) = cases[0]["assertions"]
     assert assertion["type"] == "stock_prices.stock_price"
     assert set(assertion["params"]) == {"symbol", "currency"}
+
+
+def test_duplicate_csv_rows_are_dropped_rather_than_emitting_clashing_ids(
+    plugin, tmp_path, monkeypatch, caplog
+):
+    csv_path = tmp_path / "dupes.csv"
+    csv_path.write_text(
+        "user,__metadata:stooq_symbol,__metadata:currency,__metadata:company\n"
+        "Price of Arm?,arm.us,USD,Arm\n"
+        "Price of Arm?,arm.us,USD,Arm\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.modules[type(plugin).__module__], "CSV_PATH", csv_path)
+
+    with caplog.at_level(logging.WARNING):
+        assert plugin.generate_testcases() is True
+
+    (case,) = plugin.get_testcases()
+    assert case["metadata"]["stooq_symbol"] == "arm.us"
+    assert "stock_prices" in caplog.text and "Price of Arm?" in caplog.text
 
 
 def test_grading_before_a_fetch_fails_loudly(plugin):

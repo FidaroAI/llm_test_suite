@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from llmeval.assertions.base import AssertionResult, GradeContext
-from llmeval.generation.common import local_id
+from llmeval.generation.common import drop_duplicate_ids, local_id
 from llmeval.models import AssertionSpec
 from llmeval.plugins import PluginInterface, TestCasePlugin
 
@@ -115,6 +115,8 @@ class StockPricesPlugin(TestCasePlugin):
             logger.error("stock_prices: cannot read %s (%s)", CSV_PATH, exc)
             return False
         cases = [case for case in (self._row_to_case(row) for row in rows) if case]
+        # Two CSV rows asking about the same stock hash to the same id; keep the first.
+        cases = drop_duplicate_ids(cases, self.interface.name)
         self.output_path.write_text(
             json.dumps(cases, indent=2, ensure_ascii=False), encoding="utf-8"
         )

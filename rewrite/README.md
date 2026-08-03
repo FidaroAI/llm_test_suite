@@ -126,6 +126,13 @@ Every test id is `<source>.<local id>`, which is what the report's `suite` colum
 off. Generation emits **everything** a source can produce — how much of it you actually run
 is `--limit`/`--randomize`/`--filter` at run time, not a generation setting.
 
+Ids are prompt hashes, so a source that asks the same question twice produces a clash, and a
+source with clashing ids will not load. Plugins deduplicate as they generate — you will see
+`dropped duplicate test case id ...` warnings from `generate`, one per case, with the prompt
+that caused it. `multifaceted` is the loud one: the dataset repeats each prompt across
+several rows with different rubrics each time, so 921 rows become 314 test cases and only
+the first row's rubrics survive.
+
 `stock_prices` is the one to know about: it fetches live prices in `before_grade`, not at
 generation time, so `grade` needs the network for it and `--regrade` re-fetches. Run it with
 `--mode always` (or a fresh DB) so a cached *answer* cannot mask a freshness miss.

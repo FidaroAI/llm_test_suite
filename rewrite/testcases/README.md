@@ -92,6 +92,17 @@ SQLite and in logs — is `<source>.<local id>`. Local ids must be unique within
 [`local_id(prompt)`](../llmeval/generation/common.py) gives you a stable
 `sha1(prompt)[:10]`, which survives a dataset being re-downloaded or reordered.
 
+**Uniqueness is yours to enforce, at generation time.** A source with a repeated id fails to
+load *at all*, and it fails on the next `run` rather than on the `generate` that caused it.
+Since `local_id` hashes the prompt, any source that asks the same question twice collides —
+`multifaceted` does, on two thirds of its rows. Pass your cases through
+[`drop_duplicate_ids(cases, name)`](../llmeval/generation/common.py) before you write them:
+it keeps the first of each id and warns, with a prompt snippet, about every one it drops.
+`CsvTestCasePlugin`, `HfDatasetPlugin` and `stock_prices/` already do. If a repeat is
+meaningful for your source — the same prompt with *different* assertions, say — merge the
+cases yourself instead, or give them distinct `variant=` suffixes; dropping keeps the first
+and discards the rest.
+
 There is no `suite` metadata key. The id prefix *is* the provenance, and the report's
 `suite` column is read off it.
 

@@ -1,5 +1,6 @@
 """The dataset-backed plugins. Transforms are tested directly; downloads are injected."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -74,6 +75,21 @@ def test_research_rubrics_emits_both_grader_variants_with_all_rubrics(plugin_for
     assert {c["assertions"][0]["type"] for c in cases} == {"rubric", "g_eval"}
     assert cases[0]["assertions"][0]["weight"] == 2
     assert cases[0]["assertions"][0]["metric"] == "evidence"
+
+
+def test_repeated_prompts_are_dropped_rather_than_emitting_clashing_ids(plugin_for, caplog):
+    # Multifaceted really does repeat a prompt across rows, each with its own rubrics; the
+    # ids are prompt hashes, so every repeat is an id clash the loader would refuse to load.
+    plugin = plugin_for("multifaceted")
+    row = ROWS["multifaceted"][0]
+    plugin.download = lambda: [row, dict(row, rubrics=[{"criteria": "is short"}])]
+
+    with caplog.at_level(logging.WARNING):
+        assert plugin.generate_testcases() is True
+
+    (case,) = plugin.get_testcases()
+    assert "is lyrical" in case["assertions"][0]["value"]      # the first row won
+    assert "multifaceted" in caplog.text and "write a poem" in caplog.text
 
 
 def test_a_failed_download_reports_failure_rather_than_raising(plugin_for):

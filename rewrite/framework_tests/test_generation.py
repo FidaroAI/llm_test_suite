@@ -1,8 +1,10 @@
 """The shared machinery plugins build on. Loading and selection live in their own files."""
 
+import logging
+
 import pytest
 
-from llmeval.generation.common import local_id
+from llmeval.generation.common import drop_duplicate_ids, local_id
 from llmeval.generation.csv_plugin import CsvTestCasePlugin
 from llmeval.generation.csv_source import parse_expected, rows_from_csv
 from llmeval.plugins import PluginInterface
@@ -68,3 +70,62 @@ def test_csv_plugin_writes_its_cache_file_and_reads_it_back(tmp_path):
 def test_csv_plugin_reports_failure_for_a_missing_csv(tmp_path):
     plugin = CsvTestCasePlugin(PluginInterface("gone", tmp_path / "cache"), tmp_path / "nope.csv")
     assert plugin.generate_testcases() is False
+
+
+def test_drop_duplicate_ids_keeps_the_first_of_each_id(caplog):
+    cases = [
+        {"id": "aaa", "user": "What is the capital of France?", "assertions": [1]},
+        {"id": "aaa", "user": "What is the capital of France?", "assertions": [2]},
+        {"id": "bbb", "user": "Who wrote Dune?", "assertions": [3]},
+    ]
+    with caplog.at_level(logging.WARNING):
+        kept = drop_duplicate_ids(cases, "facts")
+
+    assert [c["id"] for c in kept] == ["aaa", "bbb"]
+    assert kept[0]["assertions"] == [1]          # the first one wins
+    assert cases[0]["assertions"] == [1]         # and the input is left alone
+
+
+def test_drop_duplicate_ids_warns_with_the_id_and_a_prompt_snippet(caplog):
+    cases = [{"id": "aaa", "user": "What is the capital of France?"}] * 2
+    with caplog.at_level(logging.WARNING):
+        drop_duplicate_ids(cases, "facts")
+
+    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "facts" in record.message
+    assert "aaa" in record.message
+    assert "What is the capital of France?" in record.message
+
+
+def test_drop_duplicate_ids_truncates_a_long_prompt_in_the_warning(caplog):
+    prompt = "Write me an essay about " + "elephants " * 50
+    with caplog.at_level(logging.WARNING):
+        drop_duplicate_ids([{"id": "a", "user": prompt}] * 2, "facts")
+
+    (record,) = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert "Write me an essay about elephants" in record.message
+    assert len(record.message) < 200
+
+
+def test_drop_duplicate_ids_is_a_no_op_when_there_are_none(caplog):
+    cases = [{"id": "a", "user": "one"}, {"id": "b", "user": "two"}]
+    with caplog.at_level(logging.WARNING):
+        assert drop_duplicate_ids(cases, "facts") == cases
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
+
+
+def test_csv_plugin_drops_duplicate_rows_rather_than_emitting_a_clashing_id(tmp_path, caplog):
+    csv_path = write_csv(
+        tmp_path / "facts.csv",
+        ['"What is the capital of France?","icontains:Paris"',
+         '"What is the capital of France?","icontains:Paris"',
+         '"Who wrote Dune?","icontains:Herbert"'],
+    )
+    plugin = CsvTestCasePlugin(PluginInterface("facts", tmp_path / "cache"), csv_path)
+
+    with caplog.at_level(logging.WARNING):
+        assert plugin.generate_testcases() is True
+
+    ids = [c["id"] for c in plugin.get_testcases()]
+    assert len(ids) == len(set(ids)) == 2
+    assert "capital of France" in caplog.text
