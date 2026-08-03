@@ -448,6 +448,21 @@ def test_grading_upsert_overwrites_same_assertion(store, run_id):
     assert gradings[0].passed is False  # latest wins
 
 
+def test_grading_records_the_assertion_value(store, run_id):
+    """The criterion is stored with the score, so a report can show what was asked."""
+    rid = store.add_result_row("t1", run_id=run_id, output="Paris")
+    store.set_grading(
+        rid, "rubric:abc", type="rubric", score=0.8, assertion_value="Is the answer accurate?"
+    )
+    assert store.get_gradings(rid)[0].assertion_value == "Is the answer accurate?"
+
+
+def test_assertion_value_is_optional(store, run_id):
+    rid = store.add_result_row("t1", run_id=run_id, output="Paris")
+    store.set_grading(rid, "a1", type="contains", score=1.0)
+    assert store.get_gradings(rid)[0].assertion_value is None
+
+
 def test_multiple_assertions_per_result(store, run_id):
     rid = store.add_result_row("t1", run_id=run_id, output="x")
     store.set_grading(rid, "a1", type="contains", score=1.0, passed=True)
