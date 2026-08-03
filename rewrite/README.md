@@ -410,18 +410,37 @@ llmeval compare-report --providers configs/fidaro_prod.json configs/venice.json 
                  --order both --db runs.sqlite3 --out report.html
 ```
 
-## Caching modes (`llmeval run --mode`)
+## How many times a test runs (`llmeval run --mode`, `--repeat`)
+
+Two independent questions, one flag each.
+
+`--mode` — may cached results be reused?
 
 | Mode | Behaviour |
 |---|---|
-| `reuse` (default) | If a usable result exists for `(test, cache_key)`, don't call the model. |
-| `target_n` (`--target-n N`) | Ensure up to **N** usable results — for best-of-N statistics. Tops up across runs. |
-| `always` | Append one more result every time. |
+| `reuse` (default) | Call the model only for the shortfall: top `(test, cache_key)` up to `--repeat` usable results. |
+| `always` | Append `--repeat` more results, whatever is already stored. |
+
+`--repeat N` — how many results per test case, default `1`. So:
+
+```bash
+llmeval run --provider configs/fidaro_prod.json                    # one answer per test
+llmeval run --provider configs/fidaro_prod.json --repeat 5         # top every test up to 5
+llmeval run --provider configs/fidaro_prod.json --mode always --repeat 5   # 5 fresh answers
+```
+
+`--mode reuse --repeat 5` is the best-of-N knob: run it, run it again next week, and each test
+case ends up with five results without paying twice for the ones you already have. `--mode
+always --repeat 5` is the one to reach for when you want N *fresh* samples of the same prompt
+— measuring non-determinism, or how often a model degenerates into repetition. Repeats are
+ordinary results, so they grade and report as N separate rows.
+
+`--repeat 0` is a usage error, not a run that quietly does nothing.
 
 Failures retry (`--retries`, default 2, so 3 attempts) and **every attempt is stored** —
 including the ones that failed, and including their latency. A test case that exhausts its
 retries just leaves error rows and the run carries on; a later invocation tops it up,
-because only successful results count towards the mode's target. **Ctrl-C is safe**: each
+because only successful results count towards `--repeat`. **Ctrl-C is safe**: each
 attempt is committed before the next is made, so an interrupted run keeps everything
 computed so far — only the in-flight call is lost.
 

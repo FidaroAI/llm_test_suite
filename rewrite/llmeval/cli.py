@@ -10,6 +10,11 @@
 Stages share a SQLite DB (``--db``, default ./llmeval.sqlite3). run/grade/pickbest/report
 all read cached results — only ``run`` ever calls the model under test.
 
+``run`` decides how many times to call the model from two flags: ``--mode`` (may cached
+results be reused: ``reuse``, ``always``) and ``--repeat N`` (how many results per test case,
+default 1). ``--mode reuse --repeat 5`` tops each test case up to five results; ``--mode
+always --repeat 5`` adds five more however many are already stored.
+
 ``--testcases`` names a **source** — a plugin directory or a ``.json`` stem inside
 ``testcases/`` — and is repeatable. Omit it for every source:
 
@@ -43,7 +48,7 @@ from llmeval.logs import configure_logging
 from llmeval.models import ProviderConfig
 from llmeval.providers import build_provider, make_litellm_judge
 from llmeval.resultrows import result_columns, result_rows, write_csv
-from llmeval.runner import RunPolicy, run
+from llmeval.runner import VALID_MODES, RunPolicy, run
 from llmeval.runselect import RunSelectionError, parse_run_selection, resolve_runs
 from llmeval.store import IncompatibleSchema, Store
 from llmeval.testcases import (
@@ -73,6 +78,21 @@ def load_provider_config(path: str) -> ProviderConfig:
     if data.get("base_url"):
         data["base_url"] = os.path.expandvars(data["base_url"])
     return ProviderConfig.model_validate(data)
+
+
+def _positive_int(value: str) -> int:
+    """An ``argparse`` type for counts that must be at least 1.
+
+    A usage error rather than a silent no-op: ``--repeat 0`` would otherwise open a run,
+    call nothing and report success, which looks exactly like a fully cached run.
+    """
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1 (got {n})")
+    return n
 
 
 def _filters(items: list[str] | None) -> dict[str, str]:
@@ -141,7 +161,7 @@ def cmd_run(args) -> int:
     provider = build_provider(load_provider_config(args.provider))
     policy = RunPolicy(
         mode=args.mode,
-        target_n=args.target_n,
+        repeat=args.repeat,
         retries=args.retries,
         concurrency=args.concurrency,
         timeout=args.timeout,
@@ -302,8 +322,16 @@ def _add_run_parser(sub) -> None:
     r = sub.add_parser("run", help="run a provider over test cases (cached by cache key)")
     _add_testcases(r)
     r.add_argument("--provider", required=True)
-    r.add_argument("--mode", default="reuse", choices=["reuse", "target_n", "always"])
-    r.add_argument("--target-n", type=int, default=1)
+    r.add_argument(
+        "--mode", default="reuse", choices=list(VALID_MODES),
+        help="whether cached results may be reused: reuse (default) tops a test case up to "
+        "--repeat results; always appends --repeat more, whatever is stored",
+    )
+    r.add_argument(
+        "--repeat", type=_positive_int, default=1, metavar="N",
+        help="how many results per test case (default 1). Under --mode reuse this is a "
+        "target the run tops up to; under always it is how many fresh calls to make.",
+    )
     r.add_argument("--retries", type=int, default=2)
     r.add_argument(
         "--concurrency", type=int, default=5,

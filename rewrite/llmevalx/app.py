@@ -27,11 +27,10 @@ from llmevalx.commands import (
     DEFAULT_CONCURRENCY,
     DEFAULT_LIMIT,
     DEFAULT_MODE,
-    DEFAULT_TARGET_N,
+    DEFAULT_REPEAT,
     DEFAULT_TIMEOUT,
     MODE_ALWAYS,
     MODE_REUSE,
-    MODE_TARGET_N,
     RUNS_ALL,
     RUNS_LAST,
     RUNS_SPECIFIC,
@@ -176,7 +175,16 @@ def step_generate_sources(sel: Selection) -> object:
 # --------------------------------------------------------------------------- step 4
 
 
-def _number(sel: Selection, field: str, message: str, default: str, allow_blank: bool) -> object:
+def _number(
+    sel: Selection, field: str, message: str, default: str, allow_blank: bool,
+    whole: bool = False,
+) -> object:
+    """Ask for a positive number, re-asking until one is given.
+
+    `whole` rejects fractions here rather than letting them through to argparse, which would
+    fail the command *after* the wizard had finished asking its questions.
+    """
+    noun = "positive whole number" if whole else "positive number"
     while True:
         answer = prompts.text(message, default=getattr(sel, field) or default)
         if answer is BACK:
@@ -186,10 +194,10 @@ def _number(sel: Selection, field: str, message: str, default: str, allow_blank:
             setattr(sel, field, "")
             return None
         try:
-            if float(value) <= 0:
+            if (int(value) if whole else float(value)) <= 0:
                 raise ValueError
         except ValueError:
-            print(f"  '{value}' is not a positive number — try again, or Esc to go back.")
+            print(f"  '{value}' is not a {noun} — try again, or Esc to go back.")
             continue
         setattr(sel, field, value)
         return None
@@ -212,7 +220,7 @@ def step_run_options(sel: Selection) -> object:
 
 
 def step_run_mode(sel: Selection) -> object:
-    """Which caching mode the run uses — the last of the run options.
+    """Whether cached results may be reused. Pairs with :func:`step_repeat`, asked next.
 
     Defaults to `always`, not the CLI's `reuse`: see `commands.DEFAULT_MODE`.
     """
@@ -220,8 +228,7 @@ def step_run_mode(sel: Selection) -> object:
         "Which mode?",
         [
             Choice("always     — call the model again, keeping what is already there", MODE_ALWAYS),
-            Choice("reuse      — skip any test that already has a usable result", MODE_REUSE),
-            Choice("target_n   — top every test up to N usable results", MODE_TARGET_N),
+            Choice("reuse      — only call the model where results are missing", MODE_REUSE),
         ],
         default=sel.mode or DEFAULT_MODE,
     )
@@ -231,10 +238,16 @@ def step_run_mode(sel: Selection) -> object:
     return None
 
 
-def step_target_n(sel: Selection) -> object:
-    """Only reached when `target_n` was chosen — see :func:`steps_for`."""
+def step_repeat(sel: Selection) -> object:
+    """How many results per test case — asked whatever the mode, because it applies to both.
+
+    The wording names the mode already chosen: "top up to 5" and "add 5 more" are different
+    enough that a mode-neutral phrasing would leave you guessing which one you were getting.
+    """
+    verb = "top each test case up to" if sel.mode == MODE_REUSE else "run each test case"
     return _number(
-        sel, "target_n", "How many usable results per test case?", DEFAULT_TARGET_N, False
+        sel, "repeat", f"How many results per test case? ({verb} this many)",
+        DEFAULT_REPEAT, False, whole=True,
     )
 
 
@@ -250,12 +263,12 @@ def steps_for(sel: Selection) -> list[Step]:
     if sel.action == "generate":
         return [step_action, step_generate_sources]
     if sel.action == "run":
-        # step_target_n appears and disappears with the mode answer, exactly as the run
-        # picker does for "specific runs" — see :func:`_with_run_picker`.
-        run_steps: list[Step] = [
+        # Fixed-length: every question applies to every run. `repeat` used to appear and
+        # disappear with the mode answer, back when it was `target_n`'s extra question.
+        return [
             step_action, step_testcases, step_provider, step_run_options, step_run_mode,
+            step_repeat,
         ]
-        return [*run_steps, step_target_n] if sel.mode == MODE_TARGET_N else run_steps
     if sel.action == "grade":
         steps: list[Step] = [step_action, step_testcases, step_provider, step_runs]
         return _with_run_picker(steps, sel)

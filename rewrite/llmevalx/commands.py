@@ -35,7 +35,6 @@ DEFAULT_LIMIT = ""  # blank means "no --limit", i.e. every selected test
 
 # The runner's caching modes (llmeval.runner.VALID_MODES) offered by the "which mode?" menu.
 MODE_REUSE = "reuse"
-MODE_TARGET_N = "target_n"
 MODE_ALWAYS = "always"
 
 # The one place the wizard deliberately does *not* mirror the CLI: `llmeval run` defaults to
@@ -43,7 +42,9 @@ MODE_ALWAYS = "always"
 # wizard has just picked a provider and a set of tests on purpose, and expects fresh answers;
 # `reuse` would silently do nothing at all on a second pass and look like a broken run.
 DEFAULT_MODE = MODE_ALWAYS
-DEFAULT_TARGET_N = "1"
+# How many results per test case. Mirrors the CLI's own default, and pairs with the mode:
+# under `reuse` the run tops up to this, under `always` it adds this many.
+DEFAULT_REPEAT = "1"
 
 
 @dataclass
@@ -64,7 +65,7 @@ class Selection:
     concurrency: str = DEFAULT_CONCURRENCY
     limit: str = DEFAULT_LIMIT
     mode: str = DEFAULT_MODE
-    target_n: str = DEFAULT_TARGET_N                     # only used when mode is target_n
+    repeat: str = DEFAULT_REPEAT                         # results per test case, any mode
 
 
 @dataclass(frozen=True)
@@ -152,12 +153,10 @@ def _run_commands(sel: Selection) -> list[Command]:
     args += ["--timeout", sel.timeout, "--concurrency", sel.concurrency]
     if sel.limit.strip():
         args += ["--limit", sel.limit.strip()]
-    # Spelled out even when it matches the CLI's default, unlike the run-selection flags:
-    # the mode decides whether the run calls the model at all, so the echoed command should
-    # say which one was chosen rather than leave it to be inferred.
-    args += ["--mode", sel.mode]
-    if sel.mode == MODE_TARGET_N:
-        args += ["--target-n", sel.target_n.strip()]
+    # Both spelled out even when they match the CLI's defaults, unlike the run-selection
+    # flags: together they decide how many times the model is called, so the echoed command
+    # should say so rather than leave it to be inferred.
+    args += ["--mode", sel.mode, "--repeat", sel.repeat.strip()]
     return [_llmeval(*args)]
 
 

@@ -5,7 +5,6 @@ import sys
 from llmevalx.commands import (
     MODE_ALWAYS,
     MODE_REUSE,
-    MODE_TARGET_N,
     RUNS_ALL,
     RUNS_LAST,
     RUNS_SPECIFIC,
@@ -100,22 +99,28 @@ def test_run_spells_out_the_mode_even_when_it_matches_the_cli_default():
     assert "--mode reuse" in command.display
 
 
-def test_target_n_mode_passes_the_count():
-    command = only(
-        Selection(action="run", provider="p.json",
-                  mode=MODE_TARGET_N, target_n="3")
-    )
-    assert "--mode target_n" in command.display
-    assert "--target-n 3" in command.display
+def test_run_defaults_to_one_repeat():
+    command = only(Selection(action="run", provider="p.json"))
+    assert "--repeat 1" in command.display
 
 
-def test_other_modes_omit_the_count():
-    """`--target-n` is meaningless outside that mode, and a stale answer must not leak in."""
-    command = only(
-        Selection(action="run", provider="p.json",
-                  mode=MODE_ALWAYS, target_n="3")
-    )
-    assert "--target-n" not in command.display
+def test_run_passes_the_repeat_count():
+    """Spelled out for the same reason the mode is: it decides how many calls happen."""
+    command = only(Selection(action="run", provider="p.json", repeat="5"))
+    assert "--repeat 5" in command.display
+
+
+def test_repeat_applies_to_every_mode():
+    """It is orthogonal to the mode now, not an extra question one mode asks."""
+    for mode in (MODE_ALWAYS, MODE_REUSE):
+        command = only(Selection(action="run", provider="p.json", mode=mode, repeat="4"))
+        assert f"--mode {mode}" in command.display
+        assert "--repeat 4" in command.display
+
+
+def test_target_n_is_gone():
+    assert not hasattr(Selection(action="run"), "target_n")
+    assert "--target-n" not in only(Selection(action="run", provider="p.json")).display
 
 
 def test_grade_and_report_never_pass_a_mode():

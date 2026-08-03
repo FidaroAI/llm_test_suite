@@ -117,6 +117,61 @@ def test_cli_run_timeout_flag_override():
     assert args.timeout == 300.0
 
 
+def test_cli_run_repeat_flag_defaults_to_one():
+    assert build_parser().parse_args(["run", "--provider", "p"]).repeat == 1
+
+
+def test_cli_run_repeat_flag_override():
+    assert build_parser().parse_args(["run", "--provider", "p", "--repeat", "5"]).repeat == 5
+
+
+def test_cli_run_mode_offers_only_reuse_and_always():
+    """``target_n`` was never a mode — it was a count. It is now ``--repeat``."""
+    assert build_parser().parse_args(["run", "--provider", "p"]).mode == "reuse"
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["run", "--provider", "p", "--mode", "target_n"])
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["run", "--provider", "p", "--target-n", "3"])
+
+
+def test_cli_repeat_runs_each_test_that_many_times(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    assert main(["run", "--provider", "echo.json", "--db", db, "--repeat", "3"]) == 0
+    assert count_results(db) == 3
+
+
+def test_cli_repeat_under_reuse_tops_up_rather_than_redoing(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    main(["run", "--provider", "echo.json", "--db", db, "--repeat", "2"])
+    main(["run", "--provider", "echo.json", "--db", db, "--repeat", "5"])
+    assert count_results(db) == 5
+
+
+def test_cli_repeat_under_always_appends_every_time(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    main(["run", "--provider", "echo.json", "--db", db, "--mode", "always", "--repeat", "2"])
+    main(["run", "--provider", "echo.json", "--db", db, "--mode", "always", "--repeat", "2"])
+    assert count_results(db) == 4
+
+
+def test_cli_repeat_below_one_is_a_usage_error_not_a_silent_no_op(tmp_path, monkeypatch):
+    """Rejected while parsing, so nothing is opened and no database is left behind."""
+    db = project(tmp_path, monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        main(["run", "--provider", "echo.json", "--db", db, "--repeat", "0"])
+    assert exc.value.code == 2
+    assert not (tmp_path / "db.sqlite3").exists()
+
+
+def test_cli_repeat_is_recorded_against_the_run(tmp_path, monkeypatch):
+    db = project(tmp_path, monkeypatch)
+    main(["run", "--provider", "echo.json", "--db", db, "--repeat", "4"])
+    with sqlite3.connect(db) as conn:
+        params = json.loads(conn.execute("select params_json from runs").fetchone()[0])
+    assert params["repeat"] == 4
+    assert "target_n" not in params
+
+
 def test_cli_testcases_flag_is_repeatable():
     args = build_parser().parse_args(
         ["run", "--testcases", "a", "--testcases", "b", "--provider", "p"]

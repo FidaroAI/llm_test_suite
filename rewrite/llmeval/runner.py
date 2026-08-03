@@ -3,10 +3,16 @@
 Caching is per ``(test_id, cache_key)`` — never per whole run — so a single failing test
 can be re-run in isolation and nothing already done is repeated or wasted.
 
-Policies:
-* ``reuse``    — if a usable result exists, don't call the model again.
-* ``target_n`` — ensure up to N usable results exist (best-of-N statistics).
-* ``always``   — append one more result regardless.
+How many results a test case gets is **two** independent questions, and there is a knob for
+each. ``mode`` answers "may I reuse what is already cached?" and ``repeat`` answers "how many
+results do I want?":
+
+* ``reuse``  — top up to ``repeat`` usable results, calling the model only for the shortfall.
+* ``always`` — append ``repeat`` more results, whatever is already there.
+
+With the default ``repeat=1`` that is "call once if there's nothing cached" and "call once,
+always" — so the pair collapses to the two behaviours you'd expect. Raising ``repeat`` gives
+best-of-N statistics under ``reuse`` and N fresh samples under ``always``.
 
 **Every attempt is stored**, successful or not, so a test that needed three calls to
 answer leaves three rows. A persistent failure is stored as error rows (graceful) rather
@@ -40,7 +46,7 @@ from llmeval.store import Store
 
 logger = logging.getLogger(__name__)
 
-VALID_MODES = ("reuse", "target_n", "always")
+VALID_MODES = ("reuse", "always")
 
 # How much of a prompt or answer to show in a log line. Long enough to identify which
 # test case a block belongs to, short enough to keep one test case to one line.
@@ -50,7 +56,10 @@ LOG_EXCERPT_CHARS = 80
 @dataclass
 class RunPolicy:
     mode: str = "reuse"
-    target_n: int = 1
+    # How many results each test case should end up with from this policy. Under ``reuse``
+    # it is a target the run tops up to; under ``always`` it is how many to append. 1 (the
+    # default) is the ordinary "one answer per test" run.
+    repeat: int = 1
     retries: int = 2
     # How many test cases to run in parallel. 1 = sequential (deterministic, the
     # library default); the CLI raises this to 5. Each test case is an independent
@@ -96,13 +105,12 @@ class RunResult:
     summary: RunSummary
 
 
-def _to_run(mode: str, existing_success: int, target_n: int) -> int:
+def _to_run(mode: str, existing_success: int, repeat: int) -> int:
+    """How many calls this test case needs, given what is already stored."""
     if mode == "reuse":
-        return 0 if existing_success >= 1 else 1
-    if mode == "target_n":
-        return max(0, target_n - existing_success)
+        return max(0, repeat - existing_success)
     if mode == "always":
-        return 1
+        return repeat
     raise ValueError(f"unknown run mode: {mode!r} (expected one of {VALID_MODES})")
 
 
@@ -292,7 +300,7 @@ def _run_testcase(
     key = provider.config.cache_key()
     config = provider.config.model_dump()  # full config stored alongside every result
     existing = store.count_results(testcase.id, key.hash, success_only=True)
-    n = _to_run(policy.mode, existing, policy.target_n)
+    n = _to_run(policy.mode, existing, policy.repeat)
 
     # Every record in this block is prefixed with the test id. Redundant while the
     # block is contiguous, but the prefix is what makes the output greppable and keeps
@@ -357,8 +365,8 @@ def run(
     # Logged before the first model call, so the run id is on screen even if the run
     # is later interrupted — it is the only handle for querying partial results back.
     logger.info(
-        "run %s: %d test case(s), provider=%s, mode=%s, concurrency=%d",
-        run_id, len(cases), provider.config.name, policy.mode, concurrency,
+        "run %s: %d test case(s), provider=%s, mode=%s, repeat=%d, concurrency=%d",
+        run_id, len(cases), provider.config.name, policy.mode, policy.repeat, concurrency,
     )
 
     if hooks is not None:

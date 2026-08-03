@@ -216,7 +216,7 @@ ProviderConfig(
 This gives the requested behaviours for free:
 
 - *"if cached, reuse"* — look up `(test_id, cache_key)`; ≥1 row ⇒ skip.
-- *"keep up to N results"* — `target_n` policy tops up to N rows for best-of-N.
+- *"keep up to N results"* — `reuse` with `repeat=N` tops up to N rows for best-of-N.
 - *"rerun one failing test until it passes"* — caching is per `(test_id, cache_key)`, so
   reruns touch only that pair; nothing else is wasted or repeated.
 
@@ -225,13 +225,27 @@ This gives the requested behaviours for free:
 ## 5. Running, retries, timeouts, graceful failure (`RunPolicy`)
 
 ```python
-RunPolicy(mode="reuse" | "target_n" | "always", target_n=1, retries=2,
+RunPolicy(mode="reuse" | "always", repeat=1, retries=2,
           concurrency=1, timeout=60.0)
 ```
 
-- `reuse`: if ≥1 stored *successful* result for `(test, key)`, do nothing.
-- `target_n`: ensure up to N successful results exist (run `N − existing`).
-- `always`: append exactly one more.
+`mode` and `repeat` are orthogonal: the mode says whether stored results may be reused, and
+`repeat` says how many results a test case should have.
+
+- `reuse`: ensure `repeat` successful results exist for `(test, key)` — run `repeat − existing`.
+- `always`: append `repeat` more, whatever is stored.
+
+### [DECISION] `repeat` is a count, not a third mode
+
+`target_n` was originally a *mode* alongside `reuse`/`always`, with its N in a separate
+`--target-n` flag that only meant anything for that one mode. That conflated two questions:
+"may I reuse the cache?" and "how many results do I want?". The `reuse` branch was
+`existing >= 1 ? 0 : 1` and the `target_n` branch was `max(0, N − existing)` — the same
+arithmetic, one of them with N hardcoded to 1. Making the count a first-class `repeat`
+collapses the two branches into one, deletes a mode, and gives `always` a count it never had
+(N fresh samples of the same prompt, which is what a non-determinism or repetition check
+wants). `repeat=1` reproduces the old two-mode behaviour exactly, so the default is unchanged.
+The cost is a breaking CLI change: `--mode target_n --target-n N` is now `--repeat N`.
 
 Per attempt: call the provider with a timeout; retry up to `retries` on any exception
 (`BaseException`, i.e. Ctrl-C, is deliberately not caught). A test case that exhausts its

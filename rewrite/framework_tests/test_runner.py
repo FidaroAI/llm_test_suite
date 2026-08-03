@@ -65,17 +65,19 @@ def test_reuse_runs_once_then_reuses(store, run_id):
     assert store.count_results("t1", cfg().cache_key().hash) == 1
 
 
-def test_target_n_fills_up_to_n(store, run_id):
+def test_reuse_fills_up_to_repeat(store, run_id):
     p = FakeProvider(cfg())
-    run_testcase(store, tc(), p, RunPolicy(mode="target_n", target_n=5), run_id)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", repeat=5), run_id)
     assert store.count_results("t1", cfg().cache_key().hash, success_only=True) == 5
 
 
-def test_target_n_tops_up_existing(store, run_id):
+def test_reuse_tops_up_existing_to_repeat(store, run_id):
+    """The behaviour the removed ``target_n`` mode used to provide: top up, don't redo."""
     p = FakeProvider(cfg())
-    run_testcase(store, tc(), p, RunPolicy(mode="target_n", target_n=2), run_id)
-    summary = run_testcase(store, tc(), p, RunPolicy(mode="target_n", target_n=5), run_id)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse", repeat=2), run_id)
+    summary = run_testcase(store, tc(), p, RunPolicy(mode="reuse", repeat=5), run_id)
     assert summary.ran == 3
+    assert summary.cached == 2
     assert store.count_results("t1", cfg().cache_key().hash, success_only=True) == 5
 
 
@@ -84,6 +86,32 @@ def test_always_appends_each_call(store, run_id):
     run_testcase(store, tc(), p, RunPolicy(mode="always"), run_id)
     run_testcase(store, tc(), p, RunPolicy(mode="always"), run_id)
     assert store.count_results("t1", cfg().cache_key().hash) == 2
+
+
+def test_always_appends_repeat_results_ignoring_what_is_cached(store, run_id):
+    p = FakeProvider(cfg())
+    run_testcase(store, tc(), p, RunPolicy(mode="always", repeat=2), run_id)
+    run_testcase(store, tc(), p, RunPolicy(mode="always", repeat=3), run_id)
+    assert p.calls == 5
+    assert store.count_results("t1", cfg().cache_key().hash) == 5
+
+
+def test_repeat_defaults_to_one(store, run_id):
+    """The default must be a no-op, so an existing invocation behaves exactly as before."""
+    assert RunPolicy().repeat == 1
+    p = FakeProvider(cfg())
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse"), run_id)
+    run_testcase(store, tc(), p, RunPolicy(mode="reuse"), run_id)
+    assert p.calls == 1
+
+
+def test_target_n_is_no_longer_a_mode(store, run_id):
+    """Its behaviour moved to ``reuse`` + ``repeat``; the mode itself is gone."""
+    from llmeval.runner import VALID_MODES  # pylint: disable=import-outside-toplevel
+
+    assert VALID_MODES == ("reuse", "always")
+    with pytest.raises(ValueError, match="unknown run mode"):
+        run_testcase(store, tc(), FakeProvider(cfg()), RunPolicy(mode="target_n"), run_id)
 
 
 def test_retries_then_succeeds(store, run_id):
@@ -334,7 +362,7 @@ def test_interrupted_run_is_left_unfinished(store):
 
 def test_run_opens_one_run_and_attributes_every_result_to_it(store):
     p = FakeProvider(cfg())
-    result = run(store, [tc("a"), tc("b")], p, RunPolicy(mode="target_n", target_n=2))
+    result = run(store, [tc("a"), tc("b")], p, RunPolicy(mode="reuse", repeat=2))
 
     assert store.list_runs() == [store.get_run(result.run_id)]
     rows = store.get_results_for_run(result.run_id)
@@ -349,7 +377,7 @@ def test_completed_run_is_marked_finished(store):
 
 def test_run_records_provider_identity_and_policy(store):
     p = FakeProvider(cfg())
-    policy = RunPolicy(mode="target_n", target_n=3, retries=1, concurrency=2, timeout=30.0)
+    policy = RunPolicy(mode="reuse", repeat=3, retries=1, concurrency=2, timeout=30.0)
     result = run(store, [tc()], p, policy, notes="before the prompt change")
 
     row = store.get_run(result.run_id)
@@ -357,7 +385,7 @@ def test_run_records_provider_identity_and_policy(store):
     assert row.cache_key_hash == cfg().cache_key().hash
     assert row.config["model"] == "m1"
     assert row.params == {
-        "mode": "target_n", "target_n": 3, "retries": 1, "concurrency": 2, "timeout": 30.0,
+        "mode": "reuse", "repeat": 3, "retries": 1, "concurrency": 2, "timeout": 30.0,
     }
     assert row.notes == "before the prompt change"
 

@@ -62,9 +62,9 @@ def test_full_pipeline(tmp_path):
 
     # RUN best-of-2 for each config (mock provider, no network)
     run(store, tcs, SimpleProvider(cfg_a, "reasoning\n\n\nGOOD: Paris is the capital."),
-        RunPolicy(mode="target_n", target_n=2))
+        RunPolicy(mode="reuse", repeat=2))
     run(store, tcs, SimpleProvider(cfg_b, "reasoning\n\n\nParis, maybe."),
-        RunPolicy(mode="target_n", target_n=2))
+        RunPolicy(mode="reuse", repeat=2))
     assert store.count_results("t1", cfg_a.cache_key().hash, success_only=True) == 2
 
     # GRADE cached outputs (re-runnable; no model calls)
