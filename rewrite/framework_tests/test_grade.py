@@ -74,6 +74,33 @@ def test_skip_existing_avoids_recalling_judge(store):
     assert j.calls == 2
 
 
+def test_grading_records_the_criterion_the_judge_saw(store):
+    """A rubric score is unreadable without the rubric, so the text is stored beside it."""
+    rid = seed(store)
+    criterion = "Does the answer name the city, and only the city?"
+    grade_testcase(
+        store,
+        tc([{"type": "rubric", "value": criterion}]),
+        KEY.hash,
+        judge=lambda prompt: '{"score": 1.0, "reason": "yes"}',
+    )
+    assert store.get_gradings(rid)[0].assertion_value == criterion
+
+
+def test_a_non_string_assertion_value_is_stored_as_json(store):
+    """``value`` is Any — a list has to survive as text rather than as ``"['a', 'b']"``."""
+    rid = seed(store)
+    grade_testcase(store, tc([{"type": "icontains", "value": ["Paris"]}]), KEY.hash)
+    assert store.get_gradings(rid)[0].assertion_value == '["Paris"]'
+
+
+def test_valueless_assertion_records_no_criterion(store):
+    """``refusal`` carries no value; the column should be empty, not the string "None"."""
+    rid = seed(store)
+    grade_testcase(store, tc([{"type": "refusal"}]), KEY.hash)
+    assert store.get_gradings(rid)[0].assertion_value is None
+
+
 def test_editing_assertion_value_changes_key(store):
     a = AssertionSpec(type="icontains", value="Paris")
     b = AssertionSpec(type="icontains", value="Lyon")

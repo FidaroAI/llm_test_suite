@@ -47,6 +47,25 @@ def assertion_key(spec: AssertionSpec) -> str:
     return f"{spec.type}:{hashlib.sha1(payload.encode('utf-8')).hexdigest()[:10]}"
 
 
+def assertion_value_text(spec: AssertionSpec) -> str | None:
+    """The criterion as readable text, stored beside the score.
+
+    ``assertion_key`` hashes the criterion so re-grades can find their row; this is the
+    other half — the text itself, so a report can show *what* was asked without joining
+    against ``testcases/``, which is regenerated and may since have changed.
+
+    ``value`` is typed ``Any``: a rubric's is prose and goes in verbatim, anything else is
+    JSON so a list survives as ``["a"]`` rather than Python's ``['a']``. A valueless
+    assertion (``refusal``, ``length`` — the criterion lives in ``params``) stores nothing
+    rather than the string ``"None"``.
+    """
+    if spec.value is None:
+        return None
+    if isinstance(spec.value, str):
+        return spec.value
+    return json.dumps(spec.value, ensure_ascii=False, default=str)
+
+
 def grade_testcase(
     store: Store,
     testcase: TestCase,
@@ -92,6 +111,7 @@ def grade_testcase(
             store.set_grading(
                 result.id,
                 akey,
+                assertion_value=assertion_value_text(spec),
                 type=spec.type,
                 metric=spec.metric,
                 score=res.score,

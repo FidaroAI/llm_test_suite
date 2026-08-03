@@ -65,6 +65,9 @@ _GRADING_COLUMNS = [
     "passed",
     "weight",
     "judge_model",
+    # The criterion, then the judge's verdict on it: two prose cells that are read
+    # together, kept last so the scalar columns stay reachable without scrolling.
+    "assertion_value",
     "grading_reason",
 ]
 _PROVENANCE_COLUMNS = ["cache_key_hash", "result_id"]
@@ -221,6 +224,7 @@ def result_rows(
                 row.update(
                     {
                         "assertion_key": grading.assertion_key,
+                        "assertion_value": grading.assertion_value,
                         "assertion_type": grading.type,
                         "metric": grading.metric,
                         "score": grading.score,

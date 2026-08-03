@@ -256,6 +256,13 @@ to grade rather than superseding one. `grade` fills in every `(result, assertion
 the selected runs that doesn't have a grading yet, and **skips attempts that errored** —
 there is no output to assert against, and the error row is itself the finding.
 
+Each grading also stores the criterion it was graded against, in `assertion_value`: the
+rubric a judge was given, or the substring a deterministic check looked for. `assertion_key`
+is a hash of that text — enough to match a re-grade to its row, useless to a human — and
+`testcases/` is regenerated, so without this a score has no surviving record of what it
+scored. Assertions that keep their criterion in `params` rather than `value` (`refusal`,
+`length`, the stock-price check) leave it empty.
+
 ```bash
 llmeval grade --provider configs/fidaro_prod.json --run-last-n 1
 ```
@@ -297,6 +304,12 @@ run2, test x, attempt 0, assertion1, passed=True
 
 `latency_ms` is filled in for error rows too, which is how "the timeout is too tight" is
 distinguished from "the provider is down".
+
+**A score arrives with the criterion it scored.** `assertion_value` holds the rubric text
+as graded, next to `grading_reason`, which is the judge's verdict on it — so a row reads
+*asked → scored → why* without opening a test-case file. It comes off the stored grading,
+not off `testcases/`, so it needs no `--testcases` and cannot drift if the suite is
+regenerated.
 
 **The prompt is always there.** Two columns carry it, both read off the result rather than
 the test-case files, so they need no `--testcases`:

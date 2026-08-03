@@ -8,7 +8,10 @@ Four tables, deliberately separated so stages stay decoupled:
 * ``results``  — one row per *attempt*, successful or not. Reused so expensive calls
   aren't repeated; topped up to N for best-of-N statistics.
 * ``gradings`` — assertion scores against a result. Separate from results so you can
-  edit/add assertions and re-grade **without re-running the model**.
+  edit/add assertions and re-grade **without re-running the model**. Each row also keeps
+  the ``assertion_value`` it was graded against — the rubric text, the expected substring
+  — because ``testcases/`` is regenerated and a bare score with no record of the criterion
+  is unreadable a week later. Same reasoning as ``results.messages_json`` below.
 * ``verdicts`` — pick-best head-to-head outcomes, also keyed so they replay against
   cached outputs.
 
@@ -61,7 +64,8 @@ from llmeval.cache_key import CacheKey
 # is a hard error telling the user to delete the file (see ``Store._check_version``).
 # 3: results.messages_json — the prompt as sent, recorded with each attempt.
 # 4: results.provider_specific_output — non-standard response data, verbatim.
-SCHEMA_VERSION = 4
+# 5: gradings.assertion_value — the criterion the score was awarded against.
+SCHEMA_VERSION = 5
 
 
 def _now() -> str:
@@ -131,6 +135,7 @@ class GradingRow:
     id: int
     result_id: int
     assertion_key: str
+    assertion_value: str | None
     type: str | None
     metric: str | None
     score: float | None
@@ -214,6 +219,10 @@ CREATE TABLE IF NOT EXISTS gradings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     result_id INTEGER NOT NULL,
     assertion_key TEXT NOT NULL,
+    -- The criterion as graded, as text: the rubric a judge was given, the substring a
+    -- deterministic check looked for. assertion_key is a hash of it, which identifies an
+    -- assertion but cannot be read; this is the half a human needs.
+    assertion_value TEXT,
     type TEXT,
     metric TEXT,
     score REAL,
@@ -601,21 +610,29 @@ class Store:
         weight: float = 1.0,
         reason: str | None = None,
         judge_model: str | None = None,
+        assertion_value: str | None = None,
     ) -> None:
-        """Upsert a grading for (result, assertion). Re-grading overwrites."""
+        """Upsert a grading for (result, assertion). Re-grading overwrites.
+
+        ``assertion_value`` is the criterion as text — already rendered by the caller,
+        because what counts as readable is a property of the assertion type, not of the
+        store (see :func:`llmeval.grade.assertion_value_text`).
+        """
         with self._lock:
             self._conn.execute(
                 """INSERT INTO gradings
-               (result_id, assertion_key, type, metric, score, passed, weight,
-                reason, judge_model, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?)
+               (result_id, assertion_key, assertion_value, type, metric, score, passed,
+                weight, reason, judge_model, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(result_id, assertion_key) DO UPDATE SET
-                 type=excluded.type, metric=excluded.metric, score=excluded.score,
+                 assertion_value=excluded.assertion_value, type=excluded.type,
+                 metric=excluded.metric, score=excluded.score,
                  passed=excluded.passed, weight=excluded.weight, reason=excluded.reason,
                  judge_model=excluded.judge_model, created_at=excluded.created_at""",
                 (
                     result_id,
                     assertion_key,
+                    assertion_value,
                     type,
                     metric,
                     score,
@@ -638,6 +655,7 @@ class Store:
                 id=r["id"],
                 result_id=r["result_id"],
                 assertion_key=r["assertion_key"],
+                assertion_value=r["assertion_value"],
                 type=r["type"],
                 metric=r["metric"],
                 score=r["score"],

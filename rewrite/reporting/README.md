@@ -71,7 +71,9 @@ python -m reporting.csv_table results.csv -o results.html --title "last 3 runs"
 ```
 
 The CSV has one row per (result × assertion), plus one row per **errored** result with the
-grading columns empty. Rows are grouped by run in chronological order and by attempt within
+grading columns empty. A graded row carries the criterion as well as the score
+(`assertion_value`, sitting next to `grading_reason`), so a rubric result can be read
+without going and finding the rubric. Rows are grouped by run in chronological order and by attempt within
 a test, so a retried test reads as its failures followed by the answer. Every row carries
 the prompt it was produced from (`prompt` for the question, `messages` for the full
 conversation as sent), so the page is readable without cross-referencing anything, and

@@ -85,6 +85,17 @@ def test_grading_detail_is_carried_onto_the_row(store):
     assert row["judge_model"] == "bedrock/haiku"
 
 
+def test_assertion_value_is_carried_onto_the_row(store):
+    """The rubric text, so a reader can see what the score was a score *of*."""
+    run = a_run(store, KEY)
+    rid = store.add_result_row("t-0123456789", run_id=run, output="hello")
+    store.set_grading(
+        rid, "a1", type="rubric", score=0.4, assertion_value="Is the answer concise?"
+    )
+    row = result_rows(store, runs_of(store, run))[0]
+    assert row["assertion_value"] == "Is the answer concise?"
+
+
 def test_ungraded_result_still_yields_one_row(store):
     run = a_run(store, KEY)
     store.add_result_row("t-0123456789", run_id=run, output="hello")
