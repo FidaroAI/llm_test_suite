@@ -72,7 +72,7 @@ DEFAULT_DB = os.path.join(CACHE_DIR_NAME, "llmeval.sqlite3")
 # Matches the legacy suite's judge: Bedrock Claude Haiku, deterministic.
 DEFAULT_JUDGE = ProviderConfig(
     name="judge",
-    model="bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    model="bedrock/deepseek.v3.2",
     params={"temperature": 0},
 )
 
