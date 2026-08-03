@@ -136,7 +136,7 @@ def test_the_cache_directory_is_a_sibling_of_the_root(tmp_path):
     make_plugin(root, "greeter")
     loaded = load(root=root)
     iface = loaded.sources[0].plugin.interface
-    assert iface.cache_directory() == tmp_path / ".testcases.cache" / "greeter"
+    assert iface.cache_directory() == tmp_path / ".llmeval.cache" / "greeter"
 
 
 def test_load_returns_testcase_objects_with_namespaced_ids(tmp_path):

@@ -15,8 +15,6 @@ reports/*.html
 /*.html
 /*.csv
 
-# Default sqllite
-llmeval.sqlite3
-
-# Plugin scratch space: downloads and generated test cases (llmeval generate).
-.testcases.cache/
+# Scratch space: plugin downloads and generated test cases (llmeval generate), plus the
+# default results database (.llmeval.cache/llmeval.sqlite3).
+.llmeval.cache/

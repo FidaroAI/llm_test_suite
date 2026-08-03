@@ -81,7 +81,7 @@ abstract; everything else defaults to doing nothing.
 | `before_each_grade(tc)` / `after_each_grade(tc, gradings)` | Around each test case's grading. |
 
 **`PluginInterface`** gives you `name` and `cache_directory()` — a private scratch directory
-at `.testcases.cache/<name>/`, gitignored, created on demand. Downloads, intermediate files
+at `.llmeval.cache/<name>/`, gitignored, created on demand. Downloads, intermediate files
 and the generated `testcases.json` go there. Cache downloads and reuse them: a first
 `generate` may cost the network, later ones should not.
 

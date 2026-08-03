@@ -268,6 +268,12 @@ class Store:
     def __init__(self, path: str = ":memory:"):
         self.path = path
         self._lock = threading.RLock()
+        # ``sqlite3.connect`` will not create missing parents — it raises "unable to open
+        # database file", which reads like a permissions problem. The default DB lives in
+        # ``.llmeval.cache/``, a directory a fresh checkout does not have yet, so make it.
+        if path != ":memory:":
+            parent = os.path.dirname(os.path.abspath(path))
+            os.makedirs(parent, exist_ok=True)
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         # Off by default in sqlite3; without it ``results.run_id REFERENCES runs(id)``

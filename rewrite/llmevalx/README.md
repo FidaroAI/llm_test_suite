@@ -67,7 +67,7 @@ registry, and runs from the SQLite store.
 ## Where it runs
 
 The wizard `chdir`s to the project directory at startup — the one holding `testcases/`,
-`configs/` and `llmeval.sqlite3` — so every path it prints is relative and every command it
+`configs/` and `.llmeval.cache/` — so every path it prints is relative and every command it
 echoes can be pasted straight into a shell. That is the package's parent for a checkout or an
 editable install; for any other install it falls back to the current directory, so
 `cd my-eval-project && llmevalx` works too. See `paths.project_root`.

@@ -425,6 +425,19 @@ def test_a_fresh_file_opens_cleanly(tmp_path):
     Store(db).close()  # reopening an already-versioned DB is fine
 
 
+def test_a_missing_parent_directory_is_created(tmp_path):
+    """The default DB lives in .llmeval.cache/, which a fresh checkout does not have."""
+    db = str(tmp_path / ".llmeval.cache" / "llmeval.sqlite3")
+    Store(db).close()
+    assert (tmp_path / ".llmeval.cache" / "llmeval.sqlite3").is_file()
+
+
+def test_an_in_memory_store_creates_no_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    Store().close()
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_persists_across_connections(tmp_path):
     db = str(tmp_path / "e.sqlite3")
     k = key()

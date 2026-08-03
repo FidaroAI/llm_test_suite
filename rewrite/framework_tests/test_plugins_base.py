@@ -4,9 +4,9 @@ from llmeval.plugins import PluginInterface, TestCasePlugin
 
 
 def test_cache_directory_is_created_under_the_plugin_name(tmp_path):
-    iface = PluginInterface("stock_prices", tmp_path / ".testcases.cache")
+    iface = PluginInterface("stock_prices", tmp_path / ".llmeval.cache")
     path = iface.cache_directory()
-    assert path == tmp_path / ".testcases.cache" / "stock_prices"
+    assert path == tmp_path / ".llmeval.cache" / "stock_prices"
     assert path.is_dir()
     assert iface.name == "stock_prices"
 

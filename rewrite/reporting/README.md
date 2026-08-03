@@ -66,7 +66,7 @@ renderer's only input is a file.
 
 ```bash
 uv run llmeval report --run-last-n 3 --provider configs/fidaro_prod.json \
-    --testcases testcases/ --out results.csv
+    --out results.csv
 python -m reporting.csv_table results.csv -o results.html --title "last 3 runs"
 ```
 

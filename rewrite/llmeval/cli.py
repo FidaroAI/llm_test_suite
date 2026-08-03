@@ -7,8 +7,9 @@
     llmeval report   --run-last-n 3 --out results.csv
     llmeval compare-report --providers a.json b.json --baseline fidaro-prod --out report.html
 
-Stages share a SQLite DB (``--db``, default ./llmeval.sqlite3). run/grade/pickbest/report
-all read cached results — only ``run`` ever calls the model under test.
+Stages share a SQLite DB (``--db``, default ``.llmeval.cache/llmeval.sqlite3``, created on
+demand). run/grade/pickbest/report all read cached results — only ``run`` ever calls the
+model under test.
 
 ``run`` decides how many times to call the model from two flags: ``--mode`` (may cached
 results be reused: ``reuse``, ``always``) and ``--repeat N`` (how many results per test case,
@@ -53,6 +54,7 @@ from llmeval.runner import VALID_MODES, RunPolicy, run
 from llmeval.runselect import RunSelectionError, parse_run_selection, resolve_runs
 from llmeval.store import IncompatibleSchema, Store
 from llmeval.testcases import (
+    CACHE_DIR_NAME,
     DEFAULT_ROOT,
     SourceError,
     load_testcases,
@@ -63,7 +65,10 @@ from llmeval.testcases import (
 logger = logging.getLogger(__name__)
 
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
-DEFAULT_DB = "llmeval.sqlite3"
+# Inside the cache directory rather than the project root: the database is regenerable
+# working state, like the plugin scratch space it now sits beside, so one `rm -rf
+# .llmeval.cache` is the whole clean slate. Relative, so it follows the working directory.
+DEFAULT_DB = os.path.join(CACHE_DIR_NAME, "llmeval.sqlite3")
 # Matches the legacy suite's judge: Bedrock Claude Haiku, deterministic.
 DEFAULT_JUDGE = ProviderConfig(
     name="judge",
@@ -281,7 +286,10 @@ def _add_generate_parser(sub) -> None:
 
 
 def _add_db(sp) -> None:
-    sp.add_argument("--db", default=DEFAULT_DB, help="SQLite results DB")
+    sp.add_argument(
+        "--db", default=DEFAULT_DB,
+        help=f"SQLite results DB (default: {DEFAULT_DB}; parent directory created on demand)",
+    )
 
 
 def _add_testcases(sp) -> None:

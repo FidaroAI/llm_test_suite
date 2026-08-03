@@ -13,6 +13,7 @@ import random
 from typing import Sequence, TypeVar
 
 from llmeval.plugins.loader import (
+    CACHE_DIR_NAME,
     DEFAULT_ROOT,
     Loaded,
     SourceError,
@@ -21,6 +22,7 @@ from llmeval.plugins.loader import (
 )
 
 __all__ = [
+    "CACHE_DIR_NAME",
     "DEFAULT_ROOT",
     "Loaded",
     "SourceError",

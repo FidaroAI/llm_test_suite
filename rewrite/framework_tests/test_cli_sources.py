@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from llmeval.cli import main
+from llmeval.cli import DEFAULT_DB, main
 
 PLUGIN = '''
 from pathlib import Path
@@ -39,7 +39,7 @@ def make_project(tmp_path):
     return root
 
 
-def stored_test_ids(db="llmeval.sqlite3"):
+def stored_test_ids(db=DEFAULT_DB):
     with sqlite3.connect(db) as conn:
         return {row[0] for row in conn.execute("SELECT test_id FROM results")}
 
@@ -48,7 +48,7 @@ def test_generate_runs_every_plugin_by_default(tmp_path, monkeypatch):
     make_project(tmp_path)
     monkeypatch.chdir(tmp_path)
     assert main(["generate"]) == 0
-    cached = tmp_path / ".testcases.cache" / "facts" / "testcases.json"
+    cached = tmp_path / ".llmeval.cache" / "facts" / "testcases.json"
     assert json.loads(cached.read_text())[0]["assertions"][0]["value"] == "Paris"
 
 

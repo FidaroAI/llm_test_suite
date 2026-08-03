@@ -1,7 +1,7 @@
 """Where things live.
 
 The wizard works in one directory — the project directory holding `testcases/`, `configs/`
-and `llmeval.sqlite3` — and `chdir`s there at startup. That is what lets every path it prints
+and `.llmeval.cache/` — and `chdir`s there at startup. That is what lets every path it prints
 be relative and every command it echoes be pasted straight into a shell, so everything
 downstream uses these relative names rather than absolutes.
 """

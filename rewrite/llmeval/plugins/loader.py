@@ -35,7 +35,10 @@ from llmeval.plugins.base import GradingOutcome, PluginInterface, TestCasePlugin
 logger = logging.getLogger(__name__)
 
 DEFAULT_ROOT = "testcases"
-CACHE_DIR_NAME = ".testcases.cache"
+# The suite's one gitignored scratch directory. Plugin caches live under it, and so does the
+# default results database (see ``llmeval.cli.DEFAULT_DB``) — one directory to delete when you
+# want a clean slate, rather than a cache folder here and a stray .sqlite3 in the project root.
+CACHE_DIR_NAME = ".llmeval.cache"
 
 # Entries that are never a source. ``__pycache__`` and dot/underscore-prefixed directories are
 # skipped silently — they are plainly not somebody's forgotten plugin, so warning about them
@@ -166,7 +169,7 @@ def _import_plugin_module(name: str, directory: Path):
 
 
 def cache_root_for(root: Path) -> Path:
-    """Where plugin cache directories live: ``.testcases.cache/`` beside the testcases root."""
+    """Where plugin cache directories live: ``.llmeval.cache/`` beside the testcases root."""
     return root.parent / CACHE_DIR_NAME
 
 

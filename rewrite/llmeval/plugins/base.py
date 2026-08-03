@@ -53,7 +53,7 @@ class PluginInterface:
     def cache_directory(self) -> Path:
         """This plugin's private scratch directory, created on demand.
 
-        ``<project>/.testcases.cache/<name>/``, gitignored. Downloads, intermediate files and
+        ``<project>/.llmeval.cache/<name>/``, gitignored. Downloads, intermediate files and
         the generated ``testcases.json`` go here. Nothing outside the plugin reads it.
         """
         path = self._cache_root / self._name

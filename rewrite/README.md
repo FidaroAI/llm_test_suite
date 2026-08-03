@@ -120,7 +120,7 @@ llmeval generate                              # every plugin
 llmeval generate --testcases multifaceted     # just one
 ```
 
-A plugin writes its output to `.testcases.cache/<name>/` (gitignored), so generated test
+A plugin writes its output to `.llmeval.cache/<name>/` (gitignored), so generated test
 cases are inspectable locally but are not tracked — the reviewable artefact is the plugin
 and its CSV. Datasets download themselves on first `generate` and are reused afterwards;
 `pnpm dataset` is not involved. Writing a plugin takes about twenty lines:
@@ -148,8 +148,14 @@ standard 0–1 template). See
 
 ## Results
 
-Results are stored in a local sqllite db. Default name is llmeval.sqlite3. You can interrogate that
-on the command line to see results.
+Results are stored in a local SQLite database. The default is
+**`.llmeval.cache/llmeval.sqlite3`**, created on demand along with its directory;
+`--db PATH` puts it anywhere else, and every stage takes the flag. You can interrogate the
+file with plain SQL — that's a supported way to consume results, not a workaround.
+
+`.llmeval.cache/` is the suite's one gitignored scratch directory: the database sits beside
+the plugins' generated test cases and downloads, so `rm -rf .llmeval.cache` is the whole
+clean slate.
 
 Every `llmeval run` opens a **run** and stamps each result with its id, which the command
 prints when it finishes (`run run_20260729-142530-a3f1: ...`). Add `--note "..."` to record
@@ -280,6 +286,23 @@ Like `run`, the limit also scopes the lifecycle hooks: a plugin whose test cases
 outside it never runs its `before_grade`, so a five-case trial won't go and fetch live stock
 prices. Ordering is the load order — there is no `--randomize` here, because grading is
 resumable (re-running without `--limit` fills in the rest) in a way a sample isn't.
+
+`--regrade` is what makes the resumable behaviour deliberate rather than accidental. Without
+it `grade` only fills in `(result, assertion)` pairs that have no grading yet, so re-running
+it after editing a rubric changes nothing; with it, every selected pair is judged again and
+the stored score overwritten. That is the flag for "I changed the criterion" or "I changed
+the judge" — and it is the expensive one, which is why `--limit` exists next to it.
+
+`--judge PATH` swaps the model doing the LLM-graded assertions (`rubric`, `g_eval`) and the
+`pickbest` comparisons. It takes an ordinary provider config, the same JSON shape as
+`--provider`; the default is Bedrock Claude Haiku at `temperature: 0`, matching the legacy
+suite. Deterministic assertions never consult it, so a suite of `icontains` checks grades
+offline with no key at all:
+
+```bash
+llmeval grade --provider configs/fidaro_prod.json \
+              --judge configs/judge_bedrock_haiku.json --regrade
+```
 
 ## Reporting
 
@@ -565,6 +588,114 @@ output keeps the reasoning. Hand-write tests as JSON too — see `testcases/exam
 attempt reducers (`mean`/`max`/`pass_rate`) for best-of-N. Pick-best yields win rates.
 More advanced "which config is best" methods are a documented extension point (DESIGN §9).
 
+## CLI reference
+
+Every flag in one place. The sections above say *why*; this says *what*, and matches
+`llmeval <subcommand> --help`.
+
+### Shared flags
+
+Listed once rather than repeated per command. "All" means all six subcommands.
+
+| Flag | On | Default | Meaning |
+|---|---|---|---|
+| `--log-level {debug,info,warning,error,critical}` | all | `LLMEVAL_LOG_LEVEL`, else `info` | verbosity, on stderr; `debug` adds the cache key and cache/to-run counts per test case |
+| `--db PATH` | all but `generate` | `.llmeval.cache/llmeval.sqlite3` | the results DB; the parent directory is created on demand |
+| `--testcases NAME` | all but `compare-report` | every source | a source name — a plugin directory or `.json` stem in `testcases/`. Repeatable; a name that matches nothing is an error |
+| `--filter k=v` | `run`, `grade`, `pickbest`, `report` | no filter | narrow by test metadata. Repeatable |
+| `--run-id` / `--run-after` / `--run-before` / `--run-last-n` | `grade`, `report` | every run | which stored runs to read; see [Selecting which runs to read](#selecting-which-runs-to-read). The three groups cannot be combined |
+
+### Per-command flags
+
+**`llmeval generate`** — has none of its own. `--testcases` picks which plugins build their
+test cases; hand-written `.json` sources have nothing to generate and are skipped.
+
+**`llmeval run`** — the only stage that calls the model under test.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--provider PATH` | **required** | provider config JSON (see [Real providers](#real-providers)) |
+| `--mode {reuse,always}` | `reuse` | may cached results be reused — `reuse` tops each test case up to `--repeat`, `always` appends `--repeat` more |
+| `--repeat N` | `1` | how many results per test case. `0` is a usage error |
+| `--retries N` | `2` | retries per failed attempt, so 3 calls in total. Every attempt is stored, failures included |
+| `--concurrency N` | `5` | test cases run in parallel; `1` is sequential and streams its logs live |
+| `--timeout SECONDS` | `60` | per inference call, before retries. A test case's own `"timeout"` field overrides it |
+| `--limit N` | no limit | run only the first N test cases |
+| `--randomize` | off | shuffle before applying `--limit`, giving a reproducible random sample |
+| `--seed N` | `0` | the shuffle seed |
+| `--note TEXT` | none | free text recorded on the run row |
+
+**`llmeval grade`** — assertions over cached outputs; no model-under-test calls.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--provider PATH` | **required** | whose results to grade; only its cache key is used |
+| `--judge PATH` | Bedrock Claude Haiku, `temperature: 0` | the judge for `rubric` / `g_eval`. Deterministic assertions ignore it |
+| `--regrade` | off | re-judge pairs that already have a grading, overwriting the score |
+| `--limit N` | no limit | grade only the first N test cases, each in full |
+
+**`llmeval pickbest`** — direct head-to-head over cached outputs.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--providers PATH...` | **required** | the provider configs to compare, space-separated |
+| `--judge PATH` | Bedrock Claude Haiku | the judge making the pick |
+| `--order {as_is,random,both}` | `as_is` | presentation order; `both` judges each pair twice to cancel position bias |
+| `--regrade` | off | re-judge verdicts that already exist |
+
+**`llmeval report`** — result rows as CSV. Renders nothing.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--out PATH` | `results.csv` | output CSV |
+| `--provider PATH` | every provider in the DB | repeatable, so one report can span configs |
+
+**`llmeval compare-report`** — the statistics and pick-best HTML.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--providers PATH...` | **required** | the configs to compare |
+| `--baseline NAME` | none | provider *name* (not path) to show deltas against |
+| `--metrics NAME...` | overall | metric names to break the table down by |
+| `--order {as_is,random,both}` | omitted | include pick-best win rates for that order |
+| `--out PATH` | `report.html` | output HTML |
+
+### Exit codes
+
+Porcelain can branch on these; they are part of the contract.
+
+| Code | Meaning |
+|---|---|
+| `0` | success |
+| `1` | `generate` only: at least one plugin failed. The others still ran |
+| `2` | a usage error, an unknown source, a run selection that can't be satisfied, a `--db` that doesn't exist for `report`, or a DB from an incompatible schema. A message, never a traceback |
+
+### Porcelain
+
+Neither of these is part of `llmeval`; both are built on it (see
+[Plumbing and porcelain](#plumbing-and-porcelain)).
+
+**`llmevalx`** takes no flags — it is the arrow-key wizard, and everything it would take as a
+flag it asks. It `chdir`s to the project directory, loads `.env`, and **echoes every command
+before running it**, so it doubles as a way to learn the CLI above. Full description:
+[llmevalx/README.md](llmevalx/README.md).
+
+```bash
+uv run llmevalx          # or ./llmevalx.sh, or python -m llmevalx
+```
+
+**`python -m reporting.csv_table CSV`** renders any CSV as one self-contained HTML page —
+per-column filters, sortable and hideable columns, download-the-filtered-view. Not just
+`llmeval` output; it declares no schema. Details: [reporting/README.md](reporting/README.md).
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `CSV` | **required** | the file to render, or `-` for stdin |
+| `-o`, `--out PATH` | stdout | output HTML path |
+| `--title TEXT` | the CSV's basename | page title |
+| `--subtitle TEXT` | none | a line under the heading |
+| `--open` / `--no-open` | `--open` when writing to a file | open the page with the OS opener. Use `--no-open` in scripts and CI; a missing launcher is a warning, not a failure |
+
 ## Layout
 
 ```
@@ -595,7 +726,8 @@ llmevalx/           the interactive wizard — the `llmevalx` command
 llmevalx.sh         convenience wrapper for `uv run llmevalx`
 configs/            example provider/judge configs
 testcases/          every test case: plugins and hand-written .json (see its README)
-.testcases.cache/   per-plugin scratch: downloads + generated cases (gitignored)
+.llmeval.cache/     scratch (gitignored): per-plugin downloads + generated cases, and the
+                    default results DB, llmeval.sqlite3
 framework_tests/    unit + integration tests for the llmeval package
 llmevalx_tests/     tests for the wizard
 reporting/          generic CSV->HTML viewer; a module, not an entry point (not in the wheel)
