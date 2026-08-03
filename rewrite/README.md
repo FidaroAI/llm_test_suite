@@ -70,7 +70,10 @@ python -m reporting.csv_table results.csv -o results.html
 
 ```bash
 uv venv .venv && uv pip install --python .venv/bin/python -e ".[providers,dev]"
-# 'providers' pulls in litellm (real LLM calls); 'dev' pulls in pytest + pylint.
+# 'providers' pulls in litellm (real LLM calls) and boto3, which litellm imports lazily
+# for Bedrock credentials — the default rubric judge is Bedrock, and without boto3 it
+# fails on its first call with `APIConnectionError: No module named 'boto3'`.
+# 'dev' pulls in pytest + pylint.
 # questionary is a core dependency: `llmevalx` is built out of it, so it is not optional.
 ```
 

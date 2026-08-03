@@ -21,7 +21,11 @@ dependencies = [
 [project.optional-dependencies]
 # Needed only to actually call real LLM providers. httpx is listed explicitly rather
 # than leaned on as a litellm transitive: the streaming provider imports it directly.
-providers = ["litellm>=1.40", "httpx>=0.27"]
+# boto3 likewise: litellm imports it *lazily*, inside Bedrock credential resolution, and
+# does not declare it, so without it the default rubric judge
+# (configs/judge_bedrock_haiku.json) fails on its first call with a confusing
+# `APIConnectionError: No module named 'boto3'` rather than at import time.
+providers = ["litellm>=1.40", "httpx>=0.27", "boto3>=1.34"]
 # Needed only by plugins that reach the network: the stock_prices live Stooq fetch, and the
 # dataset plugins' Hugging Face downloads.
 network = ["requests>=2.28"]
