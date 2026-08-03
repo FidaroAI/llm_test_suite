@@ -102,6 +102,60 @@ def test_report_reads_the_suite_off_the_id_prefix(tmp_path, monkeypatch):
     assert any(",facts," in row or row.startswith("facts,") for row in rows) or rows
 
 
+# A plugin that records its setup hook. Named "zzz" so name-ordered discovery puts it after
+# examples.json, and `grade --limit 1` therefore selects none of its cases.
+MARKER_PLUGIN = '''
+from pathlib import Path
+
+from llmeval.plugins import PluginInterface, TestCasePlugin
+
+MARKER = Path(__file__).resolve().parent / "before_grade_ran"
+
+
+class Marker(TestCasePlugin):
+    def generate_testcases(self):
+        return True
+
+    def get_testcases(self):
+        return [{"id": "only", "user": "q?", "assertions": []}]
+
+    def before_grade(self):
+        MARKER.write_text("ran", encoding="utf-8")
+
+
+def get_plugin(interface: PluginInterface) -> TestCasePlugin:
+    return Marker()
+'''
+
+
+def with_marker_plugin(tmp_path):
+    """The standard project plus a plugin that leaves a file behind if it is graded."""
+    root = make_project(tmp_path)
+    plugin = root / "zzz"
+    plugin.mkdir()
+    (plugin / "__init__.py").write_text(MARKER_PLUGIN, encoding="utf-8")
+    return plugin / "before_grade_ran"
+
+
+def test_grade_limit_skips_the_setup_hook_of_an_excluded_plugin(tmp_path, monkeypatch):
+    """The point of the limit: a five-case trial must not trigger a plugin's live fetch."""
+    marker = with_marker_plugin(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    main(["generate"])
+    main(["run", "--provider", "configs/echo.json"])
+    assert main(["grade", "--provider", "configs/echo.json", "--limit", "1"]) == 0
+    assert not marker.exists()
+
+
+def test_grade_without_a_limit_still_runs_every_plugins_setup_hook(tmp_path, monkeypatch):
+    marker = with_marker_plugin(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    main(["generate"])
+    main(["run", "--provider", "configs/echo.json"])
+    assert main(["grade", "--provider", "configs/echo.json"]) == 0
+    assert marker.exists()
+
+
 def test_generate_csv_subcommand_is_gone(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit):

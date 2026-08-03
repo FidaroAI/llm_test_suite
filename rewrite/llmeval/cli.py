@@ -25,9 +25,10 @@ custom assertions and lifecycle hooks are in play for whichever stage is running
 
 ``grade`` and ``report`` both read stored results, so both take the same run-selection
 flags (``--run-id``, ``--run-after``/``--run-before``, ``--run-last-n``); see
-:mod:`llmeval.runselect`. ``report`` emits **CSV** — rendering it as a page is porcelain,
-so pipe it to ``python -m reporting.csv_table``. ``compare-report`` is the statistics and
-pick-best HTML.
+:mod:`llmeval.runselect`. ``grade`` also takes ``--limit N``, which caps how many test cases
+it grades the way ``run --limit`` caps how many it runs. ``report`` emits **CSV** —
+rendering it as a page is porcelain, so pipe it to ``python -m reporting.csv_table``.
+``compare-report`` is the statistics and pick-best HTML.
 
 All output goes through :mod:`logging` to stderr; ``--log-level`` (or
 ``LLMEVAL_LOG_LEVEL``) controls verbosity. Machine-readable results come from the store,
@@ -186,7 +187,9 @@ def cmd_grade(args) -> int:
     store = Store(args.db)
     try:
         loaded = load_testcases(names=args.testcases or None, filters=_filters(args.filter))
-        tcs = loaded.cases
+        # Same subsetting as run, and for the same reason: hooks are scoped to the cases
+        # actually selected, so --limit also excludes an omitted plugin's before_grade.
+        tcs = select_testcases(loaded.cases, limit=args.limit)
         cfg = load_provider_config(args.provider)
         key_hash = cfg.cache_key().hash
         run_ids = [r.id for r in resolve_runs(store, _run_selection(args), [key_hash])]
@@ -357,6 +360,10 @@ def _add_grade_parser(sub) -> None:
     gr.add_argument("--provider", required=True)
     gr.add_argument("--judge", help="judge provider config JSON (default: Bedrock Haiku)")
     gr.add_argument("--regrade", action="store_true")
+    gr.add_argument(
+        "--limit", type=int, default=None,
+        help="grade only the first N test cases (every attempt and assertion of each)",
+    )
     _add_db(gr)
     _add_filters(gr)
     _add_run_selection(gr)
