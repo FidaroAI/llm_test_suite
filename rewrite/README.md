@@ -107,6 +107,7 @@ them on every invocation; there is no registry to edit and nothing to import.
 
 | Source | Kind | Assertions |
 |---|---|---|
+| `example.json` | hand-written | one case each: deterministic, `rubric`, `g_eval` |
 | `examples.json` | hand-written | the format by example |
 | `simple_facts`, `simple_facts_regressions` | plugin (CSV) | `icontains` |
 | `agentharm_refusal` | plugin (HF download) | one refusal `rubric` (`censorship: true`) |

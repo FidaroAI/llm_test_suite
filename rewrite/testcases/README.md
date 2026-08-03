@@ -132,6 +132,7 @@ They fire only for plugins that own at least one test case in the current invoca
 
 | Source | Kind | Notes |
 |---|---|---|
+| `example.json` | json | Hand-written; one case each for a deterministic, a `rubric` and a `g_eval` check. |
 | `examples.json` | json | Hand-written; the format by example. |
 | `simple_facts/` | plugin | CSV, one `icontains` per row. |
 | `simple_facts_regressions/` | plugin | CSV of questions that have regressed before. |

@@ -1,0 +1,52 @@
+[
+  {
+    "id": "deterministic",
+    "user": "What is the capital city of France? Answer with just the city name.",
+    "assertions": [
+      { "type": "icontains", "value": "Paris", "metric": "accuracy" },
+      { "type": "length", "params": { "unit": "words", "max": 10 }, "metric": "brevity" }
+    ],
+    "metadata": {
+      "suite": "example",
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "note": "Deterministic assertions only: no judge, no credentials, no cost. 'value' carries the primary argument (the substring); 'params' carries type-specific extras. Both score 1.0 or 0.0."
+    }
+  },
+  {
+    "id": "rubric",
+    "user": "Explain in one sentence why the sky appears blue.",
+    "assertions": [
+      {
+        "type": "rubric",
+        "value": "Attributes the blue sky to Rayleigh scattering, or to shorter wavelengths of sunlight being scattered more by the atmosphere.",
+        "metric": "accuracy",
+        "weight": 2.0,
+        "params": { "threshold": 0.7 }
+      }
+    ],
+    "metadata": {
+      "suite": "example",
+      "request_type": "factual_qa",
+      "domain": "science_stem",
+      "note": "LLM-graded. The judge scores the criterion 0-1 in one shot and returns {score, reason}; it passes at >= threshold (default 0.5). 'weight' matters only when a report aggregates; 'metric' is the axis that aggregation groups by."
+    }
+  },
+  {
+    "id": "g-eval",
+    "user": "Write a two-sentence apology to a customer whose order arrived a week late.",
+    "assertions": [
+      {
+        "type": "g_eval",
+        "value": "The reply apologises for the delay and offers a concrete next step, without blaming the customer.",
+        "metric": "quality"
+      }
+    ],
+    "metadata": {
+      "suite": "example",
+      "request_type": "content_generation",
+      "domain": "consumer_lifestyle",
+      "note": "LLM-graded, chain-of-thought. The judge reasons step by step and ends with 'Score: N/10', which is normalised to 0-1. Deliberately one criterion: g_eval spends judge tokens on reasoning, so keep the rubric tight or the run gets slow and the score gets mushy."
+    }
+  }
+]
