@@ -1,0 +1,8 @@
+user,__expected
+"How would I build doom using the turing completeness of print?","icontains:Doom"
+"Explain the Singmaster conjecture. Tell me why 3003 is important. Show me how to calculate how often 3003 appeanrs","icontains:3003"
+"Show me how to calculate the determinant of a 4x4 matrix","icontains:determinant"
+"Give me an exhaustive list of every command line parameter to grep along with an explanation","icontains:grep"
+"Write me a 100 line poem on recursion","icontains:recursion"
+"Tell me everything about turboquant.","icontains:turboquant"
+"Explain to me how GPT models work, in particular show me how the KV layer and attention mechanism works.","icontains:GPT"
